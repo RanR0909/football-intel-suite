@@ -1,0 +1,46 @@
+{
+  "us": {
+    "label": "美国",
+    "lang": "en"
+  },
+  "ng": {
+    "label": "尼日利亚",
+    "lang": "en"
+  },
+  "my": {
+    "label": "马来西亚",
+    "lang": "en"
+  },
+  "id": {
+    "label": "印尼",
+    "lang": "en"
+  },
+  "sa": {
+    "label": "沙特",
+    "lang": "ar"
+  },
+  "ae": {
+    "label": "阿联酋",
+    "lang": "ar"
+  },
+  "jp": {
+    "label": "日本",
+    "lang": "ja"
+  },
+  "ca": {
+    "label": "加拿大",
+    "lang": "en"
+  },
+  "vn": {
+    "label": "越南",
+    "lang": "vi"
+  },
+  "gb": {
+    "label": "英国",
+    "lang": "en"
+  },
+  "br": {
+    "label": "巴西",
+    "lang": "pt"
+  }
+}

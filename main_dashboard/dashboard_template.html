@@ -1,0 +1,1792 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INTEL-OPS 竞品情报看板</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #111118;
+  --surface2: #18181f;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --text: #f0f0f5;
+  --muted: #6b6b80;
+  --accent: #7b6ef6;
+  --accent2: #4ecca3;
+  --warn: #f5a623;
+  --danger: #ff5c5c;
+  --success: #4ecca3;
+  --mono: 'DM Mono', monospace;
+  --display: 'Syne', sans-serif;
+  --body: 'DM Sans', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 14px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(123,110,246,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(123,110,246,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+.layout { position: relative; z-index: 1; display: flex; min-height: 100vh; }
+
+/* SIDEBAR */
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 28px 0;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.logo {
+  padding: 0 24px 28px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.logo-text {
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.logo-sub { font-size: 10px; color: var(--muted); font-family: var(--mono); letter-spacing: 0.08em; margin-top: 2px; }
+.nav-section { padding: 0 12px; margin-bottom: 24px; }
+.nav-label { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; font-family: var(--mono); padding: 0 12px; margin-bottom: 6px; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 8px;
+  cursor: pointer; color: var(--muted);
+  font-size: 13px; font-weight: 400;
+  transition: all 0.15s;
+  margin-bottom: 2px;
+}
+.nav-item:hover { background: var(--surface2); color: var(--text); }
+.nav-item.active { background: rgba(123,110,246,0.15); color: var(--accent); }
+.nav-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.nav-item.active .nav-dot { background: var(--accent); }
+.nav-badge { margin-left: auto; background: var(--danger); color: white; font-size: 10px; padding: 1px 6px; border-radius: 20px; font-family: var(--mono); }
+.sidebar-bottom { margin-top: auto; padding: 20px 24px 0; border-top: 1px solid var(--border); }
+.update-time { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.update-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent2); margin-right: 6px; animation: blink 2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* MAIN */
+.main { flex: 1; padding: 32px 36px; min-width: 0; }
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 32px; }
+.page-title { font-family: var(--display); font-size: 28px; font-weight: 800; letter-spacing: -0.03em; }
+.page-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.header-actions { display: flex; gap: 10px; align-items: center; }
+.btn {
+  padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer;
+  font-family: var(--body); border: 1px solid var(--border2); background: var(--surface2);
+  color: var(--text); transition: all 0.15s;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+.btn-primary:hover { background: #6a5de0; color: white; }
+
+/* ALERT STRIP */
+.alert-strip {
+  background: rgba(245,166,35,0.08);
+  border: 1px solid rgba(245,166,35,0.2);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 28px;
+  cursor: pointer;
+}
+.alert-icon { font-size: 16px; }
+.alert-text { font-size: 13px; color: var(--warn); flex: 1; }
+.alert-count { font-family: var(--mono); font-size: 11px; background: rgba(245,166,35,0.15); color: var(--warn); padding: 2px 8px; border-radius: 20px; }
+
+/* METRICS ROW */
+.metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+.metric-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.metric-card:hover { border-color: var(--border2); }
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+}
+.metric-card.purple::before { background: var(--accent); }
+.metric-card.teal::before { background: var(--accent2); }
+.metric-card.warn::before { background: var(--warn); }
+.metric-card.danger::before { background: var(--danger); }
+.metric-label { font-size: 11px; color: var(--muted); font-family: var(--mono); letter-spacing: 0.06em; margin-bottom: 12px; }
+.metric-value { font-family: var(--display); font-size: 32px; font-weight: 700; letter-spacing: -0.03em; }
+.metric-change { display: flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 12px; font-family: var(--mono); }
+.up { color: var(--danger); }
+.down { color: var(--success); }
+.neutral { color: var(--muted); }
+.metric-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* TWO COL */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+.three-col { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 20px; }
+
+/* CARD */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.card-head {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.card-title { font-family: var(--display); font-size: 14px; font-weight: 600; }
+.card-action { font-size: 12px; color: var(--accent); cursor: pointer; font-family: var(--mono); }
+.card-action:hover { text-decoration: underline; }
+
+/* RANK TABLE */
+.rank-table { width: 100%; }
+.rank-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 60px 70px 65px 65px 55px 50px;
+  gap: 8px;
+  align-items: center;
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.rank-row:hover { background: var(--surface2); }
+.rank-row:last-child { border-bottom: none; }
+.rank-num { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.rank-name { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.rank-tag { font-size: 10px; background: rgba(123,110,246,0.15); color: var(--accent); padding: 1px 6px; border-radius: 4px; font-family: var(--mono); }
+.rank-tag.self { background: rgba(78,204,163,0.15); color: var(--accent2); }
+.rank-score { font-family: var(--mono); font-size: 13px; text-align: right; }
+.rank-change { font-family: var(--mono); font-size: 11px; text-align: right; }
+.rank-extra { font-family: var(--mono); font-size: 11px; text-align: right; color: var(--text); }
+.rank-bar-wrap { width: 50px; }
+.rank-bar { height: 3px; background: var(--border2); border-radius: 2px; overflow: hidden; }
+.rank-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.5s; }
+
+/* FEED */
+.feed-item {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.feed-item:last-child { border-bottom: none; }
+.feed-item:hover { background: var(--surface2); }
+.feed-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.feed-source { font-size: 10px; font-family: var(--mono); color: var(--muted); }
+.feed-type {
+  font-size: 10px; font-family: var(--mono);
+  padding: 1px 7px; border-radius: 4px;
+}
+.ft-feature { background: rgba(123,110,246,0.12); color: var(--accent); }
+.ft-bug { background: rgba(255,92,92,0.12); color: var(--danger); }
+.ft-price { background: rgba(245,166,35,0.12); color: var(--warn); }
+.feed-title { font-size: 13px; font-weight: 500; margin-bottom: 4px; line-height: 1.4; }
+.feed-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.feed-time { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 6px; }
+.feed-signal { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; margin-top: 6px; }
+.signal-dot { width: 5px; height: 5px; border-radius: 50%; }
+
+.insight-highlight { color: var(--warn); font-weight: 500; }
+
+/* DETAIL MODAL */
+.modal-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 16px;
+  width: min(680px, 95vw);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal-header {
+  padding: 24px 28px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; justify-content: space-between;
+  position: sticky; top: 0; background: var(--surface); z-index: 1;
+}
+.modal-title { font-family: var(--display); font-size: 18px; font-weight: 700; }
+.modal-close { font-size: 20px; color: var(--muted); cursor: pointer; line-height: 1; padding: 4px; }
+.modal-close:hover { color: var(--text); }
+.modal-body { padding: 24px 28px; }
+.modal-section { margin-bottom: 24px; }
+.modal-section-title { font-size: 11px; font-family: var(--mono); color: var(--muted); letter-spacing: 0.08em; margin-bottom: 12px; }
+.modal-kv { display: grid; grid-template-columns: 120px 1fr; gap: 10px; }
+.modal-key { font-size: 12px; color: var(--muted); }
+.modal-val { font-size: 13px; font-weight: 500; }
+
+/* BOTTOM FULL */
+.full-card { margin-bottom: 20px; }
+
+/* SUMMARY BOX */
+.summary-box {
+  background: rgba(123,110,246,0.07);
+  border: 1px solid rgba(123,110,246,0.2);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+.summary-box strong { color: var(--accent); font-weight: 500; }
+
+/* WEEKLY SUMMARY */
+.weekly-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; padding: 20px; }
+.weekly-item { }
+.weekly-num { font-family: var(--display); font-size: 28px; font-weight: 700; }
+.weekly-label { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+.weekly-trend { font-size: 11px; font-family: var(--mono); margin-top: 4px; }
+
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+.card { animation: fadeIn 0.3s ease both; }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="logo">
+    <div class="logo-text">INTEL·OPS</div>
+    <div class="logo-sub">竞品情报看板</div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">概览</div>
+    <div class="nav-item active" onclick="showPage('overview')">
+      <div class="nav-dot"></div> 总览看板
+    </div>
+    <div class="nav-item" onclick="showPage('alerts')">
+      <div class="nav-dot"></div> 预警中心
+      <span class="nav-badge"><!-- ALERT_COUNT_PLACEHOLDER --></span>
+    </div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">监测模块</div>
+    <div class="nav-item" onclick="showPage('product')">
+      <div class="nav-dot"></div> 产品动态
+    </div>
+    <div class="nav-item" onclick="showPage('ranking')">
+      <div class="nav-dot"></div> 排名变化
+    </div>
+    <div class="nav-item" onclick="showPage('reviews')">
+      <div class="nav-dot"></div> 用户评论
+    </div>
+    <div class="nav-item" onclick="showPage('weekly-review')">
+      <div class="nav-dot"></div> 评论周报
+    </div>
+    <div class="nav-item" onclick="showPage('commercial')">
+      <div class="nav-dot"></div> 商业分析
+    </div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">竞品</div>
+    <!-- COMPETITOR_LIST_PLACEHOLDER -->
+  </div>
+  <div class="sidebar-bottom">
+    <div class="update-time"><span class="update-dot"></span>最后更新 <!-- UPDATE_TIME_PLACEHOLDER --></div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">Claude API Key</div>
+      <input type="password" id="claude-api-key" value="sk-REDACTED-OLD-FLASHAPI" placeholder="API Key 已内置" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:11px;font-family:var(--mono);outline:none">
+      <div style="font-size:9px;color:var(--muted);margin-top:4px">API Key 已内置 · 点击"生成周报"或"生成 AI 分析"即可使用</div>
+    </div>
+  </div>
+</aside>
+
+
+<!-- MAIN -->
+<main class="main">
+
+<!-- PAGE: OVERVIEW -->
+<div id="page-overview">
+
+<div class="page-header">
+  <div>
+    <div class="page-title">总览看板</div>
+    <div class="page-sub"><!-- DATE_PLACEHOLDER --> · 监测 <!-- MONITORED_COUNT_PLACEHOLDER --> 个竞品</div>
+  </div>
+  <div class="header-actions">
+    <button class="btn" onclick="syncAllData()">🔄 同步数据</button>
+    <button class="btn btn-primary" onclick="window.print()">导出报告</button>
+  </div>
+</div>
+
+<!-- ALERT_STRIP_PLACEHOLDER -->
+
+<div class="metrics-row">
+  <div class="metric-card purple" onclick="showPage('product')">
+    <div class="metric-label">产品更新 / 7天</div>
+    <div class="metric-value"><!-- CHANGES_DETECTED_PLACEHOLDER --></div>
+    <div class="metric-change up">↑ 竞品版本迭代</div>
+    <div class="metric-sub">较上次检测</div>
+  </div>
+  <div class="metric-card teal" onclick="showPage('ranking')">
+    <div class="metric-label">最大排名变化</div>
+    <div class="metric-value"><!-- MAX_RANK_DELTA_PLACEHOLDER --></div>
+    <div class="metric-change up">↑ <!-- MAX_RANK_COMP_PLACEHOLDER --></div>
+    <div class="metric-sub">App Store 体育类</div>
+  </div>
+  <div class="metric-card warn" onclick="showPage('reviews')">
+    <div class="metric-label">用户负面评论</div>
+    <div class="metric-value"><!-- TOTAL_NEGATIVE_PLACEHOLDER --></div>
+    <div class="metric-change up">↑ 近3天</div>
+    <div class="metric-sub">需关注趋势</div>
+  </div>
+</div>
+
+<!-- ROW 2 -->
+<div class="three-col">
+
+  <!-- ACTIVITY FEED -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">最新动态</div>
+      <div class="card-action" onclick="showPage('product')">查看全部 →</div>
+    </div>
+    <!-- FEED_ITEMS_PLACEHOLDER -->
+  </div>
+
+  <!-- RIGHT COL -->
+  <div style="display:flex;flex-direction:column;gap:20px">
+
+    <!-- TOP DEMANDS -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">高频需求词</div>
+        <div class="card-action" onclick="showPage('reviews')">详情 →</div>
+      </div>
+      <!-- KEYWORD_CLOUD_PLACEHOLDER -->
+    </div>
+
+  </div>
+</div>
+
+<!-- RANKING CHART -->
+<div class="card full-card">
+  <div class="card-head">
+    <div class="card-title">App Store 排名趋势 · 历史记录</div>
+    <div class="card-action" onclick="showPage('ranking')">查看详情 →</div>
+  </div>
+  <!-- RANK_TREND_PLACEHOLDER -->
+</div>
+
+</div><!-- end overview -->
+
+<!-- PAGE: ALERTS -->
+<div id="page-alerts" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="page-title">预警中心</div>
+      <div class="page-sub">本周高优先级事件需要关注</div>
+    </div>
+    <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+  </div>
+  <!-- ALERT_PAGE_PLACEHOLDER -->
+
+</div>
+
+<!-- PAGE: PRODUCT -->
+<div id="page-product" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="page-title">产品动态</div>
+      <div class="page-sub">版本更新 · 功能变化 · 定价调整</div>
+    </div>
+    <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+  </div>
+  <div class="card full-card">
+    <!-- PRODUCT_PAGE_PLACEHOLDER -->
+  </div>
+</div>
+
+<!-- PAGE: RANKING -->
+<div id="page-ranking" style="display:none">
+  <div class="page-header">
+    <div><div class="page-title">排名变化</div><div class="page-sub">App Store · 体育分类 Top 100</div></div>
+    <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+  </div>
+  <div class="card full-card">
+    <div class="card-head"><div class="card-title">App Store 排名 · 当前快照</div></div>
+    <div class="rank-row" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border)">
+      <span></span><span>产品</span><span>当前</span><span>变化</span><span>下载量</span><span>评分增长</span><span>热度</span><span>趋势</span>
+    </div>
+    <!-- RANK_TABLE_PLACEHOLDER -->
+  </div>
+  <!-- MULTI_SOURCE_RANK_PLACEHOLDER -->
+</div>
+
+<!-- PAGE: REVIEWS -->
+<div id="page-reviews" style="display:none">
+  <div class="page-header">
+    <div><div class="page-title">用户评论分析</div><div class="page-sub">App Store + Google Play · 近3天滚动监测</div></div>
+    <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+  </div>
+  <div class="card full-card">
+    <!-- REVIEW_PAGE_PLACEHOLDER -->
+  </div>
+</div>
+
+<!-- PAGE: COMPETITOR DETAIL -->
+<div id="page-competitor-detail" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="page-title" id="detail-title">竞品详情</div>
+      <div class="page-sub" id="detail-subtitle">实时排名 · 用户反馈 · 功能分析</div>
+    </div>
+    <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+  </div>
+
+  <!-- 排名卡片 -->
+  <div class="metrics-row" id="detail-metrics">
+    <div class="metric-card purple">
+      <div class="metric-label">App Store 排名</div>
+      <div class="metric-value" id="detail-rank">—</div>
+      <div class="metric-change neutral" id="detail-rank-delta">暂无数据</div>
+    </div>
+    <div class="metric-card teal">
+      <div class="metric-label">当前版本</div>
+      <div class="metric-value" id="detail-version">—</div>
+      <div class="metric-change neutral" id="detail-version-status">—</div>
+    </div>
+    <div class="metric-card warn">
+      <div class="metric-label">近3天评论</div>
+      <div class="metric-value" id="detail-negative">—</div>
+      <div class="metric-change neutral" id="detail-negative-detail">—</div>
+    </div>
+    <div class="metric-card danger">
+      <div class="metric-label">深度分析状态</div>
+      <div class="metric-value" id="detail-analysis-status">—</div>
+      <div class="metric-change neutral" id="detail-analysis-action">—</div>
+    </div>
+  </div>
+
+  <!-- 双列布局 -->
+  <div class="two-col">
+    <!-- 左列: 功能分析报告 -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">功能深度分析</div>
+        <div class="card-action" id="detail-analysis-btn" onclick="runDetailAnalysis()">运行分析 →</div>
+        <div class="card-action" id="run-all-btn" onclick="runAllCompetitorDetails()" style="margin-left:8px;background:rgba(123,110,246,0.15);color:#7b6ef6">分析全部竞品 →</div>
+      </div>
+      <div id="detail-analysis-content" style="padding:16px 20px;font-size:13px;line-height:1.8;color:var(--muted);white-space:pre-wrap">
+        暂无分析数据。点击"运行分析"按钮使用 Claude AI 进行深度功能分析。
+      </div>
+      <div style="padding:0 20px 18px">
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:8px">批量分析状态</div>
+        <div id="detail-batch-status" style="display:flex;flex-direction:column;gap:8px">
+          <div style="color:var(--muted);font-size:13px">暂无状态</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右列: 地区分布 -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">地区分布</div>
+        <div class="card-action">跨平台对比</div>
+      </div>
+      <div id="detail-regions" style="padding:16px 20px">
+        <div style="color:var(--muted);font-size:13px">暂无地区数据</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 平台对比 -->
+  <div class="card full-card">
+    <div class="card-head">
+      <div class="card-title">跨平台用户反馈对比</div>
+      <div class="card-action">Google Play vs App Store</div>
+    </div>
+    <div id="detail-platform" style="padding:16px 20px">
+      <div style="color:var(--muted);font-size:13px">暂无平台数据</div>
+    </div>
+  </div>
+
+  <!-- 功能关键词 -->
+  <div class="card full-card">
+    <div class="card-head">
+      <div class="card-title">高频功能关键词</div>
+      <div class="card-action">用户提及最多的功能相关词</div>
+    </div>
+    <div id="detail-keywords" style="padding:16px 20px">
+      <div style="color:var(--muted);font-size:13px">暂无关键词数据</div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: WEEKLY REVIEW -->
+<div id="page-weekly-review" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="page-title">竞品评论周报</div>
+      <div class="page-sub">过去7天 · 跨竞品全量评论汇总 · 本地化专题分析</div>
+    </div>
+    <div class="header-actions">
+      <button class="btn" onclick="runWeeklyReview()">🔄 生成周报</button>
+      <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+    </div>
+  </div>
+
+  <!-- 概览指标 -->
+  <div class="metrics-row" id="wr-metrics">
+    <div class="metric-card purple">
+      <div class="metric-label">分析周期</div>
+      <div class="metric-value" id="wr-days">7</div>
+      <div class="metric-change neutral" id="wr-days-label">天</div>
+    </div>
+    <div class="metric-card teal">
+      <div class="metric-label">总评论数</div>
+      <div class="metric-value" id="wr-total">—</div>
+      <div class="metric-change neutral" id="wr-total-detail">涉及 N 个竞品</div>
+    </div>
+    <div class="metric-card warn">
+      <div class="metric-label">本地化问题</div>
+      <div class="metric-value" id="wr-localization">—</div>
+      <div class="metric-change neutral" id="wr-localization-detail">条相关评论</div>
+    </div>
+    <div class="metric-card danger">
+      <div class="metric-label">生成时间</div>
+      <div class="metric-value" id="wr-time">—</div>
+      <div class="metric-change neutral" id="wr-time-detail">—</div>
+    </div>
+  </div>
+
+  <!-- 核心发现 -->
+  <div class="card full-card">
+    <div class="card-head">
+      <div class="card-title">本周核心发现</div>
+      <div class="card-action">AI 生成 · 跨竞品趋势</div>
+    </div>
+    <div id="wr-summary" style="padding:20px;font-size:13px;line-height:1.8;color:var(--muted);white-space:pre-wrap">
+      暂无周报数据。请先运行 <code>python3 competitor_comment/weekly_review.py</code> 生成周报，或点击"生成周报"按钮。
+    </div>
+  </div>
+
+  <!-- 双列: 各竞品分析 + 本地化专题 -->
+  <div class="two-col">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">各竞品分析摘要</div>
+        <div class="card-action">评论数量 · Top信号</div>
+      </div>
+      <div id="wr-per-competitor" style="padding:16px 20px">
+        <div style="color:var(--muted);font-size:13px">暂无数据</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">本地化专题分析</div>
+        <div class="card-action">翻译 · 本地联赛 · 地区功能</div>
+      </div>
+      <div id="wr-localization-content" style="padding:16px 20px;font-size:13px;line-height:1.8;color:var(--muted);white-space:pre-wrap">
+        暂无本地化分析数据。
+      </div>
+    </div>
+  </div>
+
+  <!-- 标签分布 -->
+  <div class="card full-card">
+    <div class="card-head">
+      <div class="card-title">评论信号标签分布</div>
+      <div class="card-action">跨竞品汇总</div>
+    </div>
+    <div id="wr-label-dist" style="padding:16px 20px">
+      <div style="color:var(--muted);font-size:13px">暂无数据</div>
+    </div>
+  </div>
+
+  <!-- 功能关键词 -->
+  <div class="card full-card">
+    <div class="card-head">
+      <div class="card-title">高频功能关键词</div>
+      <div class="card-action">用户提及最多的功能相关词</div>
+    </div>
+    <div id="wr-keywords" style="padding:16px 20px">
+      <div style="color:var(--muted);font-size:13px">暂无数据</div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: COMMERCIAL STRATEGY -->
+<div id="page-commercial" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="page-title">商业变现策略</div>
+      <div class="page-sub">IAP 监测 · 变现模式分析 · RPD 指数 · 商业动作 Feed</div>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="commercial-run-btn" onclick="runCommercialAnalysis()">运行分析</button>
+      <button class="btn" id="commercial-weekly-btn" onclick="runCommercialWeekly()">生成周报</button>
+      <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+    </div>
+  </div>
+
+  <!-- KPI 卡片 -->
+  <div class="grid-4" style="margin-bottom:16px">
+    <div class="card" style="padding:16px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">监控竞品</div>
+      <div id="cm-total" style="font-size:28px;font-weight:700;color:var(--text);margin-top:4px">—</div>
+    </div>
+    <div class="card" style="padding:16px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">价格预警</div>
+      <div id="cm-alerts" style="font-size:28px;font-weight:700;color:var(--danger);margin-top:4px">—</div>
+    </div>
+    <div class="card" style="padding:16px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">博彩导流信号</div>
+      <div id="cm-betting" style="font-size:28px;font-weight:700;color:var(--warn);margin-top:4px">—</div>
+    </div>
+    <div class="card" style="padding:16px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">最高 RPD 指数</div>
+      <div id="cm-rpd" style="font-size:28px;font-weight:700;color:var(--accent2);margin-top:4px">—</div>
+    </div>
+  </div>
+
+  <!-- 商业预警区域 -->
+  <div id="cm-alerts-list" style="margin-bottom:16px"></div>
+
+  <!-- 竞品商业卡片列表 -->
+  <div id="cm-competitor-list"></div>
+
+  <!-- 多源收入数据 (Sensor Tower) -->
+  <!-- MULTI_SOURCE_REVENUE_PLACEHOLDER -->
+
+  <!-- 商业策略周报 -->
+  <div class="card" id="cm-weekly-report" style="margin-top:16px;padding:20px;display:none">
+    <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:8px">商业变现策略周报</div>
+    <div id="cm-weekly-period" style="font-size:11px;color:var(--muted);margin-bottom:12px"></div>
+    <div id="cm-weekly-content" style="font-size:13px;line-height:1.8;color:var(--text);white-space:pre-wrap"></div>
+  </div>
+</div>
+
+</main>
+
+<div class="modal-overlay" id="modal-feature" onclick="closeModal('feature')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--accent);margin-bottom:6px">竞品动态 · 详情</div>
+        <div class="modal-title">竞品版本更新详情</div>
+      </div>
+      <div class="modal-close" onclick="closeModal('feature')">×</div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-title">基本信息</div>
+        <div class="modal-kv">
+          <span class="modal-key">发现时间</span><span class="modal-val"><!-- UPDATE_TIME_PLACEHOLDER --></span>
+          <span class="modal-key">来源</span><span class="modal-val">App Store 更新日志</span>
+        </div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-title">详情</div>
+        <div style="font-size:13px;line-height:1.7;color:var(--muted)">详细数据请查看各竞品在 App Store 的版本更新日志。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-rank" onclick="closeModal('rank')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--accent2);margin-bottom:6px">排名变化</div>
+        <div class="modal-title">App Store 排名详情</div>
+      </div>
+      <div class="modal-close" onclick="closeModal('rank')">×</div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-title">排名走势</div>
+        <div style="font-size:13px;line-height:1.7;color:var(--muted)">完整排名数据请查看排名变化页面。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-bug" onclick="closeModal('bug')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--accent2);margin-bottom:6px">用户反馈</div>
+        <div class="modal-title" id="modal-bug-title">用户评论详情</div>
+      </div>
+      <div class="modal-close" onclick="closeModal('bug')">×</div>
+    </div>
+    <div class="modal-body" id="modal-bug-body">
+      <div class="modal-section">
+        <div class="modal-section-title">AI 分析报告</div>
+        <div id="modal-bug-summary" style="font-size:13px;line-height:1.8;color:var(--muted);white-space:pre-wrap"></div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-title">原始评论</div>
+        <div id="modal-bug-reviews" style="font-size:13px;line-height:1.7;color:var(--muted)"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-weekly" onclick="closeModal('weekly')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">自动生成</div>
+        <div class="modal-title">竞品周报摘要</div>
+      </div>
+      <div class="modal-close" onclick="closeModal('weekly')">×</div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-section">
+        <div class="modal-section-title">本周核心结论</div>
+        <div class="weekly-grid">
+          <div class="weekly-item"><div class="weekly-num" style="color:var(--accent)"><!-- WEEKLY_UPDATES_PLACEHOLDER --></div><div class="weekly-label">产品更新次数</div></div>
+          <div class="weekly-item"><div class="weekly-num" style="color:var(--warn)"><!-- WEEKLY_NEGATIVE_PLACEHOLDER --></div><div class="weekly-label">低星评论数</div></div>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border);margin-bottom:20px">
+        <div style="font-size:13px;line-height:1.9;color:var(--muted)">
+          1. <span style="color:var(--text)">竞品版本更新</span>是本周最重要的产品信号，建议评估差异化策略。<br>
+          2. <span style="color:var(--text)">用户评论信号</span>带来机会窗口，用户流失意向明确，可针对性承接。<br>
+          3. <span style="color:var(--text)">离线模式</span>需求持续跨平台出现，建议列入产品路线图讨论。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====== 页面数据 ======
+var REVIEW_DATA = <!-- REVIEW_DATA_PLACEHOLDER -->;
+var WEEKLY_REVIEW_DATA = <!-- WEEKLY_REVIEW_DATA_PLACEHOLDER -->;
+var COMMERCIAL_DATA = <!-- COMMERCIAL_DATA_PLACEHOLDER -->;
+var COMMERCIAL_WEEKLY_DATA = <!-- COMMERCIAL_WEEKLY_DATA_PLACEHOLDER -->;
+var MULTI_SOURCE_DATA = <!-- MULTI_SOURCE_DATA_PLACEHOLDER -->;
+
+// ====== 页面切换 ======
+function showPage(name) {
+  var allPages = ['overview','alerts','product','ranking','reviews','competitor-detail','weekly-review','commercial'];
+  allPages.forEach(function(p) {
+    var el = document.getElementById('page-'+p);
+    if (el) el.style.display = p===name?'block':'none';
+  });
+  document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+  if (name === 'competitor-detail') return;
+  var map = {overview:0,alerts:1,product:2,ranking:3,reviews:4,'weekly-review':5,commercial:6};
+  var items = document.querySelectorAll('.nav-item');
+  if(map[name]!==undefined) items[map[name]]?.classList.add('active');
+  if (name === 'weekly-review') renderWeeklyReview();
+  if (name === 'commercial') { renderCommercialPage(); renderCommercialWeekly(); }
+}
+
+
+
+// ====== 模态框 ======
+function openModal(id) {
+  document.getElementById('modal-'+id).classList.add('open');
+}
+function closeModal(id) {
+  document.getElementById('modal-'+id).classList.remove('open');
+}
+document.addEventListener('keydown', e => {
+  if(e.key==='Escape') document.querySelectorAll('.modal-overlay').forEach(m=>m.classList.remove('open'));
+});
+
+// ====== 打开评论分析模态框 ======
+function openReviewModal(compName) {
+  var data = REVIEW_DATA[compName];
+  if (!data) {
+    document.getElementById('modal-bug-title').textContent = compName + ' · 暂无分析数据';
+    document.getElementById('modal-bug-summary').textContent = '暂无 AI 分析报告，请先同步数据。';
+    document.getElementById('modal-bug-reviews').innerHTML = '';
+    openModal('bug');
+    return;
+  }
+  document.getElementById('modal-bug-title').textContent = compName + ' · AI 分析报告';
+
+  // 显示 AI 分析报告
+  var summaryHtml = '';
+  if (data.summary) {
+    summaryHtml = '<div style="background:rgba(123,110,246,0.07);border:1px solid rgba(123,110,246,0.2);border-radius:10px;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--text);white-space:pre-wrap">' + escapeHtml(data.summary) + '</div>';
+  } else {
+    summaryHtml = '<div style="color:var(--muted);font-size:13px">暂无 AI 分析报告。请在侧边栏输入 Claude API Key 后点击"生成 AI 分析"按钮。</div>';
+  }
+  document.getElementById('modal-bug-summary').innerHTML = summaryHtml;
+
+  // 显示原始评论
+  var reviewsHtml = '';
+  if (data.reviews && data.reviews.length > 0) {
+    data.reviews.forEach(function(r) {
+      var labelColor = 'var(--accent)';
+      if (r.label.indexOf('高价值功能请求') > -1) labelColor = 'var(--danger)';
+      else if (r.label.indexOf('问题抱怨') > -1) labelColor = 'var(--warn)';
+      else if (r.label.indexOf('竞品对比') > -1) labelColor = 'var(--accent2)';
+      else if (r.label.indexOf('流失信号') > -1) labelColor = 'var(--danger)';
+      else if (r.label.indexOf('正向反馈') > -1) labelColor = 'var(--accent2)';
+      reviewsHtml += '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">';
+      reviewsHtml += '<div style="display:flex;gap:8px;margin-bottom:4px">';
+      reviewsHtml += '<span style="font-size:11px;font-family:var(--mono);color:' + labelColor + '">' + escapeHtml(r.label) + '</span>';
+      reviewsHtml += '<span style="font-size:11px;font-family:var(--mono);color:var(--muted)">' + r.score + '★</span>';
+      if (r.version) reviewsHtml += '<span style="font-size:11px;font-family:var(--mono);color:var(--muted)">v' + escapeHtml(r.version) + '</span>';
+      reviewsHtml += '</div>';
+      reviewsHtml += '<div style="font-size:12px;color:var(--muted);line-height:1.5">' + escapeHtml(r.content) + '</div>';
+      reviewsHtml += '</div>';
+    });
+  } else {
+    reviewsHtml = '<div style="color:var(--muted);font-size:13px">暂无原始评论数据。</div>';
+  }
+  document.getElementById('modal-bug-reviews').innerHTML = reviewsHtml;
+
+  openModal('bug');
+}
+
+// ====== 调用 Claude API（Anthropic Native 格式） ======
+function callClaudeAPI(prompt, apiKey) {
+  return fetch('https://ai.flashapi.top/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  })
+  .then(function(resp) { return resp.json(); })
+  .then(function(result) {
+    if (result.content && result.content[0] && result.content[0].text) {
+      return result.content[0].text;
+    } else if (result.error) {
+      throw new Error(result.error.message || JSON.stringify(result.error));
+    } else {
+      throw new Error('无法解析 Claude API 返回结果');
+    }
+  });
+}
+
+// ====== 生成 AI 分析 ======
+function generateAIAnalysis(compName) {
+  var apiKey = document.getElementById('claude-api-key').value.trim();
+  if (!apiKey) {
+    alert('请先在侧边栏输入 Claude API Key');
+    return;
+  }
+
+  var data = REVIEW_DATA[compName];
+  if (!data || !data.reviews || data.reviews.length === 0) {
+    alert('该竞品暂无评论数据可供分析');
+    return;
+  }
+
+  var btn = document.getElementById('gen-btn-' + compName);
+  if (btn) {
+    btn.textContent = '生成中...';
+    btn.disabled = true;
+  }
+
+  // 构建分析 prompt
+  var reviewsText = data.reviews.map(function(r, i) {
+    return '[' + i + '] [' + r.score + '★] [' + r.label + '] ' + r.content;
+  }).join('\n');
+
+  var prompt = '你是一名资深体育 App 产品经理，正在分析竞品「' + compName + '」近3天的 App Store 与 Google Play 全量评论。\n';
+  prompt += '请生成《用户评论分析报告》，要求：\n';
+  prompt += '1. 提炼用户抱怨最多的 3 个问题，并按频次排序。\n';
+  prompt += '2. 提炼用户主动要求的 3 个功能，并明确区分 5 星用户 vs 低星用户。\n';
+  prompt += '3. 找出与竞品的对比提及，包括“比 X 好/差”的具体场景。\n';
+  prompt += '4. 找出忠实用户流失信号，例如“曾经很好”“used to”“以前更好”。\n';
+  prompt += '5. 如果评论中能看出版本或情感变化趋势，补充一句判断；看不出来就明确写样本不足。\n';
+  prompt += '6. 优先关注这些高价值信号：5 星评论 + but/只是/唯一/希望；1 星评论 + 曾经/used to/以前；同时提到 2 个产品名。\n';
+  prompt += '7. 使用纯文本输出，不要使用 Markdown 表格，不要使用 emoji，不要编造评论中没有出现的竞品或功能。\n\n';
+  prompt += '评论数据：\n' + reviewsText;
+
+  callClaudeAPI(prompt, apiKey)
+  .then(function(text) {
+    // 更新模态框内容
+    document.getElementById('modal-bug-title').textContent = compName + ' · AI 分析报告（实时生成）';
+    document.getElementById('modal-bug-summary').innerHTML = '<div style="background:rgba(123,110,246,0.07);border:1px solid rgba(123,110,246,0.2);border-radius:10px;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--text);white-space:pre-wrap">' + escapeHtml(text) + '</div>';
+
+    if (btn) {
+      btn.textContent = '重新生成 AI 分析';
+      btn.disabled = false;
+    }
+    openModal('bug');
+  })
+  .catch(function(err) {
+    alert('AI 分析请求失败: ' + err.message);
+    if (btn) {
+      btn.textContent = '生成 AI 分析';
+      btn.disabled = false;
+    }
+  });
+}
+
+// ====== 竞品详情页数据 ======
+var COMPETITOR_DETAIL_DATA = <!-- COMPETITOR_DETAIL_DATA_PLACEHOLDER -->;
+var _currentDetailCompetitor = '';
+var _detailBatchStatus = {};
+
+function getAllCompetitorNames() {
+  return Object.keys(COMPETITOR_DETAIL_DATA || {}).sort();
+}
+
+function renderDetailBatchStatus() {
+  var el = document.getElementById('detail-batch-status');
+  if (!el) return;
+  var names = getAllCompetitorNames();
+  if (!names.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无竞品配置</div>';
+    return;
+  }
+
+  var html = '';
+  names.forEach(function(name) {
+    var explicit = _detailBatchStatus[name];
+    var hasAnalysis = !!(COMPETITOR_DETAIL_DATA[name] &&
+      COMPETITOR_DETAIL_DATA[name].detail_analysis &&
+      COMPETITOR_DETAIL_DATA[name].detail_analysis.feature_analysis &&
+      COMPETITOR_DETAIL_DATA[name].detail_analysis.feature_analysis.summary);
+
+    var status = explicit || (hasAnalysis ? 'done' : 'idle');
+    var label = '待分析';
+    var color = 'var(--warn)';
+    if (status === 'running') { label = '分析中'; color = 'var(--accent)'; }
+    else if (status === 'done') { label = '已完成'; color = 'var(--accent2)'; }
+    else if (status === 'error') { label = '失败'; color = 'var(--danger)'; }
+
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)">';
+    html += '<span style="font-size:12px;color:var(--text)">' + escapeHtml(name) + '</span>';
+    html += '<span style="font-size:11px;font-family:var(--mono);color:' + color + '">' + label + '</span>';
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+// ====== 竞品详情页 ======
+function showCompetitorDetail(name) {
+  _currentDetailCompetitor = name;
+  renderCompetitorDetail(name);
+  showPage('competitor-detail');
+}
+
+function renderCompetitorDetail(name) {
+  var data = COMPETITOR_DETAIL_DATA[name] || {};
+  document.getElementById('detail-title').textContent = name + ' · 竞品详情';
+  document.getElementById('detail-subtitle').textContent = '实时排名 · 用户反馈 · 功能分析';
+
+  // 排名
+  var rankEl = document.getElementById('detail-rank');
+  var deltaEl = document.getElementById('detail-rank-delta');
+  if (data.rank && data.rank.rank) {
+    rankEl.textContent = '#' + data.rank.rank;
+    if (data.rank.delta !== null && data.rank.delta !== undefined) {
+      var d = data.rank.delta;
+      deltaEl.textContent = (d > 0 ? '↑ +' : d < 0 ? '↓ ' : '→ ') + d;
+      deltaEl.className = 'metric-change ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'neutral');
+    } else {
+      deltaEl.textContent = '暂无变化数据';
+      deltaEl.className = 'metric-change neutral';
+    }
+  } else {
+    rankEl.textContent = '—';
+    deltaEl.textContent = '暂无排名数据';
+    deltaEl.className = 'metric-change neutral';
+  }
+
+  // 版本
+  var verEl = document.getElementById('detail-version');
+  var verStatusEl = document.getElementById('detail-version-status');
+  if (data.version && data.version.version) {
+    verEl.textContent = 'v' + data.version.version;
+    verStatusEl.textContent = data.version.has_changed ? '有更新' : '稳定';
+    verStatusEl.className = 'metric-change ' + (data.version.has_changed ? 'up' : 'neutral');
+  } else {
+    verEl.textContent = '—';
+    verStatusEl.textContent = '暂无版本数据';
+    verStatusEl.className = 'metric-change neutral';
+  }
+
+  // 评论
+  var negEl = document.getElementById('detail-negative');
+  var negDetailEl = document.getElementById('detail-negative-detail');
+  if (data.comments && data.comments.total > 0) {
+    negEl.textContent = data.comments.total;
+    var regionLabels = Object.keys(data.comments.regions || {}).map(function(r) {
+      return r.toUpperCase() + '(' + data.comments.regions[r].count + '条)';
+    }).join(' ');
+    negDetailEl.textContent = regionLabels || '近3天';
+    negDetailEl.className = 'metric-change up';
+  } else if (data.detail_analysis && data.detail_analysis.total_reviews > 0) {
+    negEl.textContent = data.detail_analysis.total_reviews;
+    negDetailEl.textContent = '近' + data.detail_analysis.days_analyzed + '天';
+    negDetailEl.className = 'metric-change up';
+  } else {
+    negEl.textContent = '—';
+    negDetailEl.textContent = '暂无评论数据';
+    negDetailEl.className = 'metric-change neutral';
+  }
+
+  // 深度分析状态
+  var analysisStatusEl = document.getElementById('detail-analysis-status');
+  var analysisActionEl = document.getElementById('detail-analysis-action');
+  if (data.detail_analysis && data.detail_analysis.feature_analysis && data.detail_analysis.feature_analysis.summary) {
+    analysisStatusEl.textContent = '已分析';
+    analysisStatusEl.style.color = 'var(--accent2)';
+    analysisActionEl.textContent = '上次: ' + (data.detail_analysis.generated_at || '').slice(0, 10);
+    analysisActionEl.className = 'metric-change neutral';
+  } else {
+    analysisStatusEl.textContent = '待分析';
+    analysisStatusEl.style.color = 'var(--warn)';
+    analysisActionEl.textContent = '点击运行';
+    analysisActionEl.className = 'metric-change up';
+  }
+
+  // 功能分析内容
+  var analysisContent = document.getElementById('detail-analysis-content');
+  if (data.detail_analysis && data.detail_analysis.feature_analysis && data.detail_analysis.feature_analysis.summary) {
+    analysisContent.innerHTML = '<div style="background:rgba(123,110,246,0.07);border:1px solid rgba(123,110,246,0.2);border-radius:10px;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--text)">' + markdownToHtml(data.detail_analysis.feature_analysis.summary) + '</div>';
+  } else {
+    analysisContent.innerHTML = '暂无分析数据。点击"运行分析"按钮使用 Claude AI 进行深度功能分析。';
+  }
+
+  // 地区分布
+  renderDetailRegions(data);
+
+  // 平台对比
+  renderDetailPlatform(data);
+
+  // 关键词
+  renderDetailKeywords(data);
+  renderDetailBatchStatus();
+}
+
+function renderDetailRegions(data) {
+  var el = document.getElementById('detail-regions');
+  var regions = {};
+
+  // 从 detail_analysis 获取
+  if (data.detail_analysis && data.detail_analysis.regions) {
+    for (var code in data.detail_analysis.regions) {
+      regions[code] = data.detail_analysis.regions[code];
+    }
+  }
+  // 从 comments 获取
+  if (data.comments && data.comments.regions) {
+    for (var code in data.comments.regions) {
+      if (!regions[code]) regions[code] = {};
+      regions[code].count = data.comments.regions[code].count || 0;
+      regions[code].labels = data.comments.regions[code].labels || {};
+    }
+  }
+
+  var codes = Object.keys(regions);
+  if (codes.length === 0) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无地区数据</div>';
+    return;
+  }
+
+  var html = '';
+  codes.forEach(function(code) {
+    var r = regions[code];
+    var label = r.label || code.toUpperCase();
+    var total = r.total || r.count || 0;
+    var gpCount = r.gp_count || 0;
+    var iosCount = r.ios_count || 0;
+    var labels = r.labels || {};
+
+    html += '<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">';
+    html += '<div style="font-size:13px;font-weight:500;margin-bottom:8px">' + label + ' (' + code.toUpperCase() + ')</div>';
+    html += '<div style="display:flex;gap:16px;margin-bottom:6px;font-size:12px;color:var(--muted)">';
+    html += '<span>📱 Google Play: ' + gpCount + '条</span>';
+    html += '<span>🍎 App Store: ' + iosCount + '条</span>';
+    html += '<span>📊 总计: ' + total + '条</span>';
+    html += '</div>';
+
+    // 标签分布
+    var labelKeys = Object.keys(labels);
+    if (labelKeys.length > 0) {
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+      labelKeys.forEach(function(l) {
+        var color = 'var(--accent)';
+        if (l.indexOf('高价值功能请求') > -1) color = 'var(--danger)';
+        else if (l.indexOf('问题抱怨') > -1) color = 'var(--warn)';
+        else if (l.indexOf('竞品对比') > -1) color = 'var(--accent2)';
+        else if (l.indexOf('流失信号') > -1) color = 'var(--danger)';
+        else if (l.indexOf('正向反馈') > -1) color = 'var(--accent)';
+        html += '<span style="font-size:10px;font-family:var(--mono);color:' + color + ';background:rgba(123,110,246,0.08);padding:2px 8px;border-radius:4px">' + l + ': ' + labels[l] + '</span>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+}
+
+function renderDetailPlatform(data) {
+  var el = document.getElementById('detail-platform');
+
+  // 从 detail_analysis 统计平台分布
+  var platformData = {};
+  if (data.detail_analysis && data.detail_analysis.feature_analysis && data.detail_analysis.feature_analysis.platform_distribution) {
+    platformData = data.detail_analysis.feature_analysis.platform_distribution;
+  }
+
+  var platformKeys = Object.keys(platformData);
+  if (platformKeys.length === 0) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无平台对比数据。运行深度分析后可查看。</div>';
+    return;
+  }
+
+  var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">';
+  var colors = {'Google Play': 'var(--accent2)', 'App Store': 'var(--accent)'};
+  platformKeys.forEach(function(p) {
+    var count = platformData[p];
+    var color = colors[p] || 'var(--muted)';
+    html += '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px">';
+    html += '<div style="font-size:12px;font-family:var(--mono);color:' + color + ';margin-bottom:8px">' + p + '</div>';
+    html += '<div style="font-family:var(--display);font-size:24px;font-weight:700">' + count + '</div>';
+    html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">条评论</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+function renderDetailKeywords(data) {
+  var el = document.getElementById('detail-keywords');
+  var keywords = {};
+
+  if (data.detail_analysis && data.detail_analysis.feature_analysis && data.detail_analysis.feature_analysis.feature_keywords) {
+    keywords = data.detail_analysis.feature_analysis.feature_keywords;
+  }
+
+  var keys = Object.keys(keywords);
+  if (keys.length === 0) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无关键词数据。运行深度分析后可查看。</div>';
+    return;
+  }
+
+  var maxVal = Math.max.apply(null, keys.map(function(k) { return keywords[k]; }));
+  var minVal = Math.min.apply(null, keys.map(function(k) { return keywords[k]; }));
+  var colors = ['var(--text)', 'var(--accent)', 'var(--accent2)', 'var(--warn)', 'var(--danger)', 'var(--muted)'];
+
+  var html = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0">';
+  keys.slice(0, 25).forEach(function(word, i) {
+    var fontSize = 11 + (keywords[word] - minVal) / Math.max(1, maxVal - minVal) * 16;
+    var color = colors[i % colors.length];
+    html += '<span style="font-size:' + fontSize.toFixed(0) + 'px;font-weight:' + (keywords[word] === maxVal ? '600' : '400') + ';color:' + color + ';font-family:var(--display)">' + escapeHtml(word) + '</span>\n';
+  });
+  html += '</div>';
+  html += '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);padding-top:8px;border-top:1px solid var(--border)">字号越大 = 提及越多 · 共 ' + keys.length + ' 个关键词</div>';
+
+  el.innerHTML = html;
+}
+
+// ====== 后端 API 基础 URL ======
+var API_BASE = window.location.origin;
+
+// ====== 同步所有数据 ======
+function syncAllData() {
+  var btn = document.querySelector('#page-overview .header-actions .btn');
+  if (btn) { btn.textContent = '⏳ 同步中...'; btn.disabled = true; }
+
+  // 依次运行各个脚本
+  var scripts = ['strategy_monitor', 'market_rank', 'daily_report'];
+  var idx = 0;
+
+  function runNext() {
+    if (idx >= scripts.length) {
+      // 所有脚本运行完毕，生成看板
+      runScript('generate_dashboard', function() {
+        if (btn) { btn.textContent = '✅ 已同步'; btn.disabled = false; }
+        setTimeout(function() { location.reload(); }, 1000);
+      });
+      return;
+    }
+    runScript(scripts[idx], function() {
+      idx++;
+      runNext();
+    });
+  }
+
+  runNext();
+}
+
+// ====== 运行后端脚本 ======
+function _apiKey() { return document.getElementById('claude-api-key').value.trim(); }
+function runScript(scriptName, callback) {
+  var url = API_BASE + '/api/run?script=' + encodeURIComponent(scriptName) + '&api_key=' + encodeURIComponent(_apiKey());
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'started') {
+        // 轮询等待完成
+        pollTaskStatus(scriptName, callback);
+      } else {
+        console.error('启动失败:', data.message);
+        if (callback) callback();
+      }
+    })
+    .catch(function(err) {
+      console.error('请求失败:', err);
+      if (callback) callback();
+    });
+}
+
+// ====== 轮询任务状态 ======
+function pollTaskStatus(scriptName, callback) {
+  var maxAttempts = 120; // 最多等 2 分钟
+  var attempt = 0;
+
+  function check() {
+    fetch(API_BASE + '/api/status')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var task = data.tasks && data.tasks[scriptName];
+        if (!task || !task.running) {
+          // 任务完成
+          if (callback) callback();
+          return;
+        }
+        attempt++;
+        if (attempt >= maxAttempts) {
+          if (callback) callback();
+          return;
+        }
+        setTimeout(check, 1000);
+      })
+      .catch(function() {
+        if (callback) callback();
+      });
+  }
+
+  setTimeout(check, 2000);
+}
+
+// ====== 运行深度分析（通过后端 API） ======
+function runDetailAnalysis() {
+  var name = _currentDetailCompetitor;
+  if (!name) return;
+
+  var apiKey = document.getElementById('claude-api-key').value.trim();
+  if (!apiKey) {
+    alert('请先在侧边栏输入 Claude API Key');
+    return;
+  }
+
+  var btn = document.getElementById('detail-analysis-btn');
+  btn.textContent = '⏳ 分析中...';
+  btn.disabled = true;
+  _detailBatchStatus[name] = 'running';
+  renderDetailBatchStatus();
+
+  var url = API_BASE + '/api/run?script=competitor_detail&competitor=' + encodeURIComponent(name) + '&days=7&api_key=' + encodeURIComponent(_apiKey());
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'started') {
+        // 轮询等待完成
+        pollTaskStatus('competitor_detail', function() {
+          // 完成后刷新数据
+          refreshCompetitorDetail(name, function() {
+            _detailBatchStatus[name] = 'done';
+            renderDetailBatchStatus();
+            btn.textContent = '✅ 已分析';
+            btn.disabled = false;
+          });
+        });
+      } else {
+        _detailBatchStatus[name] = 'error';
+        renderDetailBatchStatus();
+        alert('启动失败: ' + (data.message || '未知错误'));
+        btn.textContent = '运行分析 →';
+        btn.disabled = false;
+      }
+    })
+    .catch(function(err) {
+      _detailBatchStatus[name] = 'error';
+      renderDetailBatchStatus();
+      alert('请求失败: ' + err.message);
+      btn.textContent = '运行分析 →';
+      btn.disabled = false;
+    });
+}
+
+// ====== 一键分析全部竞品 ======
+function runAllCompetitorDetails() {
+  var btn = document.getElementById('run-all-btn');
+  var names = getAllCompetitorNames();
+  if (!names.length) {
+    alert('暂无可分析的竞品');
+    return;
+  }
+  btn.textContent = '⏳ 分析中...';
+  btn.style.pointerEvents = 'none';
+  names.forEach(function(name) {
+    _detailBatchStatus[name] = 'idle';
+  });
+  renderDetailBatchStatus();
+
+  function runNext(index) {
+    if (index >= names.length) {
+      refreshAllCompetitorDetails(function() {
+        fetch(API_BASE + '/api/run?script=generate_dashboard&api_key=' + encodeURIComponent(_apiKey()))
+          .finally(function() {
+            renderDetailBatchStatus();
+            btn.textContent = '分析全部竞品 →';
+            btn.style.pointerEvents = '';
+            if (_currentDetailCompetitor) renderCompetitorDetail(_currentDetailCompetitor);
+            alert('全部竞品分析完成，面板已更新');
+          });
+      });
+      return;
+    }
+
+    var name = names[index];
+    _detailBatchStatus[name] = 'running';
+    renderDetailBatchStatus();
+
+    var url = API_BASE + '/api/run?script=competitor_detail&competitor=' + encodeURIComponent(name) + '&days=7&api_key=' + encodeURIComponent(_apiKey());
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status !== 'started') {
+          _detailBatchStatus[name] = 'error';
+          renderDetailBatchStatus();
+          runNext(index + 1);
+          return;
+        }
+        pollTaskStatus('competitor_detail', function() {
+          refreshCompetitorDetail(name, function() {
+            _detailBatchStatus[name] = 'done';
+            renderDetailBatchStatus();
+            if (_currentDetailCompetitor === name) renderCompetitorDetail(name);
+            runNext(index + 1);
+          });
+        });
+      })
+      .catch(function() {
+        _detailBatchStatus[name] = 'error';
+        renderDetailBatchStatus();
+        runNext(index + 1);
+      });
+  }
+
+  runNext(0);
+}
+
+function refreshAllCompetitorDetails(callback) {
+  fetch(API_BASE + '/api/data/competitor_detail')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && typeof data === 'object') {
+        Object.keys(data).forEach(function(name) {
+          COMPETITOR_DETAIL_DATA[name] = data[name];
+        });
+      }
+      if (callback) callback();
+    })
+    .catch(function() {
+      if (callback) callback();
+    });
+}
+
+// ====== 商业分析页 ======
+function renderCommercialPage() {
+  var data = COMMERCIAL_DATA || {};
+  var comps = data.competitors || {};
+  var names = Object.keys(comps);
+
+  document.getElementById('cm-total').textContent = names.length || '—';
+
+  var totalAlerts = 0, bettingCount = 0, maxRpd = 0;
+  var allAlertItems = [];
+  names.forEach(function(n) {
+    var c = comps[n];
+    totalAlerts += (c.price_alerts || []).length + (c.iap_changes || []).length;
+    if (c.betting_signals) bettingCount++;
+    if ((c.rpd_index || 0) > maxRpd) maxRpd = c.rpd_index;
+    (c.price_alerts || []).forEach(function(a) {
+      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--danger);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--danger);font-weight:600">💰 ' + escapeHtml(n) + ' · ' + escapeHtml(a.direction) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(a.name) + ': $' + a.prev + ' → $' + a.curr + '</div></div>');
+    });
+    (c.iap_changes || []).forEach(function(ic) {
+      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--warn);font-weight:600">💰 ' + escapeHtml(n) + ' · IAP ' + escapeHtml(ic.type) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(ic.name) + '</div></div>');
+    });
+    if (c.betting_signals) {
+      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--warn);font-weight:600">🎰 ' + escapeHtml(n) + ' · 博彩导流信号</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml((c.description_keywords || []).join(', ')) + '</div></div>');
+    }
+  });
+  document.getElementById('cm-alerts').textContent = totalAlerts || '0';
+  document.getElementById('cm-betting').textContent = bettingCount || '0';
+  document.getElementById('cm-rpd').textContent = maxRpd ? maxRpd.toFixed(1) : '—';
+  document.getElementById('cm-alerts-list').innerHTML = allAlertItems.length ? allAlertItems.join('') : '';
+
+  var html = '';
+  names.forEach(function(n) {
+    var c = comps[n];
+    var tags = (c.monetization_tags || []).map(function(t) {
+      return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:rgba(123,110,246,0.15);color:#7b6ef6;margin:2px">' + escapeHtml(t) + '</span>';
+    }).join('');
+    var alerts = (c.price_alerts || []).map(function(a) {
+      var color = a.direction === '涨价' ? 'var(--danger)' : 'var(--accent2)';
+      return '<div style="font-size:12px;color:' + color + '">' + escapeHtml(a.name) + ' ' + escapeHtml(a.direction) + ' ' + a.prev + '→' + a.curr + '</div>';
+    }).join('');
+    var iapRows = (c.iap_items || []).slice(0, 5).map(function(i) {
+      return '<tr><td style="padding:4px 8px">' + escapeHtml(i.name) + '</td><td style="padding:4px 8px;color:var(--accent2)">' + (i.price_usd != null ? '$' + i.price_usd : '—') + '</td><td style="padding:4px 8px;color:var(--muted)">' + escapeHtml(i.category || '') + '</td></tr>';
+    }).join('');
+
+    html += '<div class="card" style="margin-bottom:12px;padding:16px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+    html += '<span style="font-weight:600;font-size:15px">' + escapeHtml(n) + '</span>';
+    html += '<span style="font-size:12px;color:var(--muted)">RPD: ' + (c.rpd_index || 0).toFixed(1) + '</span></div>';
+    if (tags) html += '<div style="margin-bottom:8px">' + tags + '</div>';
+    if (c.ai_intent) html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + escapeHtml(c.ai_intent) + '</div>';
+    if (alerts) html += '<div style="margin-bottom:8px">' + alerts + '</div>';
+    if (iapRows) html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="padding:4px 8px;text-align:left;color:var(--muted)">内购项</th><th style="padding:4px 8px;text-align:left;color:var(--muted)">价格</th><th style="padding:4px 8px;text-align:left;color:var(--muted)">分类</th></tr></thead><tbody>' + iapRows + '</tbody></table>';
+    html += '</div>';
+  });
+
+  var listEl = document.getElementById('cm-competitor-list');
+  if (listEl) listEl.innerHTML = html || '<div style="color:var(--muted);padding:20px">暂无数据，请先运行分析</div>';
+}
+
+function runCommercialAnalysis() {
+  var btn = document.getElementById('commercial-run-btn');
+  btn.textContent = '⏳ 分析中...';
+  btn.disabled = true;
+
+  fetch(API_BASE + '/api/run?script=commercial_strategy&api_key=' + encodeURIComponent(_apiKey()))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status !== 'started') {
+        alert('启动失败: ' + (data.message || '未知错误'));
+        btn.textContent = '运行分析'; btn.disabled = false;
+        return;
+      }
+      pollTaskStatus('commercial_strategy', function() {
+        fetch(API_BASE + '/api/run?script=generate_dashboard&api_key=' + encodeURIComponent(_apiKey()))
+          .finally(function() {
+            btn.textContent = '运行分析'; btn.disabled = false;
+            alert('商业策略分析完成，请刷新页面查看最新数据');
+          });
+      });
+    })
+    .catch(function(err) {
+      alert('请求失败: ' + err.message);
+      btn.textContent = '运行分析'; btn.disabled = false;
+    });
+}
+
+function renderCommercialWeekly() {
+  var data = COMMERCIAL_WEEKLY_DATA || {};
+  var el = document.getElementById('cm-weekly-report');
+  if (!data.summary) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  var dates = (data.dates_covered || []).join(', ');
+  document.getElementById('cm-weekly-period').textContent = '覆盖日期: ' + (dates || '—') + ' | 生成时间: ' + (data.generated_at || '—').slice(0, 16);
+  document.getElementById('cm-weekly-content').textContent = data.summary;
+}
+
+function runCommercialWeekly() {
+  var btn = document.getElementById('commercial-weekly-btn');
+  btn.textContent = '⏳ 生成中...';
+  btn.disabled = true;
+
+  fetch(API_BASE + '/api/run?script=commercial_weekly&api_key=' + encodeURIComponent(_apiKey()))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status !== 'started') {
+        alert('启动失败: ' + (data.message || '未知错误'));
+        btn.textContent = '生成周报'; btn.disabled = false;
+        return;
+      }
+      pollTaskStatus('commercial_weekly', function() {
+        fetch(API_BASE + '/api/run?script=generate_dashboard&api_key=' + encodeURIComponent(_apiKey()))
+          .finally(function() {
+            btn.textContent = '生成周报'; btn.disabled = false;
+            alert('商业策略周报已生成，请刷新页面查看');
+          });
+      });
+    })
+    .catch(function(err) {
+      alert('请求失败: ' + err.message);
+      btn.textContent = '生成周报'; btn.disabled = false;
+    });
+}
+
+// ====== 刷新竞品详情数据 ======
+function refreshCompetitorDetail(name, callback) {
+  fetch(API_BASE + '/api/data/competitor_detail?name=' + encodeURIComponent(name))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && data.competitor) {
+        COMPETITOR_DETAIL_DATA[name] = data;
+        renderCompetitorDetail(name);
+      }
+      if (callback) callback();
+    })
+    .catch(function() {
+      if (callback) callback();
+    });
+}
+
+// ====== 运行周报生成（通过后端 API） ======
+function runWeeklyReview() {
+  var apiKey = document.getElementById('claude-api-key').value.trim();
+  if (!apiKey) {
+    alert('请先在侧边栏输入 Claude API Key');
+    return;
+  }
+
+  var btn = document.querySelector('#page-weekly-review .header-actions .btn');
+  if (btn) {
+    btn.textContent = '⏳ 生成中...';
+    btn.disabled = true;
+  }
+
+  var url = API_BASE + '/api/run?script=weekly_review&api_key=' + encodeURIComponent(_apiKey());
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'started') {
+        pollTaskStatus('weekly_review', function() {
+          // 完成后刷新周报数据
+          refreshWeeklyReview(function() {
+            if (btn) { btn.textContent = '✅ 已生成'; btn.disabled = false; }
+          });
+        });
+      } else {
+        alert('启动失败: ' + (data.message || '未知错误'));
+        if (btn) { btn.textContent = '🔄 生成周报'; btn.disabled = false; }
+      }
+    })
+    .catch(function(err) {
+      alert('请求失败: ' + err.message);
+      if (btn) { btn.textContent = '🔄 生成周报'; btn.disabled = false; }
+    });
+}
+
+// ====== 刷新周报数据 ======
+function refreshWeeklyReview(callback) {
+  fetch(API_BASE + '/api/data/weekly_review')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && data.summary) {
+        WEEKLY_REVIEW_DATA = data;
+        renderWeeklyReview();
+      }
+      if (callback) callback();
+    })
+    .catch(function() {
+      if (callback) callback();
+    });
+}
+
+// ====== 评论周报 ======
+function renderWeeklyReview() {
+  var data = WEEKLY_REVIEW_DATA;
+  if (!data || !data.summary) {
+    document.getElementById('wr-summary').innerHTML = '暂无周报数据。请先运行 <code>python3 competitor_comment/weekly_review.py</code> 生成周报，或点击"生成周报"按钮。';
+    return;
+  }
+
+  // 指标卡片
+  document.getElementById('wr-days').textContent = data.days_analyzed || 7;
+  document.getElementById('wr-total').textContent = data.total_reviews || 0;
+  var compCount = Object.keys(data.per_competitor || {}).length;
+  document.getElementById('wr-total-detail').textContent = '涉及 ' + compCount + ' 个竞品';
+  document.getElementById('wr-localization').textContent = data.localization_review_count || 0;
+  document.getElementById('wr-localization-detail').textContent = '条本地化相关评论';
+  var genTime = data.generated_at || '';
+  document.getElementById('wr-time').textContent = genTime ? genTime.slice(0, 10) : '—';
+  document.getElementById('wr-time-detail').textContent = genTime ? genTime.slice(11, 16) : '—';
+
+  // 核心发现
+  if (data.summary) {
+    document.getElementById('wr-summary').innerHTML = '<div style="background:rgba(123,110,246,0.07);border:1px solid rgba(123,110,246,0.2);border-radius:10px;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--text)">' + markdownToHtml(data.summary) + '</div>';
+  }
+
+  // 各竞品分析摘要
+  var perCompHtml = '';
+  var competitors = data.per_competitor || {};
+  var compKeys = Object.keys(competitors);
+  if (compKeys.length > 0) {
+    compKeys.forEach(function(name) {
+      var info = competitors[name];
+      var total = info.total || 0;
+      var regions = info.regions || {};
+      var regionLabels = Object.keys(regions).map(function(code) {
+        return code.toUpperCase() + '(' + regions[code].count + '条)';
+      }).join(' ');
+      var labelSummary = '';
+      var allLabels = {};
+      for (var code in regions) {
+        var labels = regions[code].labels || {};
+        for (var l in labels) {
+          allLabels[l] = (allLabels[l] || 0) + labels[l];
+        }
+      }
+      var labelKeys = Object.keys(allLabels);
+      if (labelKeys.length > 0) {
+        labelSummary = labelKeys.map(function(l) {
+          var color = 'var(--accent)';
+          if (l.indexOf('高价值功能请求') > -1) color = 'var(--danger)';
+          else if (l.indexOf('问题抱怨') > -1) color = 'var(--warn)';
+          else if (l.indexOf('竞品对比') > -1) color = 'var(--accent2)';
+          else if (l.indexOf('流失信号') > -1) color = 'var(--danger)';
+          else if (l.indexOf('正向反馈') > -1) color = 'var(--accent)';
+          return '<span style="font-size:10px;font-family:var(--mono);color:' + color + ';background:rgba(123,110,246,0.08);padding:2px 8px;border-radius:4px;margin-right:4px">' + l + ': ' + allLabels[l] + '</span>';
+        }).join('');
+      }
+
+      perCompHtml += '<div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">';
+      perCompHtml += '<div style="font-size:13px;font-weight:500;margin-bottom:4px">' + name + '</div>';
+      perCompHtml += '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">评论: ' + total + ' 条 · ' + regionLabels + '</div>';
+      if (labelSummary) perCompHtml += '<div style="display:flex;gap:4px;flex-wrap:wrap">' + labelSummary + '</div>';
+      perCompHtml += '</div>';
+    });
+  } else {
+    perCompHtml = '<div style="color:var(--muted);font-size:13px">暂无竞品数据</div>';
+  }
+  document.getElementById('wr-per-competitor').innerHTML = perCompHtml;
+
+  // 本地化专题
+  if (data.localization_insight) {
+    document.getElementById('wr-localization-content').innerHTML = '<div style="background:rgba(78,204,163,0.07);border:1px solid rgba(78,204,163,0.2);border-radius:10px;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--text)">' + markdownToHtml(data.localization_insight) + '</div>';
+  }
+
+  // 标签分布
+  var labelDist = data.label_distribution || {};
+  var labelKeys = Object.keys(labelDist);
+  if (labelKeys.length > 0) {
+    var maxCount = Math.max.apply(null, labelKeys.map(function(k) { return labelDist[k]; }));
+    var labelHtml = '<div style="display:flex;flex-direction:column;gap:10px">';
+    labelKeys.forEach(function(l) {
+      var count = labelDist[l];
+      var pct = (count / (data.total_reviews || 1) * 100).toFixed(0);
+      var width = (count / maxCount * 100).toFixed(0);
+      var color = 'var(--accent)';
+      if (l.indexOf('高价值功能请求') > -1) color = 'var(--danger)';
+      else if (l.indexOf('问题抱怨') > -1) color = 'var(--warn)';
+      else if (l.indexOf('竞品对比') > -1) color = 'var(--accent2)';
+      else if (l.indexOf('流失信号') > -1) color = 'var(--danger)';
+      else if (l.indexOf('正向反馈') > -1) color = 'var(--accent)';
+      labelHtml += '<div style="display:flex;align-items:center;gap:12px">';
+      labelHtml += '<span style="font-size:12px;color:var(--muted);width:80px;flex-shrink:0">' + l + '</span>';
+      labelHtml += '<div style="flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden">';
+      labelHtml += '<div style="height:100%;width:' + width + '%;background:' + color + ';border-radius:4px"></div></div>';
+      labelHtml += '<span style="font-size:12px;font-family:var(--mono);color:' + color + ';width:60px;text-align:right">' + count + ' (' + pct + '%)</span>';
+      labelHtml += '</div>';
+    });
+    labelHtml += '</div>';
+    document.getElementById('wr-label-dist').innerHTML = labelHtml;
+  } else {
+    document.getElementById('wr-label-dist').innerHTML = '<div style="color:var(--muted);font-size:13px">暂无标签数据</div>';
+  }
+
+  // 功能关键词
+  var keywords = data.feature_keywords || {};
+  var kwKeys = Object.keys(keywords);
+  if (kwKeys.length > 0) {
+    var maxVal = Math.max.apply(null, kwKeys.map(function(k) { return keywords[k]; }));
+    var minVal = Math.min.apply(null, kwKeys.map(function(k) { return keywords[k]; }));
+    var kwColors = ['var(--text)', 'var(--accent)', 'var(--accent2)', 'var(--warn)', 'var(--danger)', 'var(--muted)'];
+    var kwHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0">';
+    kwKeys.slice(0, 30).forEach(function(word, i) {
+      var fontSize = 11 + (keywords[word] - minVal) / Math.max(1, maxVal - minVal) * 16;
+      var color = kwColors[i % kwColors.length];
+      kwHtml += '<span style="font-size:' + fontSize.toFixed(0) + 'px;font-weight:' + (keywords[word] === maxVal ? '600' : '400') + ';color:' + color + ';font-family:var(--display)">' + escapeHtml(word) + '</span>\n';
+    });
+    kwHtml += '</div>';
+    kwHtml += '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);padding-top:8px;border-top:1px solid var(--border)">字号越大 = 提及越多 · 共 ' + kwKeys.length + ' 个关键词</div>';
+    document.getElementById('wr-keywords').innerHTML = kwHtml;
+  } else {
+    document.getElementById('wr-keywords').innerHTML = '<div style="color:var(--muted);font-size:13px">暂无关键词数据</div>';
+  }
+}
+
+// ====== HTML 转义 ======
+function escapeHtml(str) {
+  if (!str) return '';
+  var div = document.createElement('div');
+  div.appendChild(document.createTextNode(str));
+  return div.innerHTML;
+}
+
+// ====== Markdown 转 HTML（轻量版） ======
+function markdownToHtml(md) {
+  if (!md) return '';
+  var html = escapeHtml(md);
+  // 标题: ## 标题 -> <h3>标题</h3>
+  html = html.replace(/^### (.+)$/gm, '<h3 style="font-size:15px;font-weight:600;margin:16px 0 8px;color:var(--text)">$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2 style="font-size:17px;font-weight:700;margin:18px 0 10px;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:6px">$1</h2>');
+  // 加粗: **text** -> <strong>text</strong>
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--accent)">$1</strong>');
+  // 列表: - item -> <li>item</li>
+  html = html.replace(/^- (.+)$/gm, '<li style="margin:4px 0 4px 16px;color:var(--muted)">$1</li>');
+  // 数字列表: 1. item -> <li>item</li>
+  html = html.replace(/^\d+\.\s+(.+)$/gm, '<li style="margin:4px 0 4px 16px;color:var(--muted)">$1</li>');
+  // 换行: 连续两个换行 -> </p><p>
+  html = html.replace(/\n\n/g, '</p><p style="margin:8px 0;line-height:1.8">');
+  // 单个换行 -> <br>
+  html = html.replace(/\n/g, '<br>');
+  // 包裹段落
+  html = '<p style="margin:8px 0;line-height:1.8">' + html + '</p>';
+  // 清理多余的嵌套
+  html = html.replace(/<p[^>]*><\/p>/g, '');
+  return html;
+}
+</script>
+
+</body>

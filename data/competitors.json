@@ -1,0 +1,38 @@
+{
+  "SofaScore": {
+    "gp": "com.sofascore.results",
+    "ios": 1176147574,
+    "app_id": "1176147574",
+    "bundle_id": "com.SofaScore.iOS"
+  },
+  "FlashScore": {
+    "gp": "com.flashscore.app",
+    "ios": 766443283,
+    "app_id": "766443283",
+    "bundle_id": "eu.livesport.FlashScore-com"
+  },
+  "OneFootball": {
+    "gp": "com.onefootball.onefootball.google",
+    "ios": 382002079,
+    "app_id": "382002079",
+    "bundle_id": "de.motain.iliga"
+  },
+  "365Scores": {
+    "gp": "com.scores365.android",
+    "ios": 571801488,
+    "app_id": "571801488",
+    "bundle_id": "com.365scores.365scroesapp"
+  },
+  "Fotmob": {
+    "gp": "com.fotmob.fotmob",
+    "ios": 488575683,
+    "app_id": "488575683",
+    "bundle_id": "com.mobilefootie.fotmobpro"
+  },
+  "LiveScore": {
+    "gp": "com.livescore.livescores",
+    "ios": 356928178,
+    "app_id": "356928178",
+    "bundle_id": "com.livescore.ios"
+  }
+}

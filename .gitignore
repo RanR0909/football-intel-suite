@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.claude/
+main_dashboard/dashboard.html
+competitor_comment/reports/*.md
+data/*.json
+!data/competitors.json
+!data/regions.json
+!data/.gitkeep
