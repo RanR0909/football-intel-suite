@@ -1,0 +1,5 @@
+aiohttp>=3.9
+motor>=3.3
+tqdm>=4.66
+google-play-scraper>=1.2
+beautifulsoup4>=4.12

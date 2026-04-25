@@ -287,6 +287,18 @@ body::before {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* DRAG */
+.drag-block { position: relative; }
+.drag-handle {
+  position: absolute; left: -22px; top: 50%; transform: translateY(-50%);
+  color: var(--border2); cursor: grab; font-size: 16px; line-height: 1;
+  padding: 4px; border-radius: 4px; transition: color 0.15s;
+  user-select: none;
+}
+.drag-handle:hover { color: var(--accent); }
+.drag-block.dragging { opacity: 0.4; }
+.drag-block.drag-over { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 12px; }
 </style>
 </head>
 <body>
@@ -355,7 +367,7 @@ body::before {
 <div class="page-header">
   <div>
     <div class="page-title">总览看板</div>
-    <div class="page-sub">2026年04月25日 · 监测 6 个竞品</div>
+    <div class="page-sub">2026年04月25日 · 监测 6 个竞品 · <span style="color:var(--accent);font-family:var(--mono);font-size:11px">拖拽卡片可调整布局</span></div>
   </div>
   <div class="header-actions">
     <button class="btn" onclick="syncAllData()">🔄 同步数据</button>
@@ -363,126 +375,127 @@ body::before {
   </div>
 </div>
 
+<div id="overview-grid" style="display:flex;flex-direction:column;gap:20px">
 
-    <div class="alert-strip" style="background:rgba(255,92,92,0.08);border-color:rgba(255,92,92,0.2)" onclick="showPage('alerts')">
-      <span class="alert-icon">🔴</span>
-      <span class="alert-text" style="color:var(--danger)"><strong>SofaScore 出现低星评论</strong>：近3天检测到 3 条低星评论，共抓取 3 条评论。高频信号：商业化干扰(3条)。</span>
-      <span class="alert-count" style="background:rgba(255,92,92,0.08);color:var(--danger)">共 15 条预警 →</span>
-    </div>
-    
-
-<div class="metrics-row">
-  <div class="metric-card purple" onclick="showPage('product')">
-    <div class="metric-label">产品更新 / 7天</div>
-    <div class="metric-value">0</div>
-    <div class="metric-change up">↑ 竞品版本迭代</div>
-    <div class="metric-sub">较上次检测</div>
-  </div>
-  <div class="metric-card teal" onclick="showPage('ranking')">
-    <div class="metric-label">最大排名变化</div>
-    <div class="metric-value">0</div>
-    <div class="metric-change up">↑ —</div>
-    <div class="metric-sub">App Store 体育类</div>
-  </div>
-  <div class="metric-card warn" onclick="showPage('reviews')">
-    <div class="metric-label">用户负面评论</div>
-    <div class="metric-value">3</div>
-    <div class="metric-change up">↑ 近3天</div>
-    <div class="metric-sub">需关注趋势</div>
+<!-- BLOCK: alert -->
+<div class="drag-block" draggable="true" data-id="alert">
+  <div class="drag-handle" title="拖拽移动">⠿</div>
+  <div class="alert-strip" style="background:rgba(255,92,92,0.08);border-color:rgba(255,92,92,0.2);margin:0" onclick="showPage('alerts')">
+    <span class="alert-icon">🔴</span>
+    <span class="alert-text" style="color:var(--danger)"><strong>SofaScore 出现低星评论</strong>：近3天检测到 3 条低星评论，共抓取 3 条评论。高频信号：商业化干扰(3条)。</span>
+    <span class="alert-count" style="background:rgba(255,92,92,0.08);color:var(--danger)">共 15 条预警 →</span>
   </div>
 </div>
 
-<!-- ROW 2 -->
-<div class="three-col">
-
-  <!-- ACTIVITY FEED -->
-  <div class="card">
-    <div class="card-head">
-      <div class="card-title">最新动态</div>
-      <div class="card-action" onclick="showPage('product')">查看全部 →</div>
+<!-- BLOCK: metrics -->
+<div class="drag-block" draggable="true" data-id="metrics">
+  <div class="drag-handle" title="拖拽移动">⠿</div>
+  <div class="metrics-row" style="margin:0">
+    <div class="metric-card purple" onclick="showPage('product')">
+      <div class="metric-label">产品更新 / 7天</div>
+      <div class="metric-value">0</div>
+      <div class="metric-change up">↑ 竞品版本迭代</div>
+      <div class="metric-sub">较上次检测</div>
     </div>
-    
-        <div class="feed-item" onclick="openModal('feature')">
-          <div class="feed-meta">
-            <span class="feed-source" style="color:#7b6ef6">SofaScore</span>
-            <span class="feed-type ft-bug">用户反馈</span>
-          </div>
-          <div class="feed-title">新增 3 条用户评论，其中 3 条为低星评论</div>
-          <div class="feed-desc">版本 N/A</div>
-          <div class="feed-time">今天</div>
-          <div class="feed-signal">
-            <div class="signal-dot" style="background:var(--accent2)"></div>
-            <span style="color:var(--accent2);font-size:11px;font-family:var(--mono)">机会 · 可承接</span>
-          </div>
-        </div>
-        
+    <div class="metric-card teal" onclick="showPage('ranking')">
+      <div class="metric-label">最大排名变化</div>
+      <div class="metric-value">0</div>
+      <div class="metric-change up">↑ —</div>
+      <div class="metric-sub">App Store 体育类</div>
+    </div>
+    <div class="metric-card warn" onclick="showPage('reviews')">
+      <div class="metric-label">用户负面评论</div>
+      <div class="metric-value">3</div>
+      <div class="metric-change up">↑ 近3天</div>
+      <div class="metric-sub">需关注趋势</div>
+    </div>
   </div>
+</div>
 
-  <!-- RIGHT COL -->
-  <div style="display:flex;flex-direction:column;gap:20px">
-
-    <!-- TOP DEMANDS -->
+<!-- BLOCK: feed + demands -->
+<div class="drag-block" draggable="true" data-id="feed">
+  <div class="drag-handle" title="拖拽移动">⠿</div>
+  <div class="three-col" style="margin:0">
     <div class="card">
       <div class="card-head">
-        <div class="card-title">高频需求词</div>
-        <div class="card-action" onclick="showPage('reviews')">详情 →</div>
+        <div class="card-title">最新动态</div>
+        <div class="card-action" onclick="showPage('product')">查看全部 →</div>
       </div>
-      <div style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="font-size:27px;font-weight:600;color:var(--text);font-family:var(--display)">offline</span>
-<span style="font-size:23px;font-weight:400;color:var(--muted);font-family:var(--display)">export</span>
-<span style="font-size:21px;font-weight:400;color:var(--accent2);font-family:var(--display)">dark</span>
-<span style="font-size:19px;font-weight:400;color:var(--warn);font-family:var(--display)">multi-account</span>
-<span style="font-size:17px;font-weight:400;color:var(--accent);font-family:var(--display)">api</span>
-<span style="font-size:15px;font-weight:400;color:var(--danger);font-family:var(--display)">batch</span>
-<span style="font-size:14px;font-weight:400;color:var(--text);font-family:var(--display)">collaboration</span>
-<span style="font-size:14px;font-weight:400;color:var(--muted);font-family:var(--display)">report</span>
-<span style="font-size:13px;font-weight:400;color:var(--accent2);font-family:var(--display)">notification</span>
-<span style="font-size:12px;font-weight:400;color:var(--warn);font-family:var(--display)">sync</span>
-<span style="font-size:12px;font-weight:400;color:var(--accent);font-family:var(--display)">widget</span>
-<span style="font-size:11px;font-weight:400;color:var(--danger);font-family:var(--display)">customize</span>
-</div><div style="padding:0 20px 16px;font-size:11px;color:var(--muted);font-family:var(--mono)">字号越大 = 提及越多 · 共 138 次有效提及</div>
+      <div class="feed-item" onclick="openModal('feature')">
+        <div class="feed-meta">
+          <span class="feed-source" style="color:#7b6ef6">SofaScore</span>
+          <span class="feed-type ft-bug">用户反馈</span>
+        </div>
+        <div class="feed-title">新增 3 条用户评论，其中 3 条为低星评论</div>
+        <div class="feed-desc">版本 N/A</div>
+        <div class="feed-time">今天</div>
+        <div class="feed-signal">
+          <div class="signal-dot" style="background:var(--accent2)"></div>
+          <span style="color:var(--accent2);font-size:11px;font-family:var(--mono)">机会 · 可承接</span>
+        </div>
+      </div>
     </div>
-
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">高频需求词</div>
+          <div class="card-action" onclick="showPage('reviews')">详情 →</div>
+        </div>
+        <div style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <span style="font-size:27px;font-weight:600;color:var(--text);font-family:var(--display)">offline</span>
+          <span style="font-size:23px;font-weight:400;color:var(--muted);font-family:var(--display)">export</span>
+          <span style="font-size:21px;font-weight:400;color:var(--accent2);font-family:var(--display)">dark</span>
+          <span style="font-size:19px;font-weight:400;color:var(--warn);font-family:var(--display)">multi-account</span>
+          <span style="font-size:17px;font-weight:400;color:var(--accent);font-family:var(--display)">api</span>
+          <span style="font-size:15px;font-weight:400;color:var(--danger);font-family:var(--display)">batch</span>
+          <span style="font-size:14px;font-weight:400;color:var(--text);font-family:var(--display)">collaboration</span>
+          <span style="font-size:14px;font-weight:400;color:var(--muted);font-family:var(--display)">report</span>
+          <span style="font-size:13px;font-weight:400;color:var(--accent2);font-family:var(--display)">notification</span>
+          <span style="font-size:12px;font-weight:400;color:var(--warn);font-family:var(--display)">sync</span>
+          <span style="font-size:12px;font-weight:400;color:var(--accent);font-family:var(--display)">widget</span>
+          <span style="font-size:11px;font-weight:400;color:var(--danger);font-family:var(--display)">customize</span>
+        </div>
+        <div style="padding:0 20px 16px;font-size:11px;color:var(--muted);font-family:var(--mono)">字号越大 = 提及越多 · 共 138 次有效提及</div>
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- RANKING CHART -->
-<div class="card full-card">
-  <div class="card-head">
-    <div class="card-title">App Store 排名趋势 · 历史记录</div>
-    <div class="card-action" onclick="showPage('ranking')">查看详情 →</div>
-  </div>
-  
+<!-- BLOCK: chart -->
+<div class="drag-block" draggable="true" data-id="chart">
+  <div class="drag-handle" title="拖拽移动">⠿</div>
+  <div class="card" style="margin:0">
+    <div class="card-head">
+      <div class="card-title">App Store 排名趋势 · 历史记录</div>
+      <div class="card-action" onclick="showPage('ranking')">查看详情 →</div>
+    </div>
     <div style="padding:8px 20px 4px;display:flex;gap:20px;flex-wrap:wrap">
       <span style="font-size:11px;font-family:var(--mono);color:#7b6ef6">● Fotmob</span>
-<span style="font-size:11px;font-family:var(--mono);color:#4ecca3">● SofaScore</span>
-
+      <span style="font-size:11px;font-family:var(--mono);color:#4ecca3">● SofaScore</span>
     </div>
     <div style="padding:0 20px 20px">
       <svg viewBox="0 0 640 140" style="width:100%;height:140px">
         <line x1="35" y1="20.0" x2="625" y2="20.0" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-<line x1="35" y1="42.4" x2="625" y2="42.4" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-<line x1="35" y1="64.7" x2="625" y2="64.7" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-<line x1="35" y1="87.1" x2="625" y2="87.1" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-<line x1="35" y1="109.4" x2="625" y2="109.4" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
-
+        <line x1="35" y1="42.4" x2="625" y2="42.4" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        <line x1="35" y1="64.7" x2="625" y2="64.7" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        <line x1="35" y1="87.1" x2="625" y2="87.1" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        <line x1="35" y1="109.4" x2="625" y2="109.4" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
         <text x="30" y="23.0" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#51</text>
-<text x="30" y="45.4" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#63</text>
-<text x="30" y="67.7" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#75</text>
-<text x="30" y="90.1" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#87</text>
-<text x="30" y="112.4" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#99</text>
-
+        <text x="30" y="45.4" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#63</text>
+        <text x="30" y="67.7" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#75</text>
+        <text x="30" y="90.1" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#87</text>
+        <text x="30" y="112.4" fill="rgba(255,255,255,0.2)" font-size="9" font-family="monospace" text-anchor="end">#99</text>
         <path d="M35.0,29.3 L330.0,98.2 L625.0,98.2" fill="none" stroke="#7b6ef6" stroke-width="2" stroke-linecap="round"/>
-<path d="M35.0,72.2 L625.0,105.7" fill="none" stroke="#4ecca3" stroke-width="2" stroke-linecap="round"/>
-
+        <path d="M35.0,72.2 L625.0,105.7" fill="none" stroke="#4ecca3" stroke-width="2" stroke-linecap="round"/>
         <text x="35.0" y="135" fill="rgba(255,255,255,0.3)" font-size="9" font-family="monospace" text-anchor="middle">04-23</text>
-<text x="330.0" y="135" fill="rgba(255,255,255,0.3)" font-size="9" font-family="monospace" text-anchor="middle">04-24</text>
-<text x="625.0" y="135" fill="rgba(255,255,255,0.3)" font-size="9" font-family="monospace" text-anchor="middle">04-25</text>
-
+        <text x="330.0" y="135" fill="rgba(255,255,255,0.3)" font-size="9" font-family="monospace" text-anchor="middle">04-24</text>
+        <text x="625.0" y="135" fill="rgba(255,255,255,0.3)" font-size="9" font-family="monospace" text-anchor="middle">04-25</text>
       </svg>
     </div>
-    
+  </div>
 </div>
 
+</div><!-- end overview-grid -->
 </div><!-- end overview -->
 
 <!-- PAGE: ALERTS -->
@@ -3024,6 +3037,47 @@ function markdownToHtml(md) {
   html = html.replace(/<p[^>]*><\/p>/g, '');
   return html;
 }
+
+// ── Drag & Drop 卡片重排 ──────────────────────────────────────
+(function() {
+  var dragging = null;
+
+  function initDrag() {
+    var grid = document.getElementById('overview-grid');
+    if (!grid) return;
+    grid.querySelectorAll('.drag-block').forEach(function(block) {
+      block.addEventListener('dragstart', function(e) {
+        dragging = block;
+        setTimeout(function() { block.classList.add('dragging'); }, 0);
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      block.addEventListener('dragend', function() {
+        block.classList.remove('dragging');
+        grid.querySelectorAll('.drag-block').forEach(function(b) { b.classList.remove('drag-over'); });
+        dragging = null;
+      });
+      block.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        if (block !== dragging) block.classList.add('drag-over');
+      });
+      block.addEventListener('dragleave', function() {
+        block.classList.remove('drag-over');
+      });
+      block.addEventListener('drop', function(e) {
+        e.preventDefault();
+        block.classList.remove('drag-over');
+        if (!dragging || dragging === block) return;
+        var blocks = Array.from(grid.querySelectorAll('.drag-block'));
+        var fromIdx = blocks.indexOf(dragging);
+        var toIdx = blocks.indexOf(block);
+        if (fromIdx < toIdx) grid.insertBefore(dragging, block.nextSibling);
+        else grid.insertBefore(dragging, block);
+      });
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', initDrag);
+})();
 </script>
 
 </body>
