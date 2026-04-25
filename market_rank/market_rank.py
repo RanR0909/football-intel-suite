@@ -49,7 +49,7 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent          # Football_Intel_Suite/
 DATA_DIR = _PROJECT_ROOT / "data"           # 统一数据输出目录
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from competitors import get_market_rank_competitors
+from competitors import get_market_rank_competitors, load_competitors
 
 RANKING_HISTORY_PATH = DATA_DIR / "ranking_history.json"
 
@@ -68,6 +68,34 @@ NEW_CONTENDER_RISE_THRESHOLD = 10  # 过去7天内排名上升至少10位才视�
 NEW_CONTENDER_LOOKBACK_DAYS = 7  # 回溯天数
 
 COMPETITORS: dict[str, dict[str, str | int]] = get_market_rank_competitors()
+BASELINE_APP = "AllFootball"
+BASELINE_LABEL = "All Football"
+BASELINE_DEFAULT_CONFIG = {
+    "name": BASELINE_APP,
+    "gp": "com.allfootball.news",
+    "ios": 1171012600,
+    "app_id": "1171012600",
+    "bundle_id": "com.allfootball.news",
+}
+BASELINE_METRICS = [
+    "rank",
+    "downloads",
+    "rating_count",
+    "rating_growth",
+    "review_count",
+    "sentiment_score",
+    "update_frequency",
+    "revenue_proxy",
+]
+POSITIVE_METRICS = {
+    "downloads",
+    "rating_count",
+    "rating_growth",
+    "review_count",
+    "sentiment_score",
+    "update_frequency",
+    "revenue_proxy",
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -517,6 +545,125 @@ def save_market_csv(records: list[dict]) -> Path:
     return MARKET_HISTORY_PATH
 
 
+def get_market_rank_targets() -> dict[str, dict]:
+    """Return core competitors plus the All Football baseline target."""
+    registry = load_competitors()
+    targets = dict(registry)
+    baseline_entry = registry.get(BASELINE_APP) or registry.get(BASELINE_LABEL) or {}
+    merged = dict(BASELINE_DEFAULT_CONFIG)
+    merged.update({k: v for k, v in baseline_entry.items() if v not in ("", None)})
+    targets[BASELINE_APP] = merged
+    return targets
+
+
+def _extract_rating_count(record: dict) -> Optional[float]:
+    raw = record.get("_raw", {})
+    st_data = raw.get("sensor_tower", {}) if isinstance(raw, dict) else {}
+    ar = raw.get("androidrank", {}) if isinstance(raw, dict) else {}
+    store = raw.get("store", {}) if isinstance(raw, dict) else {}
+    gp = store.get("gp", {}) if isinstance(store, dict) else {}
+    ios = store.get("ios", {}) if isinstance(store, dict) else {}
+    for value in (
+        st_data.get("rating_count"),
+        ar.get("total_ratings"),
+        gp.get("ratings"),
+        ios.get("ratings"),
+    ):
+        if value is not None:
+            return value
+    return None
+
+
+def _extract_review_count(record: dict) -> Optional[float]:
+    raw = record.get("_raw", {})
+    store = raw.get("store", {}) if isinstance(raw, dict) else {}
+    gp = store.get("gp", {}) if isinstance(store, dict) else {}
+    return gp.get("reviews_count")
+
+
+def _normalize_metrics(record: dict) -> dict:
+    return {
+        "rank": record.get("rank"),
+        "downloads": record.get("download_proxy"),
+        "rating_count": _extract_rating_count(record),
+        "rating_growth": record.get("rating_growth"),
+        "review_count": _extract_review_count(record),
+        "sentiment_score": record.get("sentiment_score"),
+        "update_frequency": record.get("update_frequency"),
+        "revenue_proxy": record.get("revenue_proxy"),
+    }
+
+
+def _compute_metric_delta(metric: str, competitor_value, baseline_value):
+    if competitor_value is None:
+        return None
+    if metric == "rank":
+        if baseline_value is None:
+            return None
+        return competitor_value - baseline_value
+    if baseline_value is None:
+        return None
+    return competitor_value - baseline_value
+
+
+def _compute_metric_ratio(metric: str, competitor_value, baseline_value):
+    if competitor_value is None:
+        return None
+    if metric == "rank":
+        if competitor_value == 0 or baseline_value in (None, 0):
+            return None
+        return baseline_value / competitor_value
+    if baseline_value in (None, 0):
+        return None
+    return competitor_value / baseline_value
+
+
+def compute_baseline_comparison(all_data: list[dict]) -> dict[str, dict]:
+    """
+    Build All Football baseline comparison records with:
+    {app, metrics, baseline, comparison:{delta, ratio}}
+    """
+    metrics_by_app = {
+        record["app"]: _normalize_metrics(record)
+        for record in all_data
+        if record.get("app")
+    }
+    baseline_metrics = metrics_by_app.get(BASELINE_APP, {metric: None for metric in BASELINE_METRICS})
+    result = {}
+
+    for record in all_data:
+        app_name = record.get("app")
+        if not app_name:
+            continue
+        metrics = metrics_by_app.get(app_name, {})
+        delta = {}
+        ratio = {}
+        for metric in BASELINE_METRICS:
+            current_value = metrics.get(metric)
+            baseline_value = baseline_metrics.get(metric)
+            if app_name == BASELINE_APP:
+                delta[metric] = 0
+                ratio[metric] = 1
+            elif current_value is None:
+                delta[metric] = None
+                ratio[metric] = None
+            else:
+                delta[metric] = _compute_metric_delta(metric, current_value, baseline_value)
+                ratio[metric] = _compute_metric_ratio(metric, current_value, baseline_value)
+
+        result[app_name] = {
+            "app": app_name,
+            "metrics": {metric: metrics.get(metric) for metric in BASELINE_METRICS},
+            "baseline": {metric: baseline_metrics.get(metric) for metric in BASELINE_METRICS},
+            "comparison": {
+                "delta": delta,
+                "ratio": ratio,
+            },
+        }
+
+    return result
+
+
 def build_known_apps() -> dict[str, dict[str, str | int]]:
     """Load all configured competitors from the shared registry."""
     return get_market_rank_competitors()
@@ -820,6 +967,23 @@ def export_json(today_ranking: list[dict], history: dict, known_apps: dict,
 
     if multi_source_data:
         data["multi_source"] = multi_source_data
+        data["baseline_app"] = BASELINE_APP
+        data["baseline_label"] = BASELINE_LABEL
+        data["baseline_comparison"] = compute_baseline_comparison(
+            [
+                {
+                    "app": app_name,
+                    "rank": ms.get("metrics", {}).get("rank"),
+                    "download_proxy": ms.get("metrics", {}).get("downloads"),
+                    "rating_growth": ms.get("metrics", {}).get("rating_growth"),
+                    "revenue_proxy": ms.get("metrics", {}).get("revenue_proxy"),
+                    "sentiment_score": ms.get("metrics", {}).get("sentiment_score"),
+                    "update_frequency": ms.get("metrics", {}).get("update_frequency"),
+                    "_raw": ms.get("_raw", {}),
+                }
+                for app_name, ms in multi_source_data.items()
+            ]
+        )
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1126,16 +1290,29 @@ else:
 
 # Export JSON for dashboard (with multi-source data)
 with st.spinner("Collecting multi-source data..."):
-    records = aggregate_market_data(COMPETITORS)
+    records = aggregate_market_data(get_market_rank_targets())
     save_market_csv(records)
-    multi_source_data = {rec["app"]: {
-        "rank": rec.get("rank"),
-        "download_proxy": rec.get("download_proxy"),
-        "rating_growth": rec.get("rating_growth"),
-        "revenue_proxy": rec.get("revenue_proxy"),
-        "sentiment_score": rec.get("sentiment_score"),
-        "update_frequency": rec.get("update_frequency"),
-        "timestamp": rec.get("timestamp"),
-        "_raw": rec.get("_raw", {}),
-    } for rec in records}
+    multi_source_data = {}
+    for rec in records:
+        raw = rec.get("_raw", {})
+        st_data = raw.get("sensor_tower", {}) if isinstance(raw, dict) else {}
+        ar = raw.get("androidrank", {}) if isinstance(raw, dict) else {}
+        store = raw.get("store", {}) if isinstance(raw, dict) else {}
+        gp = store.get("gp", {}) if isinstance(store, dict) else {}
+        ios = store.get("ios", {}) if isinstance(store, dict) else {}
+        multi_source_data[rec["app"]] = {
+            "app": rec["app"],
+            "metrics": {
+                "rank": rec.get("rank"),
+                "downloads": rec.get("download_proxy"),
+                "rating_count": st_data.get("rating_count") or ar.get("total_ratings") or gp.get("ratings") or ios.get("ratings"),
+                "rating_growth": rec.get("rating_growth"),
+                "review_count": gp.get("reviews_count"),
+                "sentiment_score": rec.get("sentiment_score"),
+                "update_frequency": rec.get("update_frequency"),
+                "revenue_proxy": rec.get("revenue_proxy"),
+            },
+            "timestamp": rec.get("timestamp"),
+            "_raw": rec.get("_raw", {}),
+        }
 export_json(today_ranking, history, known_apps, new_contenders, fast_movers, ai_brief if 'ai_brief' in locals() else None, multi_source_data)

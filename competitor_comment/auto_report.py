@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """auto_report.py — 多竞品 × 多地区 滚动评论监测 (Claude API)"""
-import os, json, re, urllib.request, ssl, sys
+import os, json, re, urllib.request, ssl, sys, time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from collections import Counter
@@ -30,28 +30,36 @@ CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # 快速模型
 
 
-def call_claude(prompt, max_tokens=4096):
+def call_claude(prompt, max_tokens=4096, timeout=60, retries=3):
     """调用 Anthropic Native 格式的 Claude API"""
-    data = json.dumps({
-        "model": CLAUDE_MODEL,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}]
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        CLAUDE_API_URL,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": CLAUDE_API_KEY,
-            "anthropic-version": "2023-06-01",
-        }
-    )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
-        result = json.loads(resp.read())
-    return result["content"][0]["text"]
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            data = json.dumps({
+                "model": CLAUDE_MODEL,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}]
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                }
+            )
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                result = json.loads(resp.read())
+            return result["content"][0]["text"]
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries:
+                time.sleep(min(attempt * 2, 6))
+    raise last_error
 
 
 def translate_to_english(rows):
@@ -100,9 +108,12 @@ def fetch_ios(app_id, country):
         except Exception:
             break
         entries = data.get("feed", {}).get("entry", [])
-        if not entries:
+        if isinstance(entries, dict):
+            entries = [entries]
+        if not isinstance(entries, list) or not entries:
             break
-        for e in entries[1:]:
+        start_idx = 1 if entries and isinstance(entries[0], dict) and "im:name" in entries[0] else 0
+        for e in entries[start_idx:]:
             score = int(e.get("im:rating", {}).get("label", 5))
             rows.append({
                 "score": score,
@@ -116,20 +127,29 @@ def fetch_ios(app_id, country):
 def label(rows):
     """使用 Claude 对评论打标"""
     id_map = {str(i): r["content"] for i, r in enumerate(rows)}
-    resp_text = call_claude(build_label_prompt(id_map, CATEGORIES))
-    raw = resp_text.strip()
-    if "```" in raw:
-        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
-    mapping = json.loads(raw)
-    for i, r in enumerate(rows):
-        r["label"] = mapping.get(str(i), "[其他]")
+    try:
+        resp_text = call_claude(build_label_prompt(id_map, CATEGORIES))
+        raw = resp_text.strip()
+        if "```" in raw:
+            raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
+        mapping = json.loads(raw)
+        for i, r in enumerate(rows):
+            r["label"] = mapping.get(str(i), "[其他]")
+    except Exception as exc:
+        print(f"  [AI] 打标失败，降级为默认标签: {exc}")
+        for r in rows:
+            r["label"] = "[其他]"
     return rows
 
 
 def summarize(rows, app_name, region):
     """使用 Claude 生成分析摘要"""
     prompt = build_daily_summary_prompt(app_name, region, CUTOFF_DAYS, rows, list(COMPETITORS.keys()))
-    return call_claude(prompt)
+    try:
+        return call_claude(prompt)
+    except Exception as exc:
+        print(f"  [AI] 摘要失败，写入降级说明: {exc}")
+        return f"AI 分析失败：{exc}"
 
 
 def export_json(all_data):
@@ -146,27 +166,20 @@ def main():
         print("错误: 未设置 CLAUDE_API_KEY 环境变量。")
         return
 
-    REPORTS_DIR.mkdir(exist_ok=True)
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    lines = [f"# 竞品滚动评论监测 ({date_str})\n"]
-
     all_data = {
         "generated_at": datetime.now().isoformat(),
-        "date": date_str,
+        "date": datetime.now().strftime("%Y-%m-%d"),
         "competitors": {}
     }
 
     for app_name, comp in COMPETITORS.items():
-        lines.append(f"## {app_name}\n")
         app_data = {"regions": {}}
-
         for region in REGIONS:
             print(f"[{app_name}/{region}] 抓取...")
             gp_rows = fetch(comp["gp"], region)
             ios_rows = fetch_ios(comp["ios"], region)
             rows = gp_rows + ios_rows
             if not rows:
-                lines.append(f"### {region.upper()}\n\n> 过去{CUTOFF_DAYS}天无评论数据。\n")
                 app_data["regions"][region] = {"count": 0, "negative_count": 0, "labels": {}, "summary": "", "reviews": []}
                 continue
             if REGION_INFO.get(region, {}).get("lang", "en") != "en":
@@ -174,28 +187,19 @@ def main():
                 rows = translate_to_english(rows)
             print(f"  {len(rows)} 条，打标...")
             rows = label(rows)
-            print(f"  生成报告...")
-            summary = summarize(rows, app_name, region)
-            lines.append(f"### {region.upper()} ({len(rows)} 条)\n\n{summary}\n")
-
             label_dist = dict(Counter(r["label"] for r in rows))
             negative_count = sum(1 for r in rows if r["score"] <= 3)
             app_data["regions"][region] = {
                 "count": len(rows),
                 "negative_count": negative_count,
                 "labels": label_dist,
-                "summary": summary,
+                "summary": "",
                 "reviews": [
                     {"score": r["score"], "version": r["version"], "label": r["label"], "content": r["content"]}
                     for r in rows
                 ]
             }
-
         all_data["competitors"][app_name] = app_data
-
-    report_path = REPORTS_DIR / f"daily_{date_str}.md"
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"\n报告已保存：{report_path}")
 
     export_json(all_data)
 

@@ -19,8 +19,9 @@ from market_rank import (
     save_ranking_history, get_today_key, get_yesterday_key,
     compute_delta, is_known_app, get_competitor_rank,
     detect_new_contenders, detect_fast_movers, generate_ai_market_brief,
-    aggregate_market_data, save_market_csv,
-    COMPETITORS, DATA_DIR,
+    aggregate_market_data, save_market_csv, compute_baseline_comparison,
+    get_market_rank_targets,
+    COMPETITORS, DATA_DIR, BASELINE_APP, BASELINE_LABEL,
 )
 
 
@@ -85,6 +86,23 @@ def export_json(today_ranking: list[dict], history: dict, known_apps: dict,
 
     if multi_source_data:
         data["multi_source"] = multi_source_data
+        data["baseline_app"] = BASELINE_APP
+        data["baseline_label"] = BASELINE_LABEL
+        data["baseline_comparison"] = compute_baseline_comparison(
+            [
+                {
+                    "app": app_name,
+                    "rank": ms.get("metrics", {}).get("rank"),
+                    "download_proxy": ms.get("metrics", {}).get("downloads"),
+                    "rating_growth": ms.get("metrics", {}).get("rating_growth"),
+                    "revenue_proxy": ms.get("metrics", {}).get("revenue_proxy"),
+                    "sentiment_score": ms.get("metrics", {}).get("sentiment_score"),
+                    "update_frequency": ms.get("metrics", {}).get("update_frequency"),
+                    "_raw": ms.get("_raw", {}),
+                }
+                for app_name, ms in multi_source_data.items()
+            ]
+        )
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -126,7 +144,7 @@ def main():
 
     # Multi-source data collection (Androidrank + Sensor Tower + Store + Reddit)
     print("\n[多源数据] 抓取竞品详细数据...")
-    records = aggregate_market_data(COMPETITORS)
+    records = aggregate_market_data(get_market_rank_targets())
     print(f"[多源数据] 完成，覆盖 {len(records)} 个竞品")
 
     # Save to CSV for historical trend analysis
@@ -136,13 +154,32 @@ def main():
     multi_source_data = {}
     for rec in records:
         name = rec["app"]
-        multi_source_data[name] = {
+        metrics = {
             "rank": rec.get("rank"),
-            "download_proxy": rec.get("download_proxy"),
+            "downloads": rec.get("download_proxy"),
+            "rating_count": None,
             "rating_growth": rec.get("rating_growth"),
-            "revenue_proxy": rec.get("revenue_proxy"),
+            "review_count": None,
             "sentiment_score": rec.get("sentiment_score"),
             "update_frequency": rec.get("update_frequency"),
+            "revenue_proxy": rec.get("revenue_proxy"),
+        }
+        raw = rec.get("_raw", {})
+        st_data = raw.get("sensor_tower", {}) if isinstance(raw, dict) else {}
+        ar = raw.get("androidrank", {}) if isinstance(raw, dict) else {}
+        store = raw.get("store", {}) if isinstance(raw, dict) else {}
+        gp = store.get("gp", {}) if isinstance(store, dict) else {}
+        ios = store.get("ios", {}) if isinstance(store, dict) else {}
+        metrics["rating_count"] = (
+            st_data.get("rating_count")
+            or ar.get("total_ratings")
+            or gp.get("ratings")
+            or ios.get("ratings")
+        )
+        metrics["review_count"] = gp.get("reviews_count")
+        multi_source_data[name] = {
+            "app": name,
+            "metrics": metrics,
             "timestamp": rec.get("timestamp"),
             "_raw": rec.get("_raw", {}),
         }

@@ -103,9 +103,12 @@ def fetch_ios(app_id, country, cutoff_dt):
         except Exception:
             break
         entries = data.get("feed", {}).get("entry", [])
-        if not entries:
+        if isinstance(entries, dict):
+            entries = [entries]
+        if not isinstance(entries, list) or not entries:
             break
-        for e in entries[1:]:
+        start_idx = 1 if entries and isinstance(entries[0], dict) and "im:name" in entries[0] else 0
+        for e in entries[start_idx:]:
             content = e.get("content", {}).get("label", "")
             score = int(e.get("im:rating", {}).get("label", 5))
             rows.append({

@@ -460,6 +460,7 @@ body::before {
     </div>
     <!-- RANK_TABLE_PLACEHOLDER -->
   </div>
+  <!-- BASELINE_COMPARISON_PLACEHOLDER -->
   <!-- MULTI_SOURCE_RANK_PLACEHOLDER -->
 </div>
 
@@ -1248,13 +1249,30 @@ function syncAllData() {
   function runNext() {
     if (idx >= scripts.length) {
       // 所有脚本运行完毕，生成看板
-      runScript('generate_dashboard', function() {
+      runScript('generate_dashboard', function(result) {
+        if (!result || !result.success) {
+          if (btn) { btn.textContent = '🔄 同步数据'; btn.disabled = false; }
+          alert('看板生成失败：' + ((result && result.message) || '未知错误'));
+          return;
+        }
         if (btn) { btn.textContent = '✅ 已同步'; btn.disabled = false; }
         setTimeout(function() { location.reload(); }, 1000);
       });
       return;
     }
-    runScript(scripts[idx], function() {
+    runScript(scripts[idx], function(result) {
+      if (!result || !result.success) {
+        if (btn) { btn.textContent = '🔄 同步数据'; btn.disabled = false; }
+        alert('同步失败：' + ((result && result.label) || scripts[idx]) + '\n' + ((result && result.message) || '未知错误'));
+        return;
+      }
+      if (scripts[idx] === 'daily_report') {
+        refreshReviewData(function() {
+          idx++;
+          runNext();
+        });
+        return;
+      }
       idx++;
       runNext();
     });
@@ -1265,6 +1283,12 @@ function syncAllData() {
 
 // ====== 运行后端脚本 ======
 function _apiKey() { return document.getElementById('claude-api-key').value.trim(); }
+function _taskTimeoutMs(scriptName) {
+  if (scriptName === 'daily_report') return 610000;
+  if (scriptName === 'weekly_review') return 610000;
+  if (scriptName === 'competitor_detail') return 610000;
+  return 180000;
+}
 function runScript(scriptName, callback) {
   var url = API_BASE + '/api/run?script=' + encodeURIComponent(scriptName) + '&api_key=' + encodeURIComponent(_apiKey());
   fetch(url)
@@ -1272,22 +1296,30 @@ function runScript(scriptName, callback) {
     .then(function(data) {
       if (data.status === 'started') {
         // 轮询等待完成
-        pollTaskStatus(scriptName, callback);
+        pollTaskStatus(scriptName, callback, _taskTimeoutMs(scriptName));
       } else {
         console.error('启动失败:', data.message);
-        if (callback) callback();
+        if (callback) callback({
+          success: false,
+          label: scriptName,
+          message: data.message || '启动失败',
+        });
       }
     })
     .catch(function(err) {
       console.error('请求失败:', err);
-      if (callback) callback();
+      if (callback) callback({
+        success: false,
+        label: scriptName,
+        message: err.message || '请求失败',
+      });
     });
 }
 
 // ====== 轮询任务状态 ======
-function pollTaskStatus(scriptName, callback) {
-  var maxAttempts = 120; // 最多等 2 分钟
-  var attempt = 0;
+function pollTaskStatus(scriptName, callback, timeoutMs) {
+  var startedAt = Date.now();
+  var maxWait = timeoutMs || 180000;
 
   function check() {
     fetch(API_BASE + '/api/status')
@@ -1295,23 +1327,87 @@ function pollTaskStatus(scriptName, callback) {
       .then(function(data) {
         var task = data.tasks && data.tasks[scriptName];
         if (!task || !task.running) {
-          // 任务完成
-          if (callback) callback();
+          if (!task) {
+            if (callback) callback({
+              success: false,
+              label: scriptName,
+              message: '任务状态丢失',
+            });
+            return;
+          }
+          if (callback) callback({
+            success: !!task.success,
+            label: task.label || scriptName,
+            message: task.output || '',
+            task: task,
+          });
           return;
         }
-        attempt++;
-        if (attempt >= maxAttempts) {
-          if (callback) callback();
+        if (Date.now() - startedAt >= maxWait) {
+          if (callback) callback({
+            success: false,
+            label: task.label || scriptName,
+            message: '前端等待超时，请稍后查看任务状态',
+            task: task,
+          });
           return;
         }
         setTimeout(check, 1000);
       })
-      .catch(function() {
-        if (callback) callback();
+      .catch(function(err) {
+        if (callback) callback({
+          success: false,
+          label: scriptName,
+          message: (err && err.message) || '轮询任务状态失败',
+        });
       });
   }
 
   setTimeout(check, 2000);
+}
+
+function buildReviewDataFromComments(commentApiData) {
+  var result = {};
+  var competitors = (commentApiData && commentApiData.competitors) || {};
+  Object.keys(competitors).forEach(function(compName) {
+    var compInfo = competitors[compName] || {};
+    var regions = compInfo.regions || {};
+    var reviews = [];
+    var summary = '';
+    Object.keys(regions).forEach(function(regionCode) {
+      var regionData = regions[regionCode] || {};
+      (regionData.reviews || []).forEach(function(review) {
+        reviews.push({
+          score: review.score || 0,
+          version: review.version || '',
+          label: review.label || '',
+          content: review.content || ''
+        });
+      });
+      if (regionData.summary) {
+        summary += '\n\n--- ' + regionCode.toUpperCase() + ' 区分析 ---\n\n' + regionData.summary;
+      }
+    });
+    if (reviews.length > 0) {
+      result[compName] = {
+        summary: summary.trim(),
+        reviews: reviews
+      };
+    }
+  });
+  return result;
+}
+
+function refreshReviewData(callback) {
+  fetch(API_BASE + '/api/data/competitor_comments?ts=' + Date.now(), { cache: 'no-store' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      REVIEW_DATA = buildReviewDataFromComments(data);
+      if (callback) callback({ success: true, data: data });
+    })
+    .catch(function(err) {
+      if (callback) callback({ success: false, message: err.message || '评论数据刷新失败' });
+    });
 }
 
 // ====== 运行深度分析（通过后端 API） ======
@@ -1337,7 +1433,15 @@ function runDetailAnalysis() {
     .then(function(data) {
       if (data.status === 'started') {
         // 轮询等待完成
-        pollTaskStatus('competitor_detail', function() {
+        pollTaskStatus('competitor_detail', function(result) {
+          if (!result || !result.success) {
+            _detailBatchStatus[name] = 'error';
+            renderDetailBatchStatus();
+            alert('分析失败: ' + ((result && result.message) || '未知错误'));
+            btn.textContent = '运行分析 →';
+            btn.disabled = false;
+            return;
+          }
           // 完成后刷新数据
           refreshCompetitorDetail(name, function() {
             _detailBatchStatus[name] = 'done';
@@ -1407,7 +1511,13 @@ function runAllCompetitorDetails() {
           runNext(index + 1);
           return;
         }
-        pollTaskStatus('competitor_detail', function() {
+        pollTaskStatus('competitor_detail', function(result) {
+          if (!result || !result.success) {
+            _detailBatchStatus[name] = 'error';
+            renderDetailBatchStatus();
+            runNext(index + 1);
+            return;
+          }
           refreshCompetitorDetail(name, function() {
             _detailBatchStatus[name] = 'done';
             renderDetailBatchStatus();
@@ -1427,7 +1537,7 @@ function runAllCompetitorDetails() {
 }
 
 function refreshAllCompetitorDetails(callback) {
-  fetch(API_BASE + '/api/data/competitor_detail')
+  fetch(API_BASE + '/api/data/competitor_detail?ts=' + Date.now(), { cache: 'no-store' })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data && typeof data === 'object') {
@@ -1514,7 +1624,12 @@ function runCommercialAnalysis() {
         btn.textContent = '运行分析'; btn.disabled = false;
         return;
       }
-      pollTaskStatus('commercial_strategy', function() {
+      pollTaskStatus('commercial_strategy', function(result) {
+        if (!result || !result.success) {
+          alert('商业策略分析失败: ' + ((result && result.message) || '未知错误'));
+          btn.textContent = '运行分析'; btn.disabled = false;
+          return;
+        }
         fetch(API_BASE + '/api/run?script=generate_dashboard&api_key=' + encodeURIComponent(_apiKey()))
           .finally(function() {
             btn.textContent = '运行分析'; btn.disabled = false;
@@ -1551,7 +1666,12 @@ function runCommercialWeekly() {
         btn.textContent = '生成周报'; btn.disabled = false;
         return;
       }
-      pollTaskStatus('commercial_weekly', function() {
+      pollTaskStatus('commercial_weekly', function(result) {
+        if (!result || !result.success) {
+          alert('商业策略周报失败: ' + ((result && result.message) || '未知错误'));
+          btn.textContent = '生成周报'; btn.disabled = false;
+          return;
+        }
         fetch(API_BASE + '/api/run?script=generate_dashboard&api_key=' + encodeURIComponent(_apiKey()))
           .finally(function() {
             btn.textContent = '生成周报'; btn.disabled = false;
@@ -1567,7 +1687,7 @@ function runCommercialWeekly() {
 
 // ====== 刷新竞品详情数据 ======
 function refreshCompetitorDetail(name, callback) {
-  fetch(API_BASE + '/api/data/competitor_detail?name=' + encodeURIComponent(name))
+  fetch(API_BASE + '/api/data/competitor_detail?name=' + encodeURIComponent(name) + '&ts=' + Date.now(), { cache: 'no-store' })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data && data.competitor) {
@@ -1600,10 +1720,18 @@ function runWeeklyReview() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.status === 'started') {
-        pollTaskStatus('weekly_review', function() {
+        pollTaskStatus('weekly_review', function(result) {
+          if (!result || !result.success) {
+            alert('周报生成失败: ' + ((result && result.message) || '未知错误'));
+            if (btn) { btn.textContent = '🔄 生成周报'; btn.disabled = false; }
+            return;
+          }
           // 完成后刷新周报数据
           refreshWeeklyReview(function() {
-            if (btn) { btn.textContent = '✅ 已生成'; btn.disabled = false; }
+            fetch(API_BASE + '/api/run?script=generate_dashboard&api_key=' + encodeURIComponent(_apiKey()))
+              .finally(function() {
+                if (btn) { btn.textContent = '✅ 已生成'; btn.disabled = false; }
+              });
           });
         });
       } else {
@@ -1619,7 +1747,7 @@ function runWeeklyReview() {
 
 // ====== 刷新周报数据 ======
 function refreshWeeklyReview(callback) {
-  fetch(API_BASE + '/api/data/weekly_review')
+  fetch(API_BASE + '/api/data/weekly_review?ts=' + Date.now(), { cache: 'no-store' })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data && data.summary) {

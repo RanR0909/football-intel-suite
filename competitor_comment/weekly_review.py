@@ -9,7 +9,7 @@ weekly_review.py — 竞品评论周报生成器
   python3 competitor_comment/weekly_review.py
 """
 
-import os, json, re, sys, urllib.request, ssl
+import os, json, re, sys, urllib.request, ssl, time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from collections import Counter
@@ -41,28 +41,36 @@ CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
 CLAUDE_MODEL = "claude-opus-4-6"  # 主模型
 
 
-def call_claude(prompt, max_tokens=8192):
+def call_claude(prompt, max_tokens=8192, timeout=120, retries=3):
     """调用 Anthropic Native 格式的 Claude API"""
-    data = json.dumps({
-        "model": CLAUDE_MODEL,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}]
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        CLAUDE_API_URL,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": CLAUDE_API_KEY,
-            "anthropic-version": "2023-06-01",
-        }
-    )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
-        result = json.loads(resp.read())
-    return result["content"][0]["text"]
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            data = json.dumps({
+                "model": CLAUDE_MODEL,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}]
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                }
+            )
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                result = json.loads(resp.read())
+            return result["content"][0]["text"]
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries:
+                time.sleep(min(attempt * 2, 6))
+    raise last_error
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -104,11 +112,21 @@ def fetch_ios(app_id, country, cutoff_dt):
         except Exception:
             break
         entries = data.get("feed", {}).get("entry", [])
-        if not entries:
+        if isinstance(entries, dict):
+            entries = [entries]
+        if not isinstance(entries, list) or not entries:
             break
-        for e in entries[1:]:
+        start_idx = 1 if entries and isinstance(entries[0], dict) and "im:name" in entries[0] else 0
+        for e in entries[start_idx:]:
             content = e.get("content", {}).get("label", "")
             score = int(e.get("im:rating", {}).get("label", 5))
+            updated = e.get("updated", {}).get("label", "")
+            try:
+                updated_at = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+            except Exception:
+                updated_at = None
+            if updated_at and updated_at < cutoff_dt:
+                continue
             rows.append({
                 "platform": "App Store",
                 "score": score,
@@ -362,8 +380,6 @@ def run_weekly_review(days=DEFAULT_DAYS):
                 r["competitor"] = comp_name
 
             region_rows = gp_rows + ios_rows
-            comp_reviews.extend(region_rows)
-
             if region_rows:
                 if REGIONS.get(region_code, {}).get("lang", "en") != "en":
                     print(f"    翻译为英文...")
@@ -372,6 +388,8 @@ def run_weekly_review(days=DEFAULT_DAYS):
                 label_dist = dict(Counter(r.get("label", "[其他]") for r in region_rows))
             else:
                 label_dist = {}
+
+            comp_reviews.extend(region_rows)
 
             regions_data[region_code] = {
                 "label": region_label,

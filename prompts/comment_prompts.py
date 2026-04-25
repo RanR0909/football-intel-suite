@@ -198,12 +198,12 @@ def build_weekly_report_prompt(
         )
     sample_text = "\n".join(sample_sections)
 
-    return f”””你是一名资深体育 App 产品经理，正在撰写《竞品评论周报》。
+    return f"""你是一名资深体育 App 产品经理，正在撰写《竞品评论周报》。
 
 分析周期：过去 {days} 天
 总评论数：{total_reviews} 条
-涉及竞品：{“, “.join(competitor_names)}
-涉及地区：{“, “.join(region_names)}
+涉及竞品：{", ".join(competitor_names)}
+涉及地区：{", ".join(region_names)}
 标签分布：{json.dumps(label_dist, ensure_ascii=False)}
 平台分布：{json.dumps(platform_dist, ensure_ascii=False)}
 地区分布：{json.dumps(region_dist, ensure_ascii=False)}
@@ -225,7 +225,7 @@ def build_weekly_report_prompt(
 
 二、各竞品分析摘要
 必须覆盖以下每一个竞品，不能遗漏，也不能编造名单外竞品：
-{“, “.join(competitor_names)}
+{", ".join(competitor_names)}
 对每个竞品给出：
 - 评论数量与评分分布趋势
 - Top 2 用户抱怨
@@ -237,7 +237,7 @@ def build_weekly_report_prompt(
 
 三、本地化专题分析（重点）
 - 必须覆盖以下每一个地区，不能遗漏，也不能编造名单外地区：
-{“, “.join(region_names)}
+{", ".join(region_names)}
 - 按地区分析本地化问题（翻译质量、本地联赛覆盖、地区特有功能需求）
 - 哪些地区对本地化抱怨最多？
 - 哪些地区用户满意度最高？原因是什么？
@@ -263,7 +263,7 @@ def build_weekly_report_prompt(
 - 如果发现某地区或某竞品样本明显不足，要明确标注”样本不足”
 
 评论样本：
-{sample_text}”””
+{sample_text}"""
 
 
 def build_localization_prompt(

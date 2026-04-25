@@ -607,6 +607,9 @@ def build_rank_trend_svg():
 # ---------------------------------------------------------------------------
 
 multi_source = market_data.get("multi_source", {}) if market_data else {}
+baseline_app = market_data.get("baseline_app", "AllFootball") if market_data else "AllFootball"
+baseline_label = market_data.get("baseline_label", "All Football") if market_data else "All Football"
+baseline_comparison = market_data.get("baseline_comparison", {}) if market_data else {}
 
 
 def _fmt_downloads(val):
@@ -649,6 +652,66 @@ def _fmt_rating_growth(val):
     return f'<span style="color:var(--muted)">0%</span>'
 
 
+def _metric_value(ms: dict, metric: str):
+    return (ms.get("metrics") or {}).get(metric)
+
+
+def _fmt_metric_value(metric: str, val):
+    if val is None:
+        return "—"
+    if metric == "rank":
+        return f"#{int(val)}"
+    if metric in {"downloads", "rating_count", "review_count"}:
+        return _fmt_downloads(val)
+    if metric == "revenue_proxy":
+        return _fmt_revenue(val)
+    if metric == "rating_growth":
+        return f"{val:+.2%}"
+    if metric == "sentiment_score":
+        return f"{val:+.2f}"
+    if metric == "update_frequency":
+        return f"{val:.0f}d"
+    return str(val)
+
+
+def _fmt_delta(metric: str, val):
+    if val is None:
+        return "—"
+    if metric == "rank":
+        return f"{val:+.0f}"
+    if metric in {"downloads", "rating_count", "review_count"}:
+        sign = "+" if val > 0 else "-"
+        return f"{sign}{_fmt_downloads(abs(val))}" if val != 0 else "0"
+    if metric == "revenue_proxy":
+        sign = "+" if val > 0 else "-"
+        return f"{sign}{_fmt_revenue(abs(val))}" if val != 0 else "$0"
+    if metric == "rating_growth":
+        return f"{val:+.2%}"
+    if metric == "sentiment_score":
+        return f"{val:+.2f}"
+    if metric == "update_frequency":
+        return f"{val:+.0f}d"
+    return f"{val:+.2f}"
+
+
+def _fmt_multiple(val):
+    if val is None:
+        return "—"
+    return f"{val:.1f}x"
+
+
+def _status_for_metric(metric: str, ratio):
+    if metric == "update_frequency":
+        return ("观察", "var(--muted)")
+    if ratio is None:
+        return ("样本不足", "var(--muted)")
+    if ratio > 1:
+        return ("领先", "var(--accent2)")
+    if ratio < 1:
+        return ("落后", "var(--danger)")
+    return ("持平", "var(--muted)")
+
+
 # ---------------------------------------------------------------------------
 # 构建排名表格 (含多源数据列)
 # ---------------------------------------------------------------------------
@@ -689,9 +752,9 @@ def build_rank_table():
                 ms = ms_data
                 break
 
-        dl_str = _fmt_downloads(ms.get("download_proxy")) if ms else "—"
-        sent_str = _fmt_sentiment(ms.get("sentiment_score")) if ms else "—"
-        rg_str = _fmt_rating_growth(ms.get("rating_growth")) if ms else "—"
+        dl_str = _fmt_downloads(_metric_value(ms, "downloads")) if ms else "—"
+        sent_str = _fmt_sentiment(_metric_value(ms, "sentiment_score")) if ms else "—"
+        rg_str = _fmt_rating_growth(_metric_value(ms, "rating_growth")) if ms else "—"
 
         rows += f"""
         <div class="rank-row" onclick="openModal('rank')">
@@ -721,7 +784,7 @@ def build_multi_source_rank_section():
         raw = ms.get("_raw", {})
         ar = raw.get("androidrank", {})
         st_data = raw.get("sensor_tower", {})
-        reddit = raw.get("reddit", )
+        reddit = raw.get("reddit", {})
 
         # Androidrank block
         ar_dl = ar.get("estimated_downloads")
@@ -763,7 +826,7 @@ def build_multi_source_rank_section():
 
         # Reddit block
         posts = reddit.get("posts", [])
-        sent = ms.get("sentiment_score")
+        sent = _metric_value(ms, "sentiment_score")
         sent_str = _fmt_sentiment(sent)
         posts_html = ""
         for p in posts[:5]:
@@ -802,17 +865,20 @@ def build_multi_source_revenue_section():
     rows = ""
     for comp_name, ms in multi_source.items():
         color = COMP_COLORS.get(comp_name, "var(--accent)")
-        rev_str = _fmt_revenue(ms.get("revenue_proxy"))
-        dl_str = _fmt_downloads(ms.get("download_proxy"))
-        rank_str = f"#{ms['rank']}" if ms.get("rank") else "—"
+        rev_str = _fmt_revenue(_metric_value(ms, "revenue_proxy"))
+        dl_str = _fmt_downloads(_metric_value(ms, "downloads"))
+        rank_val = _metric_value(ms, "rank")
+        rank_str = f"#{rank_val}" if rank_val else "—"
 
         raw = ms.get("_raw", {})
         st = raw.get("sensor_tower", {})
         countries = ", ".join(st.get("top_countries", [])[:3]) if st.get("top_countries") else "—"
 
         rpd = 0
-        if ms.get("revenue_proxy") and ms.get("download_proxy") and ms["download_proxy"] > 0:
-            rpd = ms["revenue_proxy"] / ms["download_proxy"] * 1000
+        revenue_proxy = _metric_value(ms, "revenue_proxy")
+        download_proxy = _metric_value(ms, "downloads")
+        if revenue_proxy and download_proxy and download_proxy > 0:
+            rpd = revenue_proxy / download_proxy * 1000
         rpd_str = f"${rpd:.2f}" if rpd > 0 else "—"
 
         rows += f"""
@@ -840,12 +906,70 @@ def build_multi_source_json():
     if not multi_source:
         return {}
     return {name: {
-        "revenue_proxy": d.get("revenue_proxy"),
-        "download_proxy": d.get("download_proxy"),
-        "rank": d.get("rank"),
-        "sentiment_score": d.get("sentiment_score"),
-        "rating_growth": d.get("rating_growth"),
+        "revenue_proxy": _metric_value(d, "revenue_proxy"),
+        "download_proxy": _metric_value(d, "downloads"),
+        "rank": _metric_value(d, "rank"),
+        "sentiment_score": _metric_value(d, "sentiment_score"),
+        "rating_growth": _metric_value(d, "rating_growth"),
     } for name, d in multi_source.items()}
+
+
+def build_baseline_comparison_section():
+    if not baseline_comparison:
+        return ""
+
+    metric_labels = {
+        "rank": "Rank",
+        "downloads": "Downloads",
+        "rating_count": "Rating Count",
+        "rating_growth": "Rating Growth",
+        "review_count": "Review Count",
+        "sentiment_score": "Sentiment",
+        "update_frequency": "Update Frequency",
+        "revenue_proxy": "Revenue Proxy",
+    }
+
+    header = f"""
+    <div class="card full-card" style="margin-top:16px">
+      <div class="card-head">
+        <div class="card-title">相对 {baseline_label} 表现</div>
+        <div class="card-action">Current · Baseline · Delta · Multiple</div>
+      </div>
+      <div style="display:grid;grid-template-columns:130px 120px 110px 110px 100px 90px 70px;padding:8px 20px;font-size:10px;font-family:var(--mono);color:var(--muted);border-bottom:1px solid var(--border)">
+        <span>App</span><span>Metric</span><span>Current</span><span>{baseline_label}</span><span>Delta</span><span>Multiple</span><span>Status</span>
+      </div>
+    """
+
+    rows = ""
+    for app_name, item in baseline_comparison.items():
+        if app_name == baseline_app:
+            continue
+        color = COMP_COLORS.get(app_name, "var(--accent)")
+        metrics = item.get("metrics", {})
+        baseline = item.get("baseline", {})
+        comparison = item.get("comparison", {})
+        deltas = comparison.get("delta", {})
+        ratios = comparison.get("ratio", {})
+        for metric, metric_label in metric_labels.items():
+            current_val = metrics.get(metric)
+            baseline_val = baseline.get(metric)
+            delta_val = deltas.get(metric)
+            ratio_val = ratios.get(metric)
+            status_text, status_color = _status_for_metric(metric, ratio_val)
+            ratio_color = status_color if ratio_val is not None else "var(--muted)"
+            rows += f"""
+            <div style="display:grid;grid-template-columns:130px 120px 110px 110px 100px 90px 70px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--border);font-size:12px">
+              <span style="font-weight:600;color:{color}">{app_name}</span>
+              <span style="color:var(--muted)">{metric_label}</span>
+              <span>{_fmt_metric_value(metric, current_val)}</span>
+              <span>{_fmt_metric_value(metric, baseline_val)}</span>
+              <span>{_fmt_delta(metric, delta_val)}</span>
+              <span style="color:{ratio_color};font-family:var(--mono)">{_fmt_multiple(ratio_val)}</span>
+              <span style="color:{status_color}">{status_text}</span>
+            </div>
+            """
+
+    return header + rows + "</div>"
 
 # ---------------------------------------------------------------------------
 # 构建产品动态页面
@@ -1137,6 +1261,7 @@ def generate():
         "<!-- KEYWORD_CLOUD_PLACEHOLDER -->": build_keyword_cloud(),
         "<!-- RANK_TREND_PLACEHOLDER -->": build_rank_trend_svg(),
         "<!-- RANK_TABLE_PLACEHOLDER -->": build_rank_table(),
+        "<!-- BASELINE_COMPARISON_PLACEHOLDER -->": build_baseline_comparison_section(),
         "<!-- MULTI_SOURCE_RANK_PLACEHOLDER -->": build_multi_source_rank_section(),
         "<!-- MULTI_SOURCE_REVENUE_PLACEHOLDER -->": build_multi_source_revenue_section(),
         "<!-- MULTI_SOURCE_DATA_PLACEHOLDER -->": json.dumps(build_multi_source_json(), ensure_ascii=False),
