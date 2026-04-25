@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 INTEL-OPS 竞品情报看板 · HTML 生成器
-读取 /data/ 下的 JSON 数据，填充 dashboard_template.html 模板，
-生成精美静态看板 HTML 文件。
+
+数据源：单一聚合产物 data/dashboard_data.json（由 data_pipeline.aggregator 生成）。
+模板：dashboard_template.html，build_*_html 函数零修改 —— 通过 adapter 从聚合数据派生
+出旧的全局变量名（strategy_data / market_data / comment_data / ranking_history /
+competitor_registry / competitor_details / weekly_review_data / commercial_data /
+commercial_weekly_data），保持现有逻辑兼容。
 """
 
 import json
@@ -22,11 +26,20 @@ DATA_DIR = _PROJECT_ROOT / "data"
 TEMPLATE_PATH = _SCRIPT_DIR / "dashboard_template.html"
 OUTPUT_HTML = _SCRIPT_DIR / "dashboard.html"
 
+# 使 data_pipeline 包可导入
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from data_pipeline.aggregator import build_dashboard_data, OUTPUT_PATH as _AGG_OUTPUT_PATH
+from data_pipeline.schema import to_dict
+
+
 # ---------------------------------------------------------------------------
-# 数据加载
+# 数据加载（统一入口）
 # ---------------------------------------------------------------------------
 
 def load_json(filename):
+    """保留：少数辅助函数仍按文件名读取（如临时调试）。"""
     fp = DATA_DIR / filename
     if not fp.exists():
         return {}
@@ -36,29 +49,189 @@ def load_json(filename):
     except Exception:
         return {}
 
-strategy_data = load_json("strategy_monitor.json")
-market_data = load_json("market_rank.json")
-comment_data = load_json("competitor_comments.json")
-ranking_history = load_json("ranking_history.json")
-competitor_registry = load_json("competitors.json")
 
-# 加载竞品深度分析数据 (competitor_detail_{name}.json)
-competitor_details = {}
-for f in DATA_DIR.glob("competitor_detail_*.json"):
-    try:
-        data = json.loads(f.read_text(encoding="utf-8"))
-        name = data.get("competitor", "")
-        if name:
-            competitor_details[name] = data
-    except Exception:
-        pass
+def _ensure_dashboard_data():
+    """触发聚合层，写入 data/dashboard_data.json，并返回 dict 供模板使用。"""
+    data = build_dashboard_data()
+    payload = to_dict(data)
+    _AGG_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_AGG_OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return payload
 
-# 加载周报数据
-weekly_review_data = load_json("weekly_review.json")
-# 加载商业策略数据
-commercial_data = load_json("commercial_strategy.json")
-# 加载商业策略周报数据
-commercial_weekly_data = load_json("commercial_weekly.json")
+
+# ---- Adapter：从聚合数据派生旧的数据视图 ----------------------------------
+
+def _adapt_strategy(D):
+    # 原始 strategy_monitor.json 不存在时，返回空——保持与旧版本"暂无产品动态"完全一致
+    if not D["meta"]["data_freshness"].get("strategy"):
+        return {"generated_at": None, "total_monitored": 0, "changes_detected": 0, "competitors": {}}
+    competitors = {}
+    for name, snap in D["competitors"].items():
+        v = snap["version"]
+        if v.get("error"):
+            competitors[name] = {"error": v["error"]}
+            continue
+        # 仅当原始 strategy 数据中确实存在该竞品（任意 version 字段非空）才输出
+        if not (v.get("current") or v.get("release_notes") or v.get("has_changed")
+                or v.get("is_first_record") or v.get("changes")):
+            continue
+        competitors[name] = {
+            "version": v.get("current") or "",
+            "release_notes": v.get("release_notes") or "",
+            "in_app_purchases": v.get("in_app_purchases") or [],
+            "has_changed": bool(v.get("has_changed")),
+            "is_first_record": bool(v.get("is_first_record")),
+            "version_changed": bool(v.get("version_changed")),
+            "iap_changed": False,
+            "changes": list(v.get("changes") or []),
+            "analysis": v.get("ai_analysis") or "",
+        }
+    return {
+        "generated_at": D["meta"]["data_freshness"].get("strategy"),
+        "total_monitored": D["metrics"]["monitored"],
+        "changes_detected": D["metrics"]["changes_detected"],
+        "competitors": competitors,
+    }
+
+
+def _adapt_market(D):
+    if not D["meta"]["data_freshness"].get("rank"):
+        return {}
+    competitor_performance = {}
+    for name, snap in D["competitors"].items():
+        r = snap["rank"]
+        if r.get("current") is not None or r.get("app_id"):
+            competitor_performance[name] = {
+                "rank": r.get("current"),
+                "delta": r.get("delta_dod"),
+                "app_id": r.get("app_id"),
+            }
+    baseline = D.get("baseline") or {}
+    return {
+        "generated_at": D["meta"]["data_freshness"].get("rank"),
+        "competitor_performance": competitor_performance,
+        "leaderboard": list(D.get("leaderboard") or []),
+        "fast_movers": list(D.get("fast_movers") or []),
+        "new_contenders": list(D.get("new_contenders") or []),
+        "ai_brief": D.get("ai_brief"),
+        "multi_source": dict(D.get("multi_source") or {}),
+        "baseline_app": baseline.get("app"),
+        "baseline_label": baseline.get("label"),
+        "baseline_comparison": dict(baseline.get("comparison") or {}),
+    }
+
+
+def _adapt_comments(D):
+    if not D["meta"]["data_freshness"].get("comments"):
+        return {}
+    competitors = {}
+    for name, snap in D["competitors"].items():
+        regions = {}
+        for code, r in (snap["comments"].get("by_region") or {}).items():
+            regions[code] = {
+                "count": r["count"],
+                "negative_count": r["negative_count"],
+                "labels": dict(r.get("labels") or {}),
+                "summary": r.get("summary", ""),
+                "reviews": list(r.get("reviews") or []),
+            }
+        if regions:
+            competitors[name] = {"regions": regions}
+    return {
+        "generated_at": D["meta"]["data_freshness"].get("comments"),
+        "competitors": competitors,
+    }
+
+
+def _adapt_ranking_history(D):
+    out = {}
+    for name, snap in D["competitors"].items():
+        app_id = snap["rank"].get("app_id")
+        if not app_id:
+            continue
+        for date, rank in (snap["rank"].get("history") or {}).items():
+            out.setdefault(date, {})[str(app_id)] = rank
+    return out
+
+
+def _adapt_commercial(D):
+    if not D["meta"]["data_freshness"].get("commercial"):
+        return {}
+    competitors = {}
+    for name, snap in D["competitors"].items():
+        c = snap["commercial"]
+        # 至少一个商业相关字段非空时才写入，否则保持空——和原 commercial_strategy.json 行为一致
+        if any([c.get("monetization_tags"), c.get("iap_items"), c.get("price_alerts"),
+                c.get("iap_changes"), c.get("betting_signals"), c.get("ai_intent"),
+                c.get("rpd_index") is not None]):
+            competitors[name] = {
+                "monetization_tags": list(c.get("monetization_tags") or []),
+                "iap_items": list(c.get("iap_items") or []),
+                "price_alerts": list(c.get("price_alerts") or []),
+                "iap_changes": list(c.get("iap_changes") or []),
+                "rpd_index": c.get("rpd_index"),
+                "rank": c.get("rank"),
+                "betting_signals": bool(c.get("betting_signals")),
+                "description_keywords": list(c.get("description_keywords") or []),
+                "seller_url": c.get("seller_url"),
+                "ai_intent": c.get("ai_intent"),
+            }
+    return {
+        "generated_at": D["meta"]["data_freshness"].get("commercial"),
+        "competitors": competitors,
+    }
+
+
+def _adapt_competitor_details(D):
+    out = {}
+    for name, snap in D["competitors"].items():
+        deep = snap["comments"].get("deep_analysis")
+        kw = snap["comments"].get("feature_keywords") or {}
+        if not (deep or kw):
+            continue
+        regions = {}
+        for code, r in (snap["comments"].get("by_region") or {}).items():
+            regions[code] = {
+                "label": r.get("label", code),
+                "total": r["count"],
+                "labels": dict(r.get("labels") or {}),
+                "reviews": list(r.get("reviews") or []),
+                "gp_count": 0,
+                "ios_count": 0,
+            }
+        out[name] = {
+            "competitor": name,
+            "generated_at": D["meta"].get("generated_at"),
+            "days_analyzed": 7,
+            "total_reviews": snap["comments"]["total"],
+            "regions": regions,
+            "feature_analysis": {
+                "summary": deep or "",
+                "feature_keywords": dict(kw),
+                "total_reviews": snap["comments"]["total"],
+                "label_distribution": dict(snap["comments"].get("labels") or {}),
+                "platform_distribution": {},
+                "region_distribution": {},
+                "feature_review_count": snap["comments"]["total"],
+            },
+        }
+    return out
+
+
+# ---- 触发聚合 + 派生全局视图 ---------------------------------------------
+
+_dashboard_data = _ensure_dashboard_data()
+
+strategy_data = _adapt_strategy(_dashboard_data)
+market_data = _adapt_market(_dashboard_data)
+comment_data = _adapt_comments(_dashboard_data)
+ranking_history = _adapt_ranking_history(_dashboard_data)
+competitor_registry = _dashboard_data.get("competitor_registry") or {}
+competitor_details = _adapt_competitor_details(_dashboard_data)
+weekly_review_data = _dashboard_data.get("weekly", {}).get("comment") or {}
+commercial_data = _adapt_commercial(_dashboard_data)
+commercial_weekly_data = _dashboard_data.get("weekly", {}).get("commercial") or {}
 
 # ---------------------------------------------------------------------------
 # 辅助函数
@@ -1297,12 +1470,17 @@ if __name__ == "__main__":
             if os.path.exists(path):
                 print(f"  运行 {name}...")
                 subprocess.run([sys.executable, path], capture_output=True, timeout=300, cwd=os.path.dirname(path))
-        # 重新加载数据
-        strategy_data = load_json("strategy_monitor.json")
-        market_data = load_json("market_rank.json")
-        comment_data = load_json("competitor_comments.json")
-        ranking_history = load_json("ranking_history.json")
-        competitor_registry = load_json("competitors.json")
+        # 数据源已刷新，重新跑聚合层并刷新派生视图
+        _dashboard_data = _ensure_dashboard_data()
+        strategy_data = _adapt_strategy(_dashboard_data)
+        market_data = _adapt_market(_dashboard_data)
+        comment_data = _adapt_comments(_dashboard_data)
+        ranking_history = _adapt_ranking_history(_dashboard_data)
+        competitor_registry = _dashboard_data.get("competitor_registry") or {}
+        competitor_details = _adapt_competitor_details(_dashboard_data)
+        weekly_review_data = _dashboard_data.get("weekly", {}).get("comment") or {}
+        commercial_data = _adapt_commercial(_dashboard_data)
+        commercial_weekly_data = _dashboard_data.get("weekly", {}).get("commercial") or {}
         metrics = compute_metrics()
 
     output = generate()

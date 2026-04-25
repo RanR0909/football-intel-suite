@@ -1,0 +1,194 @@
+"""统一数据 schema。
+
+dashboard 消费的唯一产物是 data/dashboard_data.json，结构由本文件定义。
+所有可空字段统一用 None；缺失列表用 []；缺失 dict 用 {}。
+
+设计原则：
+- competitor-first 主索引（competitors[<name>]）覆盖详情页
+- views.* 切片索引（by_region / by_label / timeline）覆盖跨竞品视角
+- alerts / feed / metrics 在聚合阶段预生成，dashboard 渲染零分支
+"""
+
+from dataclasses import dataclass, field, asdict
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# 竞品维度
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RankInfo:
+    current: Optional[int] = None
+    delta_dod: Optional[int] = None         # day-over-day（来自 market_rank.delta）
+    delta_wow: Optional[int] = None         # week-over-week（聚合层从 ranking_history 计算）
+    history: dict = field(default_factory=dict)   # {YYYY-MM-DD: rank}
+    fast_mover: bool = False
+    is_new_contender: bool = False
+    app_id: Optional[str] = None
+
+
+@dataclass
+class VersionInfo:
+    current: Optional[str] = None
+    release_notes: Optional[str] = None
+    has_changed: bool = False
+    version_changed: bool = False
+    is_first_record: bool = False
+    changes: list = field(default_factory=list)
+    in_app_purchases: list = field(default_factory=list)
+    ai_analysis: Optional[str] = None
+    error: Optional[str] = None
+
+
+@dataclass
+class CommentInfo:
+    total: int = 0
+    negative: int = 0
+    labels: dict = field(default_factory=dict)        # 跨地区合并的 {标签: 总数}
+    by_region: dict = field(default_factory=dict)     # {region_code: {label, count, negative_count, labels, summary, reviews}}
+    weekly_summary: Optional[str] = None              # 来自 weekly_review.json
+    deep_analysis: Optional[str] = None               # 来自 competitor_detail_*.json 的 feature_analysis.summary
+    feature_keywords: dict = field(default_factory=dict)
+
+
+@dataclass
+class CommercialInfo:
+    monetization_tags: list = field(default_factory=list)
+    iap_items: list = field(default_factory=list)
+    price_alerts: list = field(default_factory=list)
+    iap_changes: list = field(default_factory=list)
+    rpd_index: Optional[float] = None
+    rank: Optional[int] = None
+    betting_signals: bool = False
+    description_keywords: list = field(default_factory=list)
+    seller_url: Optional[str] = None
+    ai_intent: Optional[str] = None
+
+
+@dataclass
+class CompetitorSnapshot:
+    id: str                                  # 与 name 相同，保留以便未来切换
+    name: str
+    color: str = "#7b6ef6"
+    ios_id: Optional[str] = None
+    android_id: Optional[str] = None
+    rank: RankInfo = field(default_factory=RankInfo)
+    version: VersionInfo = field(default_factory=VersionInfo)
+    comments: CommentInfo = field(default_factory=CommentInfo)
+    commercial: CommercialInfo = field(default_factory=CommercialInfo)
+
+
+# ---------------------------------------------------------------------------
+# 预警 / Feed / Timeline
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Alert:
+    type: str            # negative_review / rank_rise / version_update / commercial_change
+    severity: str        # danger / warn / info
+    severity_label: str
+    icon: str
+    title: str
+    desc: str
+    time: str
+    competitor: str
+    payload: dict = field(default_factory=dict)
+
+
+@dataclass
+class FeedItem:
+    competitor: str
+    type: str            # feature / bug / rank / update
+    text: str
+    time: str
+    version: str = ""
+    payload: dict = field(default_factory=dict)
+
+
+@dataclass
+class TimelineEvent:
+    ts: str              # ISO timestamp
+    competitor: str
+    event_type: str      # version_change / negative_review / price_alert / rank_rise / iap_change
+    title: str
+    payload: dict = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# 切片 / 周报 / 顶部指标
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Views:
+    """跨竞品的视角切片，UI 想换视角时直接读对应字段。"""
+    by_region: dict = field(default_factory=dict)
+    # {region_code: {"label": str, "competitors": [{name, count, negative, labels}]}}
+
+    by_label: dict = field(default_factory=dict)
+    # {"[问题抱怨]": [{competitor, region, count}]}
+
+    timeline: list = field(default_factory=list)
+    # 按 ts 倒序的 TimelineEvent 列表
+
+
+@dataclass
+class WeeklyData:
+    comment: dict = field(default_factory=dict)         # weekly_review.json 原样透传
+    commercial: dict = field(default_factory=dict)      # commercial_weekly.json 原样透传
+
+
+@dataclass
+class Metrics:
+    changes_detected: int = 0
+    max_rank_delta: int = 0
+    max_rank_comp: str = ""
+    total_negative: int = 0
+    monitored: int = 0
+
+
+@dataclass
+class DataFreshness:
+    comments: Optional[str] = None
+    rank: Optional[str] = None
+    strategy: Optional[str] = None
+    commercial: Optional[str] = None
+    weekly_review: Optional[str] = None
+    commercial_weekly: Optional[str] = None
+
+
+@dataclass
+class Meta:
+    generated_at: str
+    data_freshness: DataFreshness = field(default_factory=DataFreshness)
+    schema_version: str = "1.0"
+
+
+@dataclass
+class DashboardData:
+    meta: Meta
+    competitors: dict           # {name: CompetitorSnapshot}
+    views: Views
+    alerts: list                # [Alert]
+    feed: list                  # [FeedItem]
+    leaderboard: list           # 来自 market_rank.leaderboard 原样透传
+    new_contenders: list
+    fast_movers: list
+    weekly: WeeklyData
+    metrics: Metrics
+    regions: dict = field(default_factory=dict)         # regions.json 透传，UI 渲染地区标签用
+    competitor_registry: dict = field(default_factory=dict)  # competitors.json 透传，UI 链接 store 用
+    multi_source: dict = field(default_factory=dict)    # market_rank.multi_source 透传（UI 多源数据卡片用）
+    baseline: dict = field(default_factory=dict)        # {app, label, comparison} 来自 market_rank
+    ai_brief: Optional[str] = None                      # market_rank.ai_brief（榜单 AI 摘要）
+
+
+def to_dict(obj):
+    """递归转 dict，dataclass / list / dict 都能处理。"""
+    if hasattr(obj, "__dataclass_fields__"):
+        return {k: to_dict(v) for k, v in asdict(obj).items()}
+    if isinstance(obj, list):
+        return [to_dict(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: to_dict(v) for k, v in obj.items()}
+    return obj

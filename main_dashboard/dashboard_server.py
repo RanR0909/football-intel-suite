@@ -20,6 +20,10 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent
 DATA_DIR = _PROJECT_ROOT / "data"
 
+# 使 data_pipeline 包可导入
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 # API Key 从环境变量获取
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
@@ -140,6 +144,40 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
         elif path == "/api/data/ranking_history":
             data = self._load_json_file("ranking_history.json")
             self._send_json(data)
+
+        elif path == "/api/data/dashboard_data":
+            # 返回聚合后的统一数据（dashboard 唯一需要的产物）
+            # 若 dashboard_data.json 不存在则即时聚合
+            fp = DATA_DIR / "dashboard_data.json"
+            if fp.exists():
+                self._send_json(self._load_json_file("dashboard_data.json"))
+            else:
+                try:
+                    from data_pipeline.aggregator import build_dashboard_data
+                    from data_pipeline.schema import to_dict
+                    self._send_json(to_dict(build_dashboard_data()))
+                except Exception as e:
+                    self._send_json({"status": "error", "message": str(e)}, 500)
+
+        elif path == "/api/aggregate":
+            # 手动触发聚合层：读 7 个原始 JSON → 写 dashboard_data.json
+            try:
+                from data_pipeline.aggregator import build_dashboard_data, OUTPUT_PATH as _AGG_OUT
+                from data_pipeline.schema import to_dict
+                payload = to_dict(build_dashboard_data())
+                _AGG_OUT.parent.mkdir(parents=True, exist_ok=True)
+                with open(_AGG_OUT, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+                self._send_json({
+                    "status": "ok",
+                    "competitors": len(payload.get("competitors") or {}),
+                    "alerts": len(payload.get("alerts") or []),
+                    "feed": len(payload.get("feed") or []),
+                    "timeline": len((payload.get("views") or {}).get("timeline") or []),
+                    "generated_at": (payload.get("meta") or {}).get("generated_at"),
+                })
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 500)
 
         elif path == "/api/data/competitor_detail":
             name = params.get("name", [""])[0]
@@ -306,6 +344,8 @@ def main():
 ║            &script=competitor_detail&competitor=X ║
 ║            &script=generate_dashboard            ║
 ║       GET  /api/data/*    → JSON 数据            ║
+║       GET  /api/data/dashboard_data → 统一聚合   ║
+║       GET  /api/aggregate → 手动重跑聚合层       ║
 ╚══════════════════════════════════════════════════╝
     """)
     try:
