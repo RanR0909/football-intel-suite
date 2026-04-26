@@ -453,29 +453,31 @@ body::before {
   </div>
 </div>
 
-<!-- PAGE: RANKING -->
+<!-- PAGE: RANKING (一级 · 我的竞品快照) -->
 <div id="page-ranking" style="display:none">
   <div class="page-header">
-    <div><div class="page-title">排名变化</div><div class="page-sub">App Store · 体育分类 Top 100</div></div>
-    <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+    <div>
+      <div class="page-title">我的竞品 · 排名快照</div>
+      <div class="page-sub">关注的竞品在 App Store 体育类 Top 100 的位置</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="showPage('overview')">← 总览</button>
+      <button class="btn btn-primary" onclick="showPage('ranking-full')">查看完整 Top 100 →</button>
+    </div>
   </div>
 
-  <!-- 周变化 > 20 的高威胁竞品 banner -->
+  <!-- 周变化 > 20 的高威胁竞品 banner（只在重点竞品里触发） -->
   <div id="rank-fast-movers"></div>
 
   <div class="card full-card">
     <div class="card-head">
-      <div class="card-title">App Store 排名 · 当前快照</div>
-      <div id="rank-filter-bar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>
+      <div class="card-title">重点竞品 · 当前排名</div>
+      <div class="card-action" style="color:var(--muted);font-size:11px">点击行进入竞品详情</div>
     </div>
-
-    <!-- 列头 -->
     <div class="rank-row" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border)">
       <span></span><span>产品</span><span>当前</span><span>日变化</span><span>周变化</span><span>下载量</span><span>评分</span><span>趋势</span>
     </div>
-
-    <!-- 行（JS 渲染） -->
-    <div id="rank-table-rows"></div>
+    <div id="rank-watchlist-rows"></div>
   </div>
 
   <!-- 相对 All Football 表现（卡组） -->
@@ -488,6 +490,28 @@ body::before {
   </div>
 
   <!-- MULTI_SOURCE_RANK_PLACEHOLDER -->
+</div>
+
+<!-- PAGE: RANKING FULL (二级 · 完整 Top 100 全市场扫描) -->
+<div id="page-ranking-full" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="page-title">App Store Top 100 · 体育类全市场</div>
+      <div class="page-sub">支持按增幅/减幅/周变化筛选 · 注册竞品已高亮 · 可发现潜在新对手</div>
+    </div>
+    <button class="btn" onclick="showPage('ranking')">← 返回我的竞品</button>
+  </div>
+
+  <div class="card full-card">
+    <div class="card-head">
+      <div class="card-title">全市场扫描</div>
+      <div id="rank-filter-bar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>
+    </div>
+    <div class="rank-row" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border)">
+      <span></span><span>产品</span><span>当前</span><span>日变化</span><span>周变化</span><span>下载量</span><span>评分</span><span>趋势</span>
+    </div>
+    <div id="rank-full-rows"></div>
+  </div>
 </div>
 
 <!-- PAGE: REVIEWS -->
@@ -989,7 +1013,7 @@ var RANK_DATA = <!-- RANK_DATA_PLACEHOLDER -->;
 
 // ====== 页面切换 ======
 function showPage(name) {
-  var allPages = ['overview','alerts','product','ranking','reviews','competitor-detail','weekly-review','commercial','community'];
+  var allPages = ['overview','alerts','product','ranking','ranking-full','reviews','competitor-detail','weekly-review','commercial','community'];
   allPages.forEach(function(p) {
     var el = document.getElementById('page-'+p);
     if (el) el.style.display = p===name?'block':'none';
@@ -1003,6 +1027,7 @@ function showPage(name) {
   if (name === 'commercial') { renderCommercialPage(); renderCommercialWeekly(); }
   if (name === 'community') renderCommunityPage();
   if (name === 'ranking') renderRankPage();
+  if (name === 'ranking-full') renderRankFullPage();
 }
 
 
@@ -2320,14 +2345,39 @@ function markdownToHtml(md) {
 // 数据来源：window.RANK_DATA = {leaderboard, baseline, registry, competitors}
 // ============================================================
 
-var _rankFilter = 'top100';   // top100 | up | down | fast
+var _rankFilter = 'top100';   // top100 | up | down | fast（仅二级页 page-ranking-full 用）
 var _rankLimit = 100;
 
+// ───── 一级页：我的竞品快照（仅 competitors.json 注册的竞品）─────
 function renderRankPage() {
-  renderRankFilters();
   renderFastMoversBanner();
-  renderRankRows();
+  renderRankWatchlist();
   renderBaselineCards();
+}
+
+function renderRankWatchlist() {
+  var compsObj = (RANK_DATA || {}).competitors || {};
+  // 只展示注册竞品（competitors.json 里的），按 current rank 升序
+  var entries = Object.keys(compsObj).map(function(name) {
+    return Object.assign({ name: name }, compsObj[name]);
+  });
+  entries.sort(function(a, b) {
+    var ar = a.current == null ? 9999 : a.current;
+    var br = b.current == null ? 9999 : b.current;
+    return ar - br;
+  });
+  var rowsEl = document.getElementById('rank-watchlist-rows');
+  if (!entries.length) {
+    rowsEl.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">暂无竞品配置</div>';
+    return;
+  }
+  rowsEl.innerHTML = entries.map(function(row) { return renderRankRowHtml(row, true, false); }).join('');
+}
+
+// ───── 二级页：完整 Top 100 全市场扫描（含筛选）─────
+function renderRankFullPage() {
+  renderRankFilters();
+  renderRankFullRows();
 }
 
 function renderRankFilters() {
@@ -2349,8 +2399,58 @@ function renderRankFilters() {
 
 function setRankFilter(key) {
   _rankFilter = key;
-  renderRankRows();
+  renderRankFullRows();
   renderRankFilters();
+}
+
+function renderRankFullRows() {
+  var rows = getSortedCompetitors(_rankFilter);
+  var rowsEl = document.getElementById('rank-full-rows');
+  if (!rows.length) {
+    rowsEl.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">当前筛选下无数据。请运行排名抓取后再试。</div>';
+    return;
+  }
+  var registered = (RANK_DATA || {}).competitors || {};
+  rowsEl.innerHTML = rows.map(function(row) {
+    var isRegistered = !!registered[row.name];
+    return renderRankRowHtml(row, isRegistered, true);
+  }).join('');
+}
+
+// 共用行渲染：watchlist 模式 = 一级（无未注册标签）；full 模式 = 二级（带高亮 + 标签）
+function renderRankRowHtml(row, isRegistered, fullMode) {
+  var dod = formatRankDelta(row.delta_dod);
+  var wow = formatRankDelta(row.delta_wow);
+  var trend = renderRankTrendInline(row.name);
+
+  var color = isRegistered ? ((RANK_DATA.competitors[row.name] || {}).color || 'var(--accent)') : null;
+  // 二级页：注册竞品左侧加 3px 竞品色边框 + 行内有"已监测"badge
+  var leftBorder = (fullMode && isRegistered)
+    ? 'border-left:3px solid ' + color + ';padding-left:17px'
+    : '';
+  var registeredBadge = (fullMode && isRegistered)
+    ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(123,110,246,0.18);color:var(--accent);margin-left:6px;font-family:var(--mono)">已监测</span>'
+    : '';
+  var unregisteredBadge = (fullMode && !isRegistered)
+    ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(245,166,35,0.15);color:var(--warn);margin-left:6px;font-family:var(--mono)">未监测</span>'
+    : '';
+
+  var clickable = isRegistered;
+  var nameStyle = clickable ? 'color:var(--text)' : 'color:var(--muted)';
+  var rowAttrs = clickable
+    ? 'onclick="showCompetitorDetail(\'' + row.name + '\')" style="cursor:pointer;' + leftBorder + '"'
+    : 'style="cursor:default;' + leftBorder + '"';
+
+  return '<div class="rank-row" ' + rowAttrs + '>' +
+    '<span style="font-family:var(--mono);color:var(--muted)">#' + (row.current != null ? row.current : '?') + '</span>' +
+    '<span style="' + nameStyle + '">' + escapeHtml(row.name || '?') + registeredBadge + unregisteredBadge + '</span>' +
+    '<span style="font-family:var(--mono)">' + (row.current != null ? row.current : '—') + '</span>' +
+    '<span>' + dod + '</span>' +
+    '<span>' + wow + '</span>' +
+    '<span style="color:var(--muted);font-family:var(--mono)">—</span>' +
+    '<span style="color:var(--muted);font-family:var(--mono)">—</span>' +
+    '<span>' + trend + '</span>' +
+  '</div>';
 }
 
 function renderFastMoversBanner() {
@@ -2414,39 +2514,6 @@ function getSortedCompetitors(filterKey) {
       artist: item.artist,
     };
   });
-}
-
-function renderRankRows() {
-  var rows = getSortedCompetitors(_rankFilter);
-  var rowsEl = document.getElementById('rank-table-rows');
-  if (!rows.length) {
-    rowsEl.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">当前筛选下无数据。请运行排名抓取后再试。</div>';
-    return;
-  }
-  rowsEl.innerHTML = rows.map(function(row) {
-    var clickable = !!(row.name && (RANK_DATA.competitors || {})[row.name]);
-    var dod = formatRankDelta(row.delta_dod);
-    var wow = formatRankDelta(row.delta_wow);
-    var trend = renderRankTrendInline(row.name);
-    var badge = '';
-    if (row.is_known === false) {
-      badge = '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(245,166,35,0.15);color:var(--warn);margin-left:4px;font-family:var(--mono)">未注册</span>';
-    }
-    var nameStyle = clickable ? 'color:var(--text)' : 'color:var(--muted)';
-    var rowAttrs = clickable
-      ? 'onclick="showCompetitorDetail(\'' + row.name + '\')" style="cursor:pointer"'
-      : 'style="cursor:default"';
-    return '<div class="rank-row" ' + rowAttrs + '>' +
-      '<span style="font-family:var(--mono);color:var(--muted)">#' + (row.current != null ? row.current : '?') + '</span>' +
-      '<span style="' + nameStyle + '">' + escapeHtml(row.name || '?') + badge + '</span>' +
-      '<span style="font-family:var(--mono)">' + (row.current != null ? row.current : '—') + '</span>' +
-      '<span>' + dod + '</span>' +
-      '<span>' + wow + '</span>' +
-      '<span style="color:var(--muted);font-family:var(--mono)">—</span>' +
-      '<span style="color:var(--muted);font-family:var(--mono)">—</span>' +
-      '<span>' + trend + '</span>' +
-    '</div>';
-  }).join('');
 }
 
 function formatRankDelta(d) {
