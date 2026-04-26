@@ -210,6 +210,36 @@ class Views:
 
 
 @dataclass
+class ReviewItem:
+    """扁平评论条目，前端 page-reviews 直接消费。"""
+    competitor: str
+    region: str = ""                                    # us / gb / jp
+    region_label: str = ""                              # 美国 / 英国 / 日本
+    platform: str = "App Store"                         # App Store / Google Play / 未知
+    rating: int = 0                                     # 1-5
+    version: str = ""
+    content: str = ""
+    label: str = ""                                     # 原细粒度标签（如 [问题抱怨] / [流失信号]）
+    sentiment: str = "neutral"                          # positive / neutral / negative
+    date: Optional[str] = None
+    source_url: Optional[str] = None                    # 跳回 App Store 评论页
+
+
+@dataclass
+class ReviewAnalysisView:
+    """聚合指标 + 扁平 items 列表，供 page-reviews。"""
+    metrics: dict = field(default_factory=lambda: {
+        "total": 0,
+        "sentiment_count": {"positive": 0, "neutral": 0, "negative": 0},
+        "topic_count": {},
+        "by_competitor": {},
+        "top_negative_topics": [],
+        "top_positive_topics": [],
+    })
+    items: list = field(default_factory=list)
+
+
+@dataclass
 class ProductUpdateItem:
     """单条产品动态记录，前端 page-product 时间轴 / 分组视图直接消费。"""
     competitor: str
@@ -284,6 +314,7 @@ class DashboardData:
     baseline: dict = field(default_factory=dict)        # {app, label, comparison} 来自 market_rank
     ai_brief: Optional[str] = None                      # market_rank.ai_brief（榜单 AI 摘要）
     product_updates: ProductUpdatesView = field(default_factory=ProductUpdatesView)
+    reviews_analysis: ReviewAnalysisView = field(default_factory=ReviewAnalysisView)
 
 
 def to_dict(obj):

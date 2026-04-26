@@ -41,6 +41,8 @@ from data_pipeline.schema import (
     ProductUpdateItem,
     ProductUpdatesView,
     RankInfo,
+    ReviewAnalysisView,
+    ReviewItem,
     TimelineEvent,
     VersionInfo,
     Views,
@@ -318,6 +320,102 @@ def _fill_comments(
             snap.comments.deep_analysis = fa["summary"]
         if fa.get("feature_keywords"):
             snap.comments.feature_keywords = dict(fa["feature_keywords"])
+
+
+SENTIMENT_BY_LABEL = {
+    "[问题抱怨]":         "negative",
+    "[流失信号]":         "negative",
+    "[竞品对比]":         "negative",      # 用户提对手通常隐含"X 比你强"，商业上是威胁
+    "[高价值功能请求]":    "neutral",       # 想要更多 = 仍在用，机会信号但不算负面
+    "[正向反馈]":         "positive",
+    "[其他]":             "neutral",
+}
+
+
+def _derive_sentiment(label: str | None, rating: int) -> str:
+    """从 label 派生情绪；无 label 时按 rating 兜底。"""
+    if label and label in SENTIMENT_BY_LABEL:
+        return SENTIMENT_BY_LABEL[label]
+    if rating >= 4:
+        return "positive"
+    if rating and rating <= 2:
+        return "negative"
+    return "neutral"
+
+
+def _build_review_analysis(
+    snapshots: dict[str, CompetitorSnapshot],
+    regions_cfg: dict,
+) -> ReviewAnalysisView:
+    """从 snapshot.comments.by_region.reviews 派生扁平视图 + 聚合 metrics。"""
+    items: list[ReviewItem] = []
+    overall_sentiment: Counter = Counter()
+    overall_topic: Counter = Counter()
+    pos_topic: Counter = Counter()
+    neg_topic: Counter = Counter()
+    by_comp: dict = {}
+
+    for name, snap in snapshots.items():
+        comp_sentiment: Counter = Counter()
+        comp_topic: Counter = Counter()
+        comp_total = 0
+
+        for region_code, r in (snap.comments.by_region or {}).items():
+            region_label = (regions_cfg.get(region_code) or {}).get("label", region_code)
+            ios_id = snap.ios_id
+            source_url = (
+                f"https://apps.apple.com/{region_code}/app/id{ios_id}?see-all=reviews"
+                if ios_id else None
+            )
+
+            for rv in r.get("reviews") or []:
+                label = rv.get("label", "") or ""
+                rating = int(rv.get("score") or rv.get("rating") or 0)
+                sentiment = _derive_sentiment(label, rating)
+                platform = rv.get("platform") or "App Store"
+
+                items.append(ReviewItem(
+                    competitor=name,
+                    region=region_code,
+                    region_label=region_label,
+                    platform=platform,
+                    rating=rating,
+                    version=rv.get("version", "") or "",
+                    content=rv.get("content", "") or "",
+                    label=label,
+                    sentiment=sentiment,
+                    source_url=source_url,
+                ))
+
+                overall_sentiment[sentiment] += 1
+                comp_sentiment[sentiment] += 1
+                if label:
+                    overall_topic[label] += 1
+                    comp_topic[label] += 1
+                    if sentiment == "positive":
+                        pos_topic[label] += 1
+                    elif sentiment == "negative":
+                        neg_topic[label] += 1
+                comp_total += 1
+
+        if comp_total > 0:
+            by_comp[name] = {
+                "total": comp_total,
+                "sentiment_count": dict(comp_sentiment),
+                "topic_count": dict(comp_topic),
+            }
+
+    return ReviewAnalysisView(
+        metrics={
+            "total": sum(overall_sentiment.values()),
+            "sentiment_count": dict(overall_sentiment),
+            "topic_count": dict(overall_topic),
+            "by_competitor": by_comp,
+            "top_negative_topics": [{"topic": t, "count": c} for t, c in neg_topic.most_common(3)],
+            "top_positive_topics": [{"topic": t, "count": c} for t, c in pos_topic.most_common(3)],
+        },
+        items=items,
+    )
 
 
 def _build_product_updates(
@@ -826,6 +924,7 @@ def build_dashboard_data() -> DashboardData:
     _fill_ads(snapshots, fb_raw, ads_ai)
     _fill_community(snapshots, reddit_raw, community_ai)
     product_updates = _build_product_updates(snapshots)
+    reviews_analysis = _build_review_analysis(snapshots, regions_cfg)
 
     alerts = _build_alerts(snapshots)
     feed = _build_feed(snapshots)
@@ -862,7 +961,26 @@ def build_dashboard_data() -> DashboardData:
         },
         ai_brief=market.get("ai_brief"),
         product_updates=product_updates,
+        reviews_analysis=reviews_analysis,
     )
+
+
+def _diagnose_review_coverage(payload: dict) -> None:
+    """若注册竞品有 N 个但 reviews_analysis 只覆盖了部分，stderr 警告。
+
+    专门排查"用户评论分析模块只显示 SofaScore"这类数据缺失问题。
+    """
+    registered = set((payload.get("competitor_registry") or {}).keys())
+    if not registered:
+        return
+    reviewed = set(((payload.get("reviews_analysis") or {}).get("metrics") or {}).get("by_competitor", {}).keys())
+    missing = registered - reviewed
+    if reviewed and missing:
+        print(
+            f"[warn] reviews_analysis 仅覆盖 {sorted(reviewed)} ({len(reviewed)}/{len(registered)}). "
+            f"缺失：{sorted(missing)} — 检查 competitor_comment/auto_report.py 是否对全部竞品执行成功",
+            file=sys.stderr,
+        )
 
 
 def main() -> int:
@@ -874,6 +992,7 @@ def main() -> int:
     print(f"[aggregator] wrote {OUTPUT_PATH}")
     print(f"[aggregator] competitors: {len(payload['competitors'])}")
     print(f"[aggregator] alerts: {len(payload['alerts'])}, feed: {len(payload['feed'])}, timeline: {len(payload['views']['timeline'])}")
+    _diagnose_review_coverage(payload)
     return 0
 
 

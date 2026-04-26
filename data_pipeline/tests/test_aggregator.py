@@ -155,13 +155,19 @@ def _build_fixtures(data_dir: Path):
                         "count": 30, "negative_count": 18,
                         "labels": {"[问题抱怨]": 10, "[流失信号]": 5, "[正向反馈]": 3},
                         "summary": "",
-                        "reviews": [{"score": 1, "version": "25.4.1", "label": "[问题抱怨]", "content": "crashes a lot"}],
+                        "reviews": [
+                            {"score": 1, "version": "25.4.1", "label": "[问题抱怨]", "content": "crashes a lot"},
+                            {"score": 1, "version": "25.4.1", "label": "[流失信号]", "content": "used to be better"},
+                            {"score": 5, "version": "25.4.1", "label": "[正向反馈]", "content": "love this app", "platform": "Google Play"},
+                        ],
                     },
                     "jp": {
                         "count": 12, "negative_count": 6,
                         "labels": {"[问题抱怨]": 4, "[竞品对比]": 2},
                         "summary": "",
-                        "reviews": [],
+                        "reviews": [
+                            {"score": 2, "version": "25.4.1", "label": "[竞品对比]", "content": "FlashScore is faster"},
+                        ],
                     },
                 },
             },
@@ -171,7 +177,10 @@ def _build_fixtures(data_dir: Path):
                         "count": 8, "negative_count": 0,
                         "labels": {"[正向反馈]": 6, "[高价值功能请求]": 2},
                         "summary": "",
-                        "reviews": [],
+                        "reviews": [
+                            {"score": 5, "version": "9.10", "label": "[正向反馈]", "content": "muito bom"},
+                            {"score": 4, "version": "9.10", "label": "[高价值功能请求]", "content": "want widget"},
+                        ],
                     },
                 },
             },
@@ -639,7 +648,50 @@ def run_tests():
         # 实际只测命中至少 pricing 即可
         _check("OneFootball tags 含 pricing", "pricing" in items_by_comp["OneFootball"]["tags"])
 
-        print("\n=== 16. 数据新鲜度 / 配置透传 ===")
+        print("\n=== 16. 用户评论分析（reviews_analysis） ===")
+        ra = payload["reviews_analysis"]
+        # SofaScore 4 条 + FlashScore 2 条 = 6 条
+        _check("items 总数 = 6", len(ra["items"]) == 6, f"got {len(ra['items'])}")
+        # 全局 sentiment_count
+        sc = ra["metrics"]["sentiment_count"]
+        # SofaScore: [问题抱怨]=neg, [流失信号]=neg, [正向反馈]=pos, [竞品对比]=neg → 3 neg + 1 pos
+        # FlashScore: [正向反馈]=pos, [高价值功能请求]=neutral → 1 pos + 1 neu
+        # 合计：neg=3 / pos=2 / neu=1
+        _check("sentiment_count.negative = 3", sc.get("negative") == 3, f"got {sc}")
+        _check("sentiment_count.positive = 2", sc.get("positive") == 2)
+        _check("sentiment_count.neutral = 1", sc.get("neutral") == 1)
+
+        # by_competitor
+        bc = ra["metrics"]["by_competitor"]
+        _check("by_competitor 含 SofaScore", "SofaScore" in bc)
+        _check("by_competitor 含 FlashScore（验证多竞品都进 items）", "FlashScore" in bc)
+        _check("SofaScore 评论数 = 4", bc["SofaScore"]["total"] == 4)
+        _check("FlashScore 评论数 = 2", bc["FlashScore"]["total"] == 2)
+
+        # Top 3
+        neg_topics = ra["metrics"]["top_negative_topics"]
+        pos_topics = ra["metrics"]["top_positive_topics"]
+        neg_topic_names = {t["topic"] for t in neg_topics}
+        pos_topic_names = {t["topic"] for t in pos_topics}
+        _check("top_negative_topics 含 [问题抱怨]", "[问题抱怨]" in neg_topic_names)
+        _check("top_negative_topics 含 [流失信号]", "[流失信号]" in neg_topic_names)
+        _check("top_negative_topics 含 [竞品对比]", "[竞品对比]" in neg_topic_names)
+        _check("top_positive_topics 含 [正向反馈]", "[正向反馈]" in pos_topic_names)
+
+        # 字段透传
+        sofa_items = [it for it in ra["items"] if it["competitor"] == "SofaScore"]
+        gp_review = next((it for it in sofa_items if it["platform"] == "Google Play"), None)
+        _check("platform 透传（Google Play）", gp_review is not None)
+        _check("source_url 拼接", any("apps.apple.com" in (it.get("source_url") or "") for it in sofa_items))
+        _check("region_label 透传", any(it["region_label"] == "美国" for it in sofa_items))
+
+        # sentiment 派生：rating=1 + label=[问题抱怨] → negative
+        crash = next(it for it in sofa_items if "crashes" in it["content"])
+        _check("crash 评论 sentiment=negative", crash["sentiment"] == "negative")
+        love = next(it for it in sofa_items if "love" in it["content"])
+        _check("love 评论 sentiment=positive", love["sentiment"] == "positive")
+
+        print("\n=== 17. 数据新鲜度 / 配置透传 ===")
         _check("data_freshness.strategy 非空", payload["meta"]["data_freshness"]["strategy"] is not None)
         _check("regions 透传", "us" in payload["regions"])
         _check("competitor_registry 透传", "SofaScore" in payload["competitor_registry"])

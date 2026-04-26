@@ -537,12 +537,62 @@ body::before {
 <!-- PAGE: REVIEWS -->
 <div id="page-reviews" style="display:none">
   <div class="page-header">
-    <div><div class="page-title">用户评论分析</div><div class="page-sub">App Store + Google Play · 近3天滚动监测</div></div>
+    <div>
+      <div class="page-title">用户评论分析</div>
+      <div class="page-sub" id="rv-window-label">App Store + Google Play 用户反馈聚合</div>
+    </div>
     <button class="btn" onclick="showPage('overview')">← 返回总览</button>
   </div>
-  <div class="card full-card">
-    <!-- REVIEW_PAGE_PLACEHOLDER -->
+
+  <!-- KPI 4 卡 -->
+  <div class="metrics-row" id="rv-metrics"></div>
+
+  <!-- 筛选栏 -->
+  <div class="card full-card" style="padding:14px 20px;margin:16px 0">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11px;font-family:var(--mono);color:var(--muted)">筛选</span>
+      <select id="rv-filter-comp"      class="prod-select"></select>
+      <select id="rv-filter-platform"  class="prod-select"></select>
+      <select id="rv-filter-sentiment" class="prod-select"></select>
+      <select id="rv-filter-region"    class="prod-select"></select>
+      <span style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn" onclick="downloadReviewsCSV()">下载 CSV</button>
+      </span>
+    </div>
   </div>
+
+  <!-- 双栏：情绪饼图 + 主题条形图 -->
+  <div class="three-col">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">情绪分布</div>
+        <div class="card-action" id="rv-sentiment-meta" style="color:var(--muted);font-size:11px"></div>
+      </div>
+      <div id="rv-sentiment-chart" style="padding:20px"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">主题热度 Top 8</div>
+        <div class="card-action" style="color:var(--muted);font-size:11px">按提及次数</div>
+      </div>
+      <div id="rv-topic-chart" style="padding:16px 20px"></div>
+    </div>
+  </div>
+
+  <!-- Top 3 正面 / 负面主题 -->
+  <div class="three-col" style="margin-top:16px">
+    <div class="card">
+      <div class="card-head"><div class="card-title">Top 3 用户抱怨</div></div>
+      <div id="rv-top-negative" style="padding:14px 20px"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">Top 3 用户好评</div></div>
+      <div id="rv-top-positive" style="padding:14px 20px"></div>
+    </div>
+  </div>
+
+  <!-- 按竞品折叠的评论列表 -->
+  <div id="rv-list" style="margin-top:16px"></div>
 </div>
 
 <!-- PAGE: COMPETITOR DETAIL -->
@@ -1031,6 +1081,7 @@ var MULTI_SOURCE_DATA = <!-- MULTI_SOURCE_DATA_PLACEHOLDER -->;
 var COMMUNITY_DATA = <!-- COMMUNITY_DATA_PLACEHOLDER -->;
 var RANK_DATA = <!-- RANK_DATA_PLACEHOLDER -->;
 var PRODUCT_UPDATES = <!-- PRODUCT_UPDATES_DATA_PLACEHOLDER -->;
+var REVIEWS_ANALYSIS = <!-- REVIEWS_ANALYSIS_DATA_PLACEHOLDER -->;
 
 // ====== 页面切换 ======
 function showPage(name) {
@@ -1050,6 +1101,7 @@ function showPage(name) {
   if (name === 'ranking') renderRankPage();
   if (name === 'ranking-full') renderRankFullPage();
   if (name === 'product') renderProductPage();
+  if (name === 'reviews') renderReviewsPage();
 }
 
 
@@ -2532,6 +2584,238 @@ function renderProdItemHtml(it) {
     '<div class="feed-title">' + escapeHtml(it.summary) + '</div>' +
     '<div class="feed-time">' + escapeHtml(date) + sourceLink + '</div>' +
   '</div>';
+}
+
+// ============================================================
+// 用户评论分析（page-reviews）：filter + KPI + 饼图 + 条形图 + Top3 + 折叠列表 + CSV
+// 数据来源：window.REVIEWS_ANALYSIS = {metrics: {...}, items: [ReviewItem]}
+// ============================================================
+
+var REVIEW_SENTIMENT_STYLE = {
+  positive: { label: '正面', color: 'var(--accent2)', bg: 'rgba(78,204,163,0.15)' },
+  neutral:  { label: '中性', color: 'var(--muted)',   bg: 'rgba(150,150,150,0.10)' },
+  negative: { label: '负面', color: 'var(--danger)',  bg: 'rgba(255,92,92,0.15)' },
+};
+var _rvFilter = { comp: 'all', platform: 'all', sentiment: 'all', region: 'all' };
+var _rvCollapsed = {};
+
+function renderReviewsPage() {
+  var ra = REVIEWS_ANALYSIS || { metrics: {}, items: [] };
+  renderRvMetrics(ra.metrics || {});
+  renderRvFilters(ra.items || []);
+  var filtered = applyRvFilters(ra.items || []);
+  renderRvSentimentChart(filtered);
+  renderRvTopicChart(filtered);
+  renderRvTopTopics(ra.metrics || {});
+  renderRvList(filtered);
+}
+
+function _rvPct(n, total) {
+  if (!total) return '—';
+  return Math.round(n * 100 / total) + '%';
+}
+
+function renderRvMetrics(m) {
+  var sc = m.sentiment_count || {};
+  var pos = sc.positive || 0, neu = sc.neutral || 0, neg = sc.negative || 0;
+  var total = m.total || 0;
+  document.getElementById('rv-metrics').innerHTML =
+    '<div class="metric-card purple"><div class="metric-label">评论总数</div><div class="metric-value">' + total + '</div><div class="metric-sub">近 3 天</div></div>' +
+    '<div class="metric-card teal"  ><div class="metric-label">正面</div>     <div class="metric-value">' + pos + '</div><div class="metric-sub">' + _rvPct(pos, total) + '</div></div>' +
+    '<div class="metric-card warn"  ><div class="metric-label">中性</div>     <div class="metric-value">' + neu + '</div><div class="metric-sub">' + _rvPct(neu, total) + '</div></div>' +
+    '<div class="metric-card danger"><div class="metric-label">负面</div>     <div class="metric-value">' + neg + '</div><div class="metric-sub">' + _rvPct(neg, total) + '</div></div>';
+}
+
+function renderRvFilters(items) {
+  var comps     = ['all'].concat(Array.from(new Set(items.map(function(i){ return i.competitor; }))).sort());
+  var platforms = ['all'].concat(Array.from(new Set(items.map(function(i){ return i.platform || '未知'; }))).sort());
+  var regions   = ['all'].concat(Array.from(new Set(items.map(function(i){ return i.region; }))).filter(Boolean).sort());
+
+  function fill(id, values, current, labelFn) {
+    document.getElementById(id).innerHTML = values.map(function(v){
+      return '<option value="' + escapeHtml(v) + '"' + (v === current ? ' selected' : '') + '>' + escapeHtml(labelFn(v)) + '</option>';
+    }).join('');
+  }
+  fill('rv-filter-comp',      comps,                                      _rvFilter.comp,      function(v){ return v === 'all' ? '全部竞品'   : v; });
+  fill('rv-filter-platform',  platforms,                                  _rvFilter.platform,  function(v){ return v === 'all' ? '全部商店'   : v; });
+  fill('rv-filter-sentiment', ['all','positive','neutral','negative'],    _rvFilter.sentiment, function(v){ return v === 'all' ? '全部情绪' : (REVIEW_SENTIMENT_STYLE[v] || {}).label || v; });
+  fill('rv-filter-region',    regions,                                    _rvFilter.region,    function(v){ return v === 'all' ? '全部地区' : v.toUpperCase(); });
+
+  ['comp','platform','sentiment','region'].forEach(function(k){
+    document.getElementById('rv-filter-' + k).onchange = function(){
+      _rvFilter[k] = this.value;
+      var ra = REVIEWS_ANALYSIS || {};
+      var filtered = applyRvFilters(ra.items || []);
+      renderRvSentimentChart(filtered);
+      renderRvTopicChart(filtered);
+      renderRvList(filtered);
+    };
+  });
+}
+
+function applyRvFilters(items) {
+  var f = _rvFilter;
+  return items.filter(function(it){
+    if (f.comp      !== 'all' && it.competitor !== f.comp)      return false;
+    if (f.platform  !== 'all' && (it.platform || '未知') !== f.platform) return false;
+    if (f.sentiment !== 'all' && it.sentiment !== f.sentiment)  return false;
+    if (f.region    !== 'all' && it.region !== f.region)        return false;
+    return true;
+  });
+}
+
+function renderRvSentimentChart(items) {
+  var counter = {};
+  items.forEach(function(it){ counter[it.sentiment] = (counter[it.sentiment] || 0) + 1; });
+  var total = items.length;
+  var chartEl = document.getElementById('rv-sentiment-chart');
+  var metaEl = document.getElementById('rv-sentiment-meta');
+  if (metaEl) metaEl.textContent = total > 0 ? '共 ' + total + ' 条' : '';
+  if (!total) {
+    chartEl.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无数据</div>';
+    return;
+  }
+
+  var size = 160, r = 70, cx = 80, cy = 80;
+  var slices = ['positive','neutral','negative'];
+  var startAngle = -Math.PI / 2;
+  var html = '<div style="display:flex;align-items:center;gap:24px"><svg viewBox="0 0 ' + size + ' ' + size + '" xmlns="http://www.w3.org/2000/svg" style="width:160px;height:160px;flex-shrink:0">';
+  slices.forEach(function(s){
+    var n = counter[s] || 0;
+    if (!n) return;
+    var pct = n / total;
+    if (pct >= 1) {
+      html += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + REVIEW_SENTIMENT_STYLE[s].color + '" opacity="0.85"><title>' + REVIEW_SENTIMENT_STYLE[s].label + ' ' + n + ' 条</title></circle>';
+      return;
+    }
+    var endAngle = startAngle + pct * 2 * Math.PI;
+    var x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
+    var x2 = cx + r * Math.cos(endAngle),   y2 = cy + r * Math.sin(endAngle);
+    var largeArc = pct > 0.5 ? 1 : 0;
+    var d = ['M', cx, cy, 'L', x1.toFixed(2), y1.toFixed(2), 'A', r, r, 0, largeArc, 1, x2.toFixed(2), y2.toFixed(2), 'Z'].join(' ');
+    html += '<path d="' + d + '" fill="' + REVIEW_SENTIMENT_STYLE[s].color + '" opacity="0.85"><title>' + REVIEW_SENTIMENT_STYLE[s].label + ' ' + n + ' 条</title></path>';
+    startAngle = endAngle;
+  });
+  html += '</svg><div style="font-size:12px;font-family:var(--mono);flex:1">';
+  slices.forEach(function(s){
+    var n = counter[s] || 0;
+    var p = total ? Math.round(n * 100 / total) : 0;
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + REVIEW_SENTIMENT_STYLE[s].color + '"></span><span style="color:var(--text);min-width:36px">' + REVIEW_SENTIMENT_STYLE[s].label + '</span><span style="color:var(--muted);margin-left:auto">' + n + ' · ' + p + '%</span></div>';
+  });
+  html += '</div></div>';
+  chartEl.innerHTML = html;
+}
+
+function renderRvTopicChart(items) {
+  var counter = {};
+  items.forEach(function(it){ if (it.label) counter[it.label] = (counter[it.label] || 0) + 1; });
+  var entries = Object.keys(counter).map(function(k){ return [k, counter[k]]; }).sort(function(a,b){ return b[1] - a[1]; }).slice(0, 8);
+  var el = document.getElementById('rv-topic-chart');
+  if (!entries.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无主题数据</div>';
+    return;
+  }
+  var max = entries[0][1] || 1;
+  el.innerHTML = entries.map(function(kv){
+    var w = Math.round(kv[1] / max * 100);
+    return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:11px;font-family:var(--mono)">' +
+      '<span style="min-width:140px;color:var(--text)">' + escapeHtml(kv[0]) + '</span>' +
+      '<div style="flex:1;height:8px;background:var(--surface2);border-radius:3px;overflow:hidden"><div style="width:' + w + '%;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))"></div></div>' +
+      '<span style="min-width:30px;text-align:right;color:var(--muted)">' + kv[1] + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+function renderRvTopTopics(metrics) {
+  var neg = metrics.top_negative_topics || [];
+  var pos = metrics.top_positive_topics || [];
+  function box(arr, color, hexBg) {
+    if (!arr.length) return '<div style="color:var(--muted);font-size:11px">暂无数据</div>';
+    return arr.map(function(t, i){
+      return '<div style="display:flex;justify-content:space-between;padding:8px 12px;border:1px solid ' + color + ';border-radius:6px;margin-bottom:6px;background:' + hexBg + '">' +
+        '<span style="font-family:var(--mono);font-size:12px"><span style="color:var(--muted);margin-right:8px">#' + (i+1) + '</span>' + escapeHtml(t.topic) + '</span>' +
+        '<span style="font-family:var(--mono);font-size:12px;color:var(--muted)">' + t.count + ' 条</span>' +
+      '</div>';
+    }).join('');
+  }
+  document.getElementById('rv-top-negative').innerHTML = box(neg, 'var(--danger)',  'rgba(255,92,92,0.06)');
+  document.getElementById('rv-top-positive').innerHTML = box(pos, 'var(--accent2)', 'rgba(78,204,163,0.06)');
+}
+
+function renderRvList(items) {
+  var listEl = document.getElementById('rv-list');
+  if (!items.length) {
+    listEl.innerHTML = '<div class="card full-card"><div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">当前筛选下无评论</div></div>';
+    return;
+  }
+  var byComp = {};
+  items.forEach(function(it){ (byComp[it.competitor] = byComp[it.competitor] || []).push(it); });
+  listEl.innerHTML = Object.keys(byComp).sort().map(function(comp) {
+    var arr = byComp[comp];
+    var collapsed = !!_rvCollapsed[comp];
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[comp]) || 'var(--accent)';
+    var sumByS = { positive:0, neutral:0, negative:0 };
+    arr.forEach(function(it){ sumByS[it.sentiment] = (sumByS[it.sentiment] || 0) + 1; });
+    var dist = ['positive','neutral','negative'].map(function(s){
+      return '<span style="color:' + REVIEW_SENTIMENT_STYLE[s].color + ';font-size:10px;font-family:var(--mono);margin-left:8px">' + REVIEW_SENTIMENT_STYLE[s].label + ' ' + sumByS[s] + '</span>';
+    }).join('');
+    var body = collapsed ? '' : arr.slice(0, 30).map(renderRvItemHtml).join('');
+    var moreNote = (arr.length > 30 && !collapsed)
+      ? '<div style="padding:10px 20px;color:var(--muted);font-size:11px;text-align:center">… 仅显示前 30 条，共 ' + arr.length + ' 条</div>'
+      : '';
+    return '<div class="card full-card" style="margin-bottom:12px">' +
+      '<div class="card-head" style="cursor:pointer">' +
+        '<div class="card-title" onclick="toggleRvGroup(\'' + comp + '\')"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:8px;vertical-align:middle"></span>' +
+          escapeHtml(comp) + ' <span style="color:var(--muted);font-size:11px">(' + arr.length + ' 条)</span>' + dist +
+        '</div>' +
+        '<div style="display:flex;gap:8px;align-items:center">' +
+          '<button class="btn" style="font-size:11px;padding:3px 10px" onclick="event.stopPropagation();openReviewModal(\'' + comp + '\')">AI 分析</button>' +
+          '<div class="card-action" onclick="toggleRvGroup(\'' + comp + '\')">' + (collapsed ? '展开 ▼' : '折叠 ▲') + '</div>' +
+        '</div>' +
+      '</div>' + body + moreNote +
+    '</div>';
+  }).join('');
+}
+
+function toggleRvGroup(comp) {
+  _rvCollapsed[comp] = !_rvCollapsed[comp];
+  renderRvList(applyRvFilters((REVIEWS_ANALYSIS || {}).items || []));
+}
+
+function renderRvItemHtml(it) {
+  var s = REVIEW_SENTIMENT_STYLE[it.sentiment] || REVIEW_SENTIMENT_STYLE.neutral;
+  var rating = Math.max(0, Math.min(5, it.rating || 0));
+  var stars = '★'.repeat(rating) + '☆'.repeat(5 - rating);
+  var sourceLink = it.source_url
+    ? '<a href="' + escapeHtml(it.source_url) + '" target="_blank" rel="noopener" style="margin-left:10px;font-size:11px;color:var(--muted);text-decoration:none;font-family:var(--mono)" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--muted)\'">查看来源 ↗</a>'
+    : '';
+  return '<div class="feed-item" style="border-left:3px solid ' + s.color + '">' +
+    '<div class="feed-meta">' +
+      '<span class="feed-source" style="color:var(--text)">' + escapeHtml(it.region_label || it.region || '?') + ' · ' + escapeHtml(it.platform || '?') + (it.version ? ' · v' + escapeHtml(it.version) : '') + '</span>' +
+      '<span style="padding:2px 8px;border-radius:4px;background:' + s.bg + ';color:' + s.color + ';font-size:10px;font-family:var(--mono)">' + s.label + '</span>' +
+      (it.label ? '<span style="padding:2px 8px;border-radius:4px;background:var(--surface2);color:var(--muted);font-size:10px;font-family:var(--mono)">' + escapeHtml(it.label) + '</span>' : '') +
+    '</div>' +
+    '<div class="feed-title" style="font-size:13px;line-height:1.6">' + escapeHtml(it.content || '') + '</div>' +
+    '<div class="feed-time"><span style="color:var(--warn);font-family:var(--mono)">' + stars + '</span>' + sourceLink + '</div>' +
+  '</div>';
+}
+
+function downloadReviewsCSV() {
+  var items = applyRvFilters((REVIEWS_ANALYSIS || {}).items || []);
+  if (!items.length) { alert('当前筛选下无可导出数据'); return; }
+  var headers = ['competitor','region','region_label','platform','rating','version','sentiment','label','content','source_url'];
+  var rows = items.map(function(it){
+    return headers.map(function(h){
+      var v = (it[h] != null ? String(it[h]) : '').replace(/"/g, '""');
+      return '"' + v + '"';
+    }).join(',');
+  });
+  var csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'reviews_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
 // ============================================================

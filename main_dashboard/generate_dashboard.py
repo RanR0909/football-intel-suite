@@ -213,6 +213,11 @@ def _adapt_product_updates(D):
     return D.get("product_updates") or {"metrics": {}, "items": []}
 
 
+def _adapt_reviews_analysis(D):
+    """直接透传 dashboard_data.reviews_analysis。"""
+    return D.get("reviews_analysis") or {"metrics": {}, "items": []}
+
+
 def _adapt_rank_view(D):
     """给前端 page-ranking 用的扁平结构，避免 JS 到处找字段。
 
@@ -297,6 +302,7 @@ commercial_weekly_data = _dashboard_data.get("weekly", {}).get("commercial") or 
 community_data = _adapt_community(_dashboard_data)
 rank_data = _adapt_rank_view(_dashboard_data)
 product_updates = _adapt_product_updates(_dashboard_data)
+reviews_analysis = _adapt_reviews_analysis(_dashboard_data)
 
 # ---------------------------------------------------------------------------
 # 辅助函数
@@ -1482,6 +1488,12 @@ def build_product_updates_json():
     return json.dumps(product_updates, ensure_ascii=False)
 
 
+def build_reviews_analysis_json():
+    if not reviews_analysis:
+        return '{"metrics": {}, "items": []}'
+    return json.dumps(reviews_analysis, ensure_ascii=False)
+
+
 # ===========================================================================
 # 生成 HTML
 # ===========================================================================
@@ -1503,6 +1515,7 @@ def generate():
         "<!-- COMMUNITY_DATA_PLACEHOLDER -->": build_community_data_json(),
         "<!-- RANK_DATA_PLACEHOLDER -->": build_rank_data_json(),
         "<!-- PRODUCT_UPDATES_DATA_PLACEHOLDER -->": build_product_updates_json(),
+        "<!-- REVIEWS_ANALYSIS_DATA_PLACEHOLDER -->": build_reviews_analysis_json(),
 
         "<!-- COMPETITOR_LIST_PLACEHOLDER -->": build_competitor_list(),
 
@@ -1526,7 +1539,8 @@ def generate():
         "<!-- MULTI_SOURCE_DATA_PLACEHOLDER -->": json.dumps(build_multi_source_json(), ensure_ascii=False),
         # PRODUCT_PAGE_PLACEHOLDER 已废弃（page-product 改为 PRODUCT_UPDATES JSON-driven 渲染）
         "<!-- PRODUCT_PAGE_PLACEHOLDER -->": "",
-        "<!-- REVIEW_PAGE_PLACEHOLDER -->": build_review_page(),
+        # REVIEW_PAGE_PLACEHOLDER 已废弃（page-reviews 改为 REVIEWS_ANALYSIS JSON-driven 渲染）
+        "<!-- REVIEW_PAGE_PLACEHOLDER -->": "",
         "<!-- WEEKLY_UPDATES_PLACEHOLDER -->": str(metrics["changes_detected"]),
         "<!-- WEEKLY_NEGATIVE_PLACEHOLDER -->": str(metrics["total_negative"]),
     }
@@ -1571,6 +1585,7 @@ if __name__ == "__main__":
         community_data = _adapt_community(_dashboard_data)
         rank_data = _adapt_rank_view(_dashboard_data)
         product_updates = _adapt_product_updates(_dashboard_data)
+        reviews_analysis = _adapt_reviews_analysis(_dashboard_data)
         metrics = compute_metrics()
 
     output = generate()
