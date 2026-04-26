@@ -359,7 +359,7 @@ body::before {
 <div class="page-header">
   <div>
     <div class="page-title">总览看板</div>
-    <div class="page-sub"><!-- DATE_PLACEHOLDER --> · 监测 <!-- MONITORED_COUNT_PLACEHOLDER --> 个竞品</div>
+    <div class="page-sub" id="ov-subtitle"><!-- DATE_PLACEHOLDER --> · 监测 <!-- MONITORED_COUNT_PLACEHOLDER --> 个竞品</div>
   </div>
   <div class="header-actions">
     <button class="btn" onclick="syncAllData()">同步数据</button>
@@ -367,63 +367,52 @@ body::before {
   </div>
 </div>
 
-<!-- ALERT_STRIP_PLACEHOLDER -->
+<!-- L0：一眼态势 4 卡 -->
+<div class="metrics-row" id="ov-l0" style="grid-template-columns:repeat(4,minmax(160px,1fr))"></div>
 
-<div class="metrics-row">
-  <div class="metric-card purple" onclick="showPage('product')">
-    <div class="metric-label">产品更新 / 7天</div>
-    <div class="metric-value"><!-- CHANGES_DETECTED_PLACEHOLDER --></div>
-    <div class="metric-change up">↑ 竞品版本迭代</div>
-    <div class="metric-sub">较上次检测</div>
+<!-- L0.5：预警精华条 -->
+<div id="ov-alert-strip" style="margin-bottom:16px"></div>
+
+<!-- L1：5 张模块 KPI 卡 -->
+<div class="metrics-row" id="ov-l1" style="grid-template-columns:repeat(5,minmax(180px,1fr));margin-top:0"></div>
+
+<!-- L2：横向战况表 + 风险机会矩阵 -->
+<div class="three-col" id="ov-l2" style="grid-template-columns:1.6fr 1fr;margin-top:16px">
+  <div class="card" id="ov-l2a-wrap">
+    <div class="card-head">
+      <div class="card-title">竞品横向战况</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="ov-l2a-sort" class="prod-select" style="font-size:11px"></select>
+        <span id="ov-l2a-meta" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+      </div>
+    </div>
+    <div id="ov-l2a"></div>
   </div>
-  <div class="metric-card teal" onclick="showPage('ranking')">
-    <div class="metric-label">最大排名变化</div>
-    <div class="metric-value"><!-- MAX_RANK_DELTA_PLACEHOLDER --></div>
-    <div class="metric-change up">↑ <!-- MAX_RANK_COMP_PLACEHOLDER --></div>
-    <div class="metric-sub">App Store 体育类</div>
-  </div>
-  <div class="metric-card warn" onclick="showPage('reviews')">
-    <div class="metric-label">用户负面评论</div>
-    <div class="metric-value"><!-- TOTAL_NEGATIVE_PLACEHOLDER --></div>
-    <div class="metric-change up">↑ 近3天</div>
-    <div class="metric-sub">需关注趋势</div>
+  <div class="card" id="ov-l2b-wrap">
+    <div class="card-head">
+      <div class="card-title">风险 / 机会矩阵</div>
+      <div class="card-action" style="color:var(--muted);font-size:11px">danger 数 × 机会 impact ≥ 4</div>
+    </div>
+    <div id="ov-l2b" style="padding:14px 20px"></div>
   </div>
 </div>
 
-<!-- ROW 2 -->
-<div class="three-col">
-
-  <!-- ACTIVITY FEED -->
+<!-- L3：今日要闻 + 痛点机会 -->
+<div class="three-col" style="grid-template-columns:1fr 1fr;margin-top:16px">
   <div class="card">
     <div class="card-head">
-      <div class="card-title">最新动态</div>
-      <div class="card-action" onclick="showPage('product')">查看全部 →</div>
+      <div class="card-title">今日要闻</div>
+      <div class="card-action" onclick="showPage('alerts')">完整时间线 →</div>
     </div>
-    <!-- FEED_ITEMS_PLACEHOLDER -->
+    <div id="ov-timeline"></div>
   </div>
-
-  <!-- RIGHT COL -->
-  <div style="display:flex;flex-direction:column;gap:20px">
-
-    <!-- TOP DEMANDS -->
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">高频需求词</div>
-        <div class="card-action" onclick="showPage('reviews')">详情 →</div>
-      </div>
-      <!-- KEYWORD_CLOUD_PLACEHOLDER -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">高频痛点 / 机会</div>
+      <div class="card-action" onclick="showPage('community')">查看全部 →</div>
     </div>
-
+    <div id="ov-pain-opp" style="padding:14px 20px"></div>
   </div>
-</div>
-
-<!-- RANKING CHART -->
-<div class="card full-card">
-  <div class="card-head">
-    <div class="card-title">App Store 排名趋势 · 历史记录</div>
-    <div class="card-action" onclick="showPage('ranking')">查看详情 →</div>
-  </div>
-  <!-- RANK_TREND_PLACEHOLDER -->
 </div>
 
 </div><!-- end overview -->
@@ -1256,6 +1245,7 @@ var RANK_DATA = <!-- RANK_DATA_PLACEHOLDER -->;
 var PRODUCT_UPDATES = <!-- PRODUCT_UPDATES_DATA_PLACEHOLDER -->;
 var REVIEWS_ANALYSIS = <!-- REVIEWS_ANALYSIS_DATA_PLACEHOLDER -->;
 var ALERTS_DATA = <!-- ALERTS_DATA_PLACEHOLDER -->;
+var COMP_COLORS = <!-- COMP_COLORS_PLACEHOLDER -->;
 
 // ====== 页面切换 ======
 function showPage(name) {
@@ -1271,6 +1261,7 @@ function showPage(name) {
   if(map[name]!==undefined) items[map[name]]?.classList.add('active');
   if (name === 'weekly-review') renderWeeklyReview();
   if (name === 'commercial') { renderCommercialPage(); renderCommercialWeekly(); }
+  if (name === 'overview') renderOverviewPage();
   if (name === 'community') renderCommunityPage();
   if (name === 'ranking') renderRankPage();
   if (name === 'alerts') renderAlertPage();
@@ -4730,6 +4721,751 @@ function _applyAlertFilters() {
   });
 }
 
+// ============================================================
+// 总览看板 v2（4 层金字塔：L0 态势 / L0.5 预警 / L1 模块 KPI /
+//                          L2 横切 / L3 信号流）
+// 数据：ALERTS_DATA / RANK_DATA / PRODUCT_UPDATES / REVIEWS_ANALYSIS
+//        / COMMUNITY_DATA / COMMERCIAL_DATA
+// ============================================================
+
+var _ovL2aSort = 'risk';   // risk | opportunity | rank | voice
+
+var OV_TAG_STYLES = {
+  feature:   { bg: 'rgba(78,204,163,.15)',  bd: 'rgba(78,204,163,.4)',  fg: 'var(--accent2)' },
+  bugfix:    { bg: 'rgba(96,165,250,.15)',  bd: 'rgba(96,165,250,.4)',  fg: 'rgba(96,165,250,1)' },
+  pricing:   { bg: 'rgba(245,166,35,.15)',  bd: 'rgba(245,166,35,.4)',  fg: 'var(--warn)' },
+  iap:       { bg: 'rgba(245,166,35,.15)',  bd: 'rgba(245,166,35,.4)',  fg: 'var(--warn)' },
+  localization:{ bg:'rgba(180,180,180,.15)',bd:'var(--border)',          fg:'var(--muted)' },
+  danger:    { bg: 'rgba(255,92,92,.18)',   bd: 'rgba(255,92,92,.4)',   fg: 'var(--danger)' },
+  warn:      { bg: 'rgba(245,166,35,.18)',  bd: 'rgba(245,166,35,.4)',  fg: 'var(--warn)' },
+  opportunity:{ bg:'rgba(123,110,246,.15)', bd: 'rgba(123,110,246,.4)', fg: 'var(--accent)' },
+  betting:   { bg: 'rgba(255,92,92,.18)',   bd: 'rgba(255,92,92,.4)',   fg: 'var(--danger)' },
+};
+
+function _ovChip(label, type) {
+  var s = OV_TAG_STYLES[type] || OV_TAG_STYLES.localization;
+  return '<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:4px;background:' +
+         s.bg + ';border:1px solid ' + s.bd + ';color:' + s.fg +
+         ';font-size:10px;font-family:var(--mono)">' + escapeHtml(String(label)) + '</span>';
+}
+
+function _ovCompChip(name) {
+  var c = (COMP_COLORS && COMP_COLORS[name]) || 'var(--accent)';
+  return '<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:4px;background:var(--surface2);color:var(--text);font-size:11px;font-family:var(--mono);cursor:pointer" onclick="showCompetitorDetail(\'' + name + '\')">' +
+    '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + c + ';margin-right:5px;vertical-align:middle"></span>' +
+    escapeHtml(name) + '</span>';
+}
+
+function _ovDays(dateStr) {
+  if (!dateStr) return Infinity;
+  try {
+    var d = new Date(String(dateStr).slice(0, 10)).getTime();
+    if (isNaN(d)) return Infinity;
+    return (Date.now() - d) / 86400000;
+  } catch(e) { return Infinity; }
+}
+
+// ====== L0：综合健康度公式 + 态势 4 卡 ============================
+function _ovOverallHealth() {
+  var alerts = ALERTS_DATA || [];
+  var dCount = alerts.filter(function(a){ return a.severity === 'danger' && _ovDays((a.payload||{}).date) <= 7; }).length;
+  var wCount = alerts.filter(function(a){ return a.severity === 'warn'   && _ovDays((a.payload||{}).date) <= 7; }).length;
+  var ra = (typeof REVIEWS_ANALYSIS !== 'undefined' && REVIEWS_ANALYSIS && REVIEWS_ANALYSIS.metrics) || {};
+  var sc = ra.sentiment_count || {};
+  var total = (sc.positive||0) + (sc.neutral||0) + (sc.negative||0);
+  var negRatio = total ? (sc.negative || 0) / total : 0;
+  // baseline drift：相对 All Football 偏离 > 15 的竞品占比
+  var rd = (typeof RANK_DATA !== 'undefined' && RANK_DATA && RANK_DATA.baseline_comparison) || {};
+  var compsTotal = Object.keys(rd).length || 1;
+  var driftN = 0;
+  Object.values(rd).forEach(function(v){
+    var diff = (v && (v.rank_diff != null ? v.rank_diff : v.delta));
+    if (diff != null && Math.abs(diff) > 15) driftN++;
+  });
+  var driftRatio = driftN / compsTotal;
+  var score = 100 - 10*dCount - 3*wCount - 30*negRatio - 5*(driftRatio*100);
+  score = Math.round(Math.max(0, Math.min(100, score)));
+  return { score: score, dCount: dCount, wCount: wCount, negRatio: negRatio, driftN: driftN };
+}
+
+function _ovHighRiskBreakdown() {
+  var alerts = (ALERTS_DATA || []).filter(function(a){
+    return a.severity === 'danger' && _ovDays((a.payload||{}).date) <= 7;
+  });
+  var byMod = {};
+  alerts.forEach(function(a){
+    var m = (a.payload||{}).module || 'other';
+    byMod[m] = (byMod[m]||0) + 1;
+  });
+  return { count: alerts.length, byMod: byMod };
+}
+
+function _ovOpportunityCount() {
+  var cd = (typeof COMMUNITY_DATA !== 'undefined' && COMMUNITY_DATA) || {};
+  var compsCovered = {};
+  var n = 0;
+  Object.keys(cd).forEach(function(name){
+    var ai = (cd[name] && cd[name].ai_analysis) || {};
+    (ai.opportunity_matrix || []).forEach(function(o){
+      if ((o.impact || 0) >= 3) {
+        n++;
+        compsCovered[name] = true;
+      }
+    });
+  });
+  return { n: n, comps: Object.keys(compsCovered).length };
+}
+
+function _ovIndustryPulse() {
+  // 7 天每日：所有竞品互动量累加（取 sentiment_daily total 累加）
+  var cd = (typeof COMMUNITY_DATA !== 'undefined' && COMMUNITY_DATA) || {};
+  var byDate = {};
+  Object.keys(cd).forEach(function(name){
+    var raw = (cd[name] && cd[name].raw) || {};
+    (raw.sentiment_daily || []).forEach(function(d){
+      var k = d.date;
+      if (!k) return;
+      var v = (d.positive||0) + (d.neutral||0) + (d.negative||0);
+      byDate[k] = (byDate[k]||0) + v;
+    });
+  });
+  var dates = Object.keys(byDate).sort().slice(-7);
+  var series = dates.map(function(d){ return { date:d, value:byDate[d] }; });
+  var trend = '→';
+  if (series.length >= 2) {
+    var first = series[0].value, last = series[series.length-1].value;
+    if (first > 0) {
+      var delta = (last - first) / first;
+      trend = delta > 0.1 ? '↑' + Math.round(delta*100) + '%' : (delta < -0.1 ? '↓' + Math.round(-delta*100) + '%' : '→');
+    }
+  }
+  return { series: series, trend: trend };
+}
+
+function _ovSparkline(series, color, h) {
+  if (!series || !series.length) return '<div style="color:var(--muted);font-size:10px">—</div>';
+  var W = 200, H = h || 32, padX = 2, padY = 4;
+  var vals = series.map(function(d){ return Number(d.value || 0); });
+  var minV = Math.min.apply(null, vals);
+  var maxV = Math.max.apply(null, vals);
+  var range = (maxV - minV) || 1;
+  var step = vals.length > 1 ? (W - padX*2) / (vals.length - 1) : 0;
+  var pts = vals.map(function(v, i){
+    var x = padX + i*step;
+    var y = H - padY - (v - minV)/range * (H - padY*2);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' L');
+  var cl = color || 'var(--accent)';
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block">' +
+    '<path d="M' + pts + '" fill="none" stroke="' + cl + '" stroke-width="1.4"/>' +
+  '</svg>';
+}
+
+function _renderOvL0() {
+  var el = document.getElementById('ov-l0');
+  if (!el) return;
+  var h = _ovOverallHealth();
+  var risk = _ovHighRiskBreakdown();
+  var opp = _ovOpportunityCount();
+  var pulse = _ovIndustryPulse();
+
+  var healthColor = h.score >= 80 ? 'var(--accent2)' : (h.score >= 60 ? 'var(--warn)' : 'var(--danger)');
+  var healthLabel = h.score >= 80 ? '健康' : (h.score >= 60 ? '注意' : '恶化');
+  var healthBars = '';
+  for (var i = 0; i < 5; i++) {
+    var on = i < Math.round(h.score / 20);
+    healthBars += '<span style="display:inline-block;width:14px;height:6px;margin-right:3px;border-radius:2px;background:' + (on ? healthColor : 'var(--surface2)') + '"></span>';
+  }
+  var riskChips = Object.keys(risk.byMod).slice(0,3).map(function(m){
+    var name = ALERT_MODULE_LABELS[m] || m;
+    return '<span style="font-size:10px;color:var(--muted);margin-right:6px;font-family:var(--mono)">' + escapeHtml(name) + ' ' + risk.byMod[m] + '</span>';
+  }).join('');
+
+  var pulseSpark = _ovSparkline(pulse.series, 'var(--accent)', 28);
+  var pulseColor = pulse.trend.indexOf('↑') >= 0 ? 'var(--accent2)' : (pulse.trend.indexOf('↓') >= 0 ? 'var(--danger)' : 'var(--muted)');
+
+  el.innerHTML =
+    '<div class="metric-card purple" onclick="showPage(\'alerts\')" style="cursor:pointer">' +
+      '<div class="metric-label">综合健康度</div>' +
+      '<div class="metric-value" style="color:' + healthColor + '">' + h.score + '<span style="font-size:14px;color:var(--muted);font-weight:400"> /100</span></div>' +
+      '<div style="margin:6px 0 4px">' + healthBars + '</div>' +
+      '<div class="metric-sub">' + healthLabel + ' · 高 ' + h.dCount + ' / 中 ' + h.wCount + '</div>' +
+    '</div>' +
+    '<div class="metric-card danger" onclick="showPage(\'alerts\')" style="cursor:pointer;border-color:rgba(255,92,92,0.4)">' +
+      '<div class="metric-label">高风险预警</div>' +
+      '<div class="metric-value" style="color:var(--danger)">' + risk.count + '</div>' +
+      '<div style="margin:4px 0">' + (riskChips || '<span style="font-size:10px;color:var(--muted)">暂无</span>') + '</div>' +
+      '<div class="metric-sub">7 天内 danger 级</div>' +
+    '</div>' +
+    '<div class="metric-card teal" onclick="showPage(\'community\')" style="cursor:pointer">' +
+      '<div class="metric-label">新机会信号</div>' +
+      '<div class="metric-value" style="color:var(--accent2)">' + opp.n + '</div>' +
+      '<div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:4px">覆盖 ' + opp.comps + ' 家竞品</div>' +
+      '<div class="metric-sub">机会 impact ≥ 3</div>' +
+    '</div>' +
+    '<div class="metric-card" style="border-color:rgba(123,110,246,0.4)">' +
+      '<div class="metric-label">行业脉搏 · 7 天</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin:6px 0 4px">' +
+        '<span style="font-size:18px;font-weight:600;color:' + pulseColor + ';font-family:var(--mono)">' + pulse.trend + '</span>' +
+        '<div style="flex:1;max-width:140px">' + pulseSpark + '</div>' +
+      '</div>' +
+      '<div class="metric-sub">综合社媒互动趋势</div>' +
+    '</div>';
+}
+
+// ====== L0.5：预警精华条 =========================================
+function _renderOvAlertStrip() {
+  var el = document.getElementById('ov-alert-strip');
+  if (!el) return;
+  var alerts = (ALERTS_DATA || []).slice();
+  alerts.sort(function(a, b){
+    var rank = { danger:0, warn:1, info:2 };
+    return (rank[a.severity]||9) - (rank[b.severity]||9);
+  });
+  if (!alerts.length) {
+    el.innerHTML = '<div onclick="showPage(\'alerts\')" style="cursor:pointer;padding:12px 18px;border-radius:8px;border:1px solid rgba(78,204,163,0.2);background:rgba(78,204,163,0.06);display:flex;align-items:center;gap:10px">' +
+      '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent2)"></span>' +
+      '<span style="color:var(--accent2);font-size:13px">当前无预警，所有竞品状态正常</span>' +
+      '<span style="margin-left:auto;font-size:11px;color:var(--accent2);font-family:var(--mono)">查看预警中心 →</span>' +
+    '</div>';
+    return;
+  }
+  var top = alerts[0];
+  var sev = top.severity || 'info';
+  var sevColors = { danger:'var(--danger)', warn:'var(--warn)', info:'var(--accent2)' };
+  var sevLabels = { danger:'高', warn:'中', info:'低' };
+  var sevBgs = { danger:'rgba(255,92,92,0.08)', warn:'rgba(245,166,35,0.08)', info:'rgba(78,204,163,0.08)' };
+  var sevBdrs = { danger:'rgba(255,92,92,0.25)', warn:'rgba(245,166,35,0.25)', info:'rgba(78,204,163,0.25)' };
+  var color = sevColors[sev] || 'var(--muted)';
+  var modLabel = ALERT_MODULE_LABELS[(top.payload||{}).module] || ((top.payload||{}).module || '');
+  var date = ((top.payload||{}).date || top.time || '').slice(0,10);
+  var desc = (top.desc || '').slice(0, 80);
+
+  el.innerHTML =
+    '<div onclick="showPage(\'alerts\')" style="cursor:pointer;padding:12px 18px;border-radius:8px;border:1px solid ' + (sevBdrs[sev]) + ';background:' + (sevBgs[sev]) + ';display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<span style="padding:2px 9px;border-radius:4px;background:' + color + ';color:#fff;font-size:10px;font-family:var(--mono)">' + sevLabels[sev] + '</span>' +
+      (modLabel ? '<span style="padding:1px 8px;border-radius:3px;background:rgba(255,255,255,0.05);color:var(--muted);font-size:10px;font-family:var(--mono)">' + escapeHtml(modLabel) + '</span>' : '') +
+      '<span style="font-size:13px;color:' + color + ';font-weight:500">' + escapeHtml(top.title || '') + '</span>' +
+      '<span style="font-size:11px;color:var(--muted)">· ' + escapeHtml(desc) + (top.desc && top.desc.length > 80 ? '…' : '') + '</span>' +
+      '<span style="margin-left:auto;font-size:11px;color:' + color + ';font-family:var(--mono)">' + date + ' · 共 ' + alerts.length + ' 条预警 →</span>' +
+    '</div>';
+}
+
+// ====== L1：5 张模块 KPI 卡 =====================================
+
+function _ovL1Rank() {
+  var rd = (typeof RANK_DATA !== 'undefined' && RANK_DATA) || {};
+  var perf = rd.competitor_performance || {};
+  var entries = Object.keys(perf).map(function(name){
+    return { name: name, rank: perf[name].rank, delta: perf[name].delta };
+  }).filter(function(e){ return e.rank != null; });
+  // 最敏感 = |delta| 最大
+  entries.sort(function(a,b){ return Math.abs(b.delta||0) - Math.abs(a.delta||0); });
+  var top = entries[0] || { name: '—', rank: '—', delta: 0 };
+  var top10Count = entries.filter(function(e){ return e.rank <= 10; }).length;
+  var totalMon = entries.length || 0;
+  var deltaSym = top.delta == null ? '→' : (top.delta < 0 ? '▲' + Math.abs(top.delta) : (top.delta > 0 ? '▼' + top.delta : '→'));
+  var deltaColor = top.delta == null || top.delta === 0 ? 'var(--muted)' : (top.delta < 0 ? 'var(--accent2)' : 'var(--danger)');
+  // mini multi-line：每竞品 14d
+  var hist = rd.ranking_history || {};
+  var dates = Object.keys(hist).sort().slice(-14);
+  var lines = '';
+  if (dates.length >= 2) {
+    var W = 220, H = 50, padX = 4, padY = 4;
+    var allRanks = [];
+    Object.values(perf).forEach(function(p){
+      var aid = p.app_id;
+      if (!aid) return;
+      dates.forEach(function(d){
+        var r = (hist[d]||{})[String(aid)];
+        if (r != null) allRanks.push(r);
+      });
+    });
+    if (allRanks.length) {
+      var minR = Math.min.apply(null, allRanks);
+      var maxR = Math.max.apply(null, allRanks);
+      var rangeR = (maxR - minR) || 1;
+      var step = (W - padX*2) / Math.max(1, dates.length - 1);
+      Object.keys(perf).forEach(function(name){
+        var aid = perf[name].app_id;
+        if (!aid) return;
+        var pts = [];
+        dates.forEach(function(d, i){
+          var r = (hist[d]||{})[String(aid)];
+          if (r == null) return;
+          var x = padX + i*step;
+          var y = padY + (r - minR)/rangeR * (H - padY*2);  // rank 数字越大排名越差，画在下方
+          pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+        });
+        if (pts.length >= 2) {
+          var c = (COMP_COLORS && COMP_COLORS[name]) || 'var(--accent)';
+          lines += '<path d="M' + pts.join(' L') + '" fill="none" stroke="' + c + '" stroke-width="1.2" opacity="0.85"/>';
+        }
+      });
+      lines = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:50px;display:block">' + lines + '</svg>';
+    }
+  }
+  return {
+    title: '排名变化',
+    main: escapeHtml(top.name) + ' #' + top.rank + ' <span style="color:' + deltaColor + ';font-size:13px;margin-left:4px">' + deltaSym + '</span>',
+    sub: 'Top10 内 ' + top10Count + ' / ' + totalMon + ' · 监测中',
+    viz: lines || '<div style="color:var(--muted);font-size:10px">14 天历史不足</div>',
+    chips: entries.slice(0,3).map(function(e){
+      var d = e.delta;
+      if (d == null || d === 0) return '';
+      var lbl = (d < 0 ? '↑ ' : '↓ ') + e.name;
+      return _ovChip(lbl, d < 0 ? 'feature' : 'danger');
+    }).filter(Boolean).join(''),
+    page: 'ranking',
+  };
+}
+
+function _ovL1Product() {
+  var pu = (typeof PRODUCT_UPDATES !== 'undefined' && PRODUCT_UPDATES) || {};
+  var m = pu.metrics || {};
+  var f = m.week_feature || 0, b = m.week_bugfix || 0, p = m.week_pricing || 0, l = m.week_localization || 0;
+  var total = m.week_total || (f+b+p+l);
+  var sum = (f+b+p+l) || 1;
+  var bar =
+    '<div style="display:flex;height:14px;border-radius:3px;overflow:hidden;background:var(--surface2)">' +
+      '<div style="flex:' + f + ';background:rgba(78,204,163,.75)" title="功能 ' + f + '"></div>' +
+      '<div style="flex:' + b + ';background:rgba(96,165,250,.75)" title="修复 ' + b + '"></div>' +
+      '<div style="flex:' + p + ';background:rgba(245,166,35,.75)" title="价格 ' + p + '"></div>' +
+      '<div style="flex:' + l + ';background:rgba(180,180,180,.55)" title="本地化 ' + l + '"></div>' +
+    '</div>';
+  return {
+    title: '产品动态',
+    main: total + ' <span style="font-size:13px;color:var(--muted);font-weight:400">次更新 / 7天</span>',
+    sub: '功能 ' + f + ' · 修复 ' + b + ' · 价格 ' + p + ' · 本地化 ' + l,
+    viz: bar,
+    chips: (f ? _ovChip('新功能 ' + f, 'feature') : '') + (b ? _ovChip('修复 ' + b, 'bugfix') : '') + (p ? _ovChip('价格 ' + p, 'pricing') : '') + (l ? _ovChip('本地化 ' + l, 'localization') : ''),
+    page: 'product',
+  };
+}
+
+function _ovL1Reviews() {
+  var ra = (typeof REVIEWS_ANALYSIS !== 'undefined' && REVIEWS_ANALYSIS) || {};
+  var m = ra.metrics || {};
+  var sc = m.sentiment_count || {};
+  var pos = sc.positive || 0, neu = sc.neutral || 0, neg = sc.negative || 0;
+  var total = m.total || (pos + neu + neg);
+  var negPct = total ? Math.round(neg/total*100) : 0;
+  var sum = (pos+neu+neg) || 1;
+  var bar =
+    '<div style="display:flex;height:14px;border-radius:3px;overflow:hidden;background:var(--surface2)">' +
+      '<div style="flex:' + pos + ';background:rgba(78,204,163,.75)"></div>' +
+      '<div style="flex:' + neu + ';background:rgba(150,150,150,.55)"></div>' +
+      '<div style="flex:' + neg + ';background:rgba(255,92,92,.75)"></div>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:9px;font-family:var(--mono);color:var(--muted);margin-top:3px">' +
+      '<span>正 ' + pos + '</span><span>中 ' + neu + '</span><span>负 ' + neg + '</span>' +
+    '</div>';
+  var topNeg = (m.top_negative_topics || [])[0];
+  var topNegLabel = topNeg ? (typeof topNeg === 'string' ? topNeg : (topNeg.topic || topNeg.label || topNeg[0] || '')) : '';
+  return {
+    title: '用户评论',
+    main: total + ' <span style="font-size:13px;color:var(--muted);font-weight:400">条 · 负 ' + negPct + '%</span>',
+    sub: '负面 ' + neg + ' · 中性 ' + neu + ' · 正面 ' + pos,
+    viz: bar,
+    chips: topNegLabel ? _ovChip('Top 负面：' + topNegLabel, 'danger') : '',
+    page: 'reviews',
+  };
+}
+
+function _ovL1Community() {
+  var cd = (typeof COMMUNITY_DATA !== 'undefined' && COMMUNITY_DATA) || {};
+  var totalMention = 0, totalEng = 0, weightedPos = 0, weightedNeg = 0;
+  var sevMax = 0, alertHigh = 0;
+  var dailyAgg = {};
+  var redditM = 0, twitterM = 0;
+  Object.keys(cd).forEach(function(name){
+    var raw = (cd[name] && cd[name].raw) || {};
+    var ai = (cd[name] && cd[name].ai_analysis) || {};
+    var s = ai.sentiment || {};
+    var m = raw.mention_count || 0;
+    totalMention += m;
+    totalEng += raw.total_engagement || 0;
+    weightedPos += (s.positive || 0) * m;
+    weightedNeg += (s.negative || 0) * m;
+    var pb = raw.platform_breakdown || {};
+    redditM += ((pb.reddit||{}).mentions||0);
+    twitterM += ((pb.twitter||{}).mentions||0);
+    if ((ai.alert_level || '').toLowerCase() === 'high') alertHigh++;
+    (ai.pain_points_with_severity || []).forEach(function(p){ if ((p.severity||0) > sevMax) sevMax = p.severity; });
+    (raw.sentiment_daily || []).forEach(function(d){
+      if (!d.date) return;
+      var v = (d.positive||0) + (d.neutral||0) + (d.negative||0);
+      dailyAgg[d.date] = (dailyAgg[d.date]||0) + v;
+    });
+  });
+  var sentNet = totalMention ? Math.round((weightedPos - weightedNeg)/totalMention*100) : 0;
+  var dates = Object.keys(dailyAgg).sort().slice(-7);
+  var series = dates.map(function(d){ return { date: d, value: dailyAgg[d] }; });
+  var spark = _ovSparkline(series, 'var(--accent)', 36);
+  var sentColor = sentNet > 10 ? 'var(--accent2)' : (sentNet < -10 ? 'var(--danger)' : 'var(--muted)');
+  return {
+    title: '社媒舆情',
+    main: totalMention + ' <span style="font-size:13px;color:var(--muted);font-weight:400">提及 · 情绪 <span style="color:' + sentColor + '">' + (sentNet>=0?'+':'') + sentNet + '%</span></span>',
+    sub: 'Reddit ' + redditM + ' · X ' + twitterM + ' · 互动 ' + totalEng,
+    viz: spark,
+    chips: (alertHigh ? _ovChip('高风险 ×' + alertHigh, 'danger') : '') + (sevMax >= 4 ? _ovChip('严重痛点 sev' + sevMax, 'warn') : ''),
+    page: 'community',
+  };
+}
+
+function _ovL1Commercial() {
+  var ad = (typeof ALERTS_DATA !== 'undefined' && ALERTS_DATA) || [];
+  var commEvents = ad.filter(function(a){
+    var m = (a.payload||{}).module;
+    return m === 'commercial' || m === 'iap' || m === 'ads';
+  });
+  var prChange = commEvents.filter(function(a){ return ((a.payload||{}).rule_id||'').indexOf('price') >= 0; }).length;
+  var iapChange = commEvents.filter(function(a){ return ((a.payload||{}).rule_id||'').indexOf('iap') >= 0; }).length;
+  var adAnomaly = commEvents.filter(function(a){ var rid = (a.payload||{}).rule_id||''; return rid.indexOf('ad_') >= 0; }).length;
+  var betting = commEvents.filter(function(a){ return ((a.payload||{}).rule_id||'').indexOf('betting') >= 0; }).length;
+  var total = commEvents.length;
+  // 14 天事件点：把每条 alert 放到对应日期点上
+  var W = 220, H = 50, padX = 4;
+  var bucket = {};
+  commEvents.forEach(function(a){
+    var d = ((a.payload||{}).date || a.time || '').slice(0,10);
+    if (!d) return;
+    if (!bucket[d]) bucket[d] = [];
+    bucket[d].push(a);
+  });
+  var dates = Object.keys(bucket).sort().slice(-14);
+  var dots = '';
+  if (dates.length) {
+    var step = (W - padX*2) / Math.max(1, dates.length - 1);
+    dates.forEach(function(d, i){
+      var x = padX + i*step;
+      bucket[d].forEach(function(a, j){
+        var y = 8 + (j*8) % (H-12);
+        var rid = (a.payload||{}).rule_id||'';
+        var color = rid.indexOf('price') >= 0 ? 'var(--warn)' :
+                    rid.indexOf('iap') >= 0 ? 'rgba(245,166,35,0.85)' :
+                    rid.indexOf('ad_') >= 0 ? 'var(--accent)' :
+                    rid.indexOf('betting') >= 0 ? 'var(--danger)' : 'var(--muted)';
+        dots += '<circle cx="' + x.toFixed(1) + '" cy="' + y + '" r="3" fill="' + color + '" opacity="0.85"/>';
+      });
+    });
+    dots = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:50px;display:block"><line x1="' + padX + '" y1="' + (H-4) + '" x2="' + (W-padX) + '" y2="' + (H-4) + '" stroke="var(--border)"/>' + dots + '</svg>';
+  } else {
+    dots = '<div style="color:var(--muted);font-size:10px;padding:14px 0">本周无商业事件</div>';
+  }
+  return {
+    title: '商业分析',
+    main: total + ' <span style="font-size:13px;color:var(--muted);font-weight:400">起商业事件</span>',
+    sub: '价格 ' + prChange + ' · IAP ' + iapChange + ' · 投放 ' + adAnomaly + (betting ? ' · 博彩 ' + betting : ''),
+    viz: dots,
+    chips: (prChange ? _ovChip('价格变动', 'pricing') : '') + (iapChange ? _ovChip('IAP', 'iap') : '') + (adAnomaly ? _ovChip('投放异常', 'opportunity') : '') + (betting ? _ovChip('博彩信号', 'betting') : ''),
+    page: 'commercial',
+  };
+}
+
+function _renderOvL1() {
+  var el = document.getElementById('ov-l1');
+  if (!el) return;
+  var cards = [_ovL1Rank(), _ovL1Product(), _ovL1Reviews(), _ovL1Community(), _ovL1Commercial()];
+  el.innerHTML = cards.map(function(c){
+    return '<div class="card" style="padding:14px 16px;cursor:pointer;display:flex;flex-direction:column;gap:8px;min-height:200px" onclick="showPage(\'' + c.page + '\')">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between">' +
+        '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">' + escapeHtml(c.title) + '</div>' +
+        '<div style="font-size:10px;color:var(--accent);font-family:var(--mono)">详情 →</div>' +
+      '</div>' +
+      '<div style="font-size:22px;font-weight:600;color:var(--text);line-height:1.2">' + c.main + '</div>' +
+      '<div style="font-size:10px;color:var(--muted);font-family:var(--mono)">' + escapeHtml(c.sub) + '</div>' +
+      '<div style="margin-top:auto;flex:1;display:flex;flex-direction:column;justify-content:flex-end">' + c.viz + '</div>' +
+      (c.chips ? '<div style="margin-top:6px">' + c.chips + '</div>' : '') +
+    '</div>';
+  }).join('');
+}
+
+// ====== L2.A：横向战况表 + L2.B：风险机会矩阵 =====================
+function _ovL2Stats() {
+  var cd = (typeof COMMUNITY_DATA !== 'undefined' && COMMUNITY_DATA) || {};
+  var rd = (typeof RANK_DATA !== 'undefined' && RANK_DATA) || {};
+  var perf = rd.competitor_performance || {};
+  var ra = (typeof REVIEWS_ANALYSIS !== 'undefined' && REVIEWS_ANALYSIS) || {};
+  var byCompRev = (ra.metrics && ra.metrics.by_competitor) || {};
+  var pu = (typeof PRODUCT_UPDATES !== 'undefined' && PRODUCT_UPDATES) || {};
+  var puItems = pu.items || [];
+  var alerts = (typeof ALERTS_DATA !== 'undefined' && ALERTS_DATA) || [];
+
+  // 收集所有竞品
+  var names = {};
+  Object.keys(perf).forEach(function(n){ names[n]=true; });
+  Object.keys(cd).forEach(function(n){ names[n]=true; });
+  Object.keys(byCompRev).forEach(function(n){ names[n]=true; });
+
+  // 总社媒声量（用于占比）
+  var totalVoice = 0;
+  Object.values(cd).forEach(function(v){ totalVoice += ((v && v.raw && v.raw.mention_count) || 0); });
+
+  return Object.keys(names).map(function(name){
+    var p = perf[name] || {};
+    var c = cd[name] || {};
+    var raw = c.raw || {};
+    var ai = c.ai_analysis || {};
+    var rev = byCompRev[name] || {};
+    // feature count from product_updates items 7d
+    var featCount = puItems.filter(function(it){
+      if (it.competitor !== name) return false;
+      var d = (it.date||'').slice(0,10);
+      return _ovDays(d) <= 7 && (it.tags||[]).indexOf('feature') >= 0;
+    }).length;
+    // negative ratio
+    var revTotal = rev.total || rev.count || 0;
+    var revNeg = rev.negative || rev.negative_count || 0;
+    var negPct = revTotal ? revNeg/revTotal : 0;
+    // voice share
+    var mention = raw.mention_count || 0;
+    var voice = totalVoice ? mention/totalVoice : 0;
+    // risk count
+    var risk = alerts.filter(function(a){ return a.competitor === name && a.severity === 'danger' && _ovDays((a.payload||{}).date) <= 7; }).length;
+    // opportunity count
+    var oppCount = (ai.opportunity_matrix || []).filter(function(o){ return (o.impact||0) >= 3; }).length;
+    return {
+      name: name,
+      rank: p.rank,
+      delta: p.delta,
+      featCount: featCount,
+      negPct: negPct,
+      voice: voice,
+      mention: mention,
+      risk: risk,
+      opp: oppCount,
+    };
+  });
+}
+
+function _renderOvL2A() {
+  var el = document.getElementById('ov-l2a');
+  if (!el) return;
+  var rows = _ovL2Stats();
+  // 排序
+  var sortFn = {
+    risk: function(a,b){ return b.risk - a.risk || b.opp - a.opp; },
+    opportunity: function(a,b){ return b.opp - a.opp || b.risk - a.risk; },
+    rank: function(a,b){ var ar = a.rank == null ? 9999 : a.rank; var br = b.rank == null ? 9999 : b.rank; return ar - br; },
+    voice: function(a,b){ return b.voice - a.voice; },
+  }[_ovL2aSort] || sortFn;
+  rows.sort(sortFn);
+
+  // sort select 初始化
+  var sortSel = document.getElementById('ov-l2a-sort');
+  if (sortSel) {
+    sortSel.innerHTML =
+      '<option value="risk">按风险数 ↓</option>' +
+      '<option value="opportunity">按机会数 ↓</option>' +
+      '<option value="rank">按排名 ↑</option>' +
+      '<option value="voice">按声量 ↓</option>';
+    sortSel.value = _ovL2aSort;
+    sortSel.onchange = function(){ _ovL2aSort = this.value; _renderOvL2A(); };
+  }
+  var meta = document.getElementById('ov-l2a-meta');
+  if (meta) meta.textContent = rows.length + ' 个竞品';
+
+  var head =
+    '<div style="display:grid;grid-template-columns:1.4fr 90px 60px 60px 90px 80px 80px;gap:8px;padding:8px 18px;border-bottom:1px solid var(--border);font-size:10px;font-family:var(--mono);color:var(--muted)">' +
+      '<span>竞品</span>' +
+      '<span style="text-align:right">排名 / Δ</span>' +
+      '<span style="text-align:right">7d 功能</span>' +
+      '<span style="text-align:right">负面率</span>' +
+      '<span style="text-align:right">社媒声量</span>' +
+      '<span style="text-align:center">风险</span>' +
+      '<span style="text-align:center">机会</span>' +
+    '</div>';
+
+  var body = rows.map(function(r){
+    var color = (COMP_COLORS && COMP_COLORS[r.name]) || 'var(--accent)';
+    var deltaSym = r.delta == null ? '—' : (r.delta < 0 ? '<span style="color:var(--accent2)">▲' + Math.abs(r.delta) + '</span>' : (r.delta > 0 ? '<span style="color:var(--danger)">▼' + r.delta + '</span>' : '<span style="color:var(--muted)">→</span>'));
+    var rankCell = r.rank == null ? '<span style="color:var(--muted)">—</span>' : '#' + r.rank + ' ' + deltaSym;
+    var negColor = r.negPct >= 0.5 ? 'var(--danger)' : (r.negPct >= 0.2 ? 'var(--warn)' : 'var(--muted)');
+    var voicePctW = Math.round(r.voice*100);
+    var voiceCell = r.mention ? '<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end"><div style="flex:0 0 50px;height:6px;background:var(--surface2);border-radius:2px;overflow:hidden"><div style="width:' + voicePctW + '%;height:100%;background:' + color + '"></div></div><span style="font-size:10px;color:var(--text)">' + voicePctW + '%</span></div>' : '<span style="color:var(--muted)">—</span>';
+    function dots(n, c) {
+      if (!n) return '<span style="color:var(--muted)">—</span>';
+      var s = '';
+      for (var i = 0; i < Math.min(3, n); i++) s += '●';
+      return '<span style="color:' + c + ';font-size:11px">' + s + '</span> <span style="font-size:10px;color:var(--muted)">' + n + '</span>';
+    }
+    return '<div onclick="showCompetitorDetail(\'' + r.name + '\')" style="display:grid;grid-template-columns:1.4fr 90px 60px 60px 90px 80px 80px;gap:8px;padding:10px 18px;border-bottom:1px solid var(--border);cursor:pointer;font-size:11px;align-items:center" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<span style="font-family:var(--mono);color:var(--text)"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + color + ';margin-right:6px;vertical-align:middle"></span>' + escapeHtml(r.name) + '</span>' +
+      '<span style="font-family:var(--mono);text-align:right">' + rankCell + '</span>' +
+      '<span style="font-family:var(--mono);text-align:right;color:var(--text)">' + r.featCount + '</span>' +
+      '<span style="font-family:var(--mono);text-align:right;color:' + negColor + '">' + Math.round(r.negPct*100) + '%</span>' +
+      '<span style="font-family:var(--mono);text-align:right">' + voiceCell + '</span>' +
+      '<span style="font-family:var(--mono);text-align:center">' + dots(r.risk, 'var(--danger)') + '</span>' +
+      '<span style="font-family:var(--mono);text-align:center">' + dots(r.opp, 'var(--accent)') + '</span>' +
+    '</div>';
+  }).join('');
+
+  el.innerHTML = head + body;
+}
+
+function _renderOvL2B() {
+  var el = document.getElementById('ov-l2b');
+  if (!el) return;
+  var rows = _ovL2Stats();
+  var quads = { hr_ho:[], hr_lo:[], lr_ho:[], lr_lo:[] };
+  rows.forEach(function(r){
+    var hiRisk = r.risk >= 2;
+    var hiOpp = r.opp >= 1;
+    if (hiRisk && hiOpp) quads.hr_ho.push(r.name);
+    else if (hiRisk && !hiOpp) quads.hr_lo.push(r.name);
+    else if (!hiRisk && hiOpp) quads.lr_ho.push(r.name);
+    else quads.lr_lo.push(r.name);
+  });
+
+  function quadCell(label, names, accent) {
+    var inner = names.length
+      ? names.map(_ovCompChip).join('')
+      : '<span style="font-size:10px;color:var(--muted)">—</span>';
+    return '<div style="border:1px solid ' + accent + ';background:rgba(255,255,255,0.02);border-radius:6px;padding:10px;min-height:88px">' +
+      '<div style="font-size:10px;font-family:var(--mono);color:' + accent + ';margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">' + label + '</div>' +
+      inner +
+    '</div>';
+  }
+
+  el.innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+      quadCell('高风险 · 高机会（重点对手）', quads.hr_ho, 'var(--accent)') +
+      quadCell('低风险 · 高机会（学习样本）', quads.lr_ho, 'var(--accent2)') +
+      quadCell('高风险 · 低机会（需警惕）', quads.hr_lo, 'var(--danger)') +
+      quadCell('低风险 · 低机会（追随者）', quads.lr_lo, 'var(--muted)') +
+    '</div>' +
+    '<div style="margin-top:10px;font-size:10px;font-family:var(--mono);color:var(--muted);text-align:center">高风险=danger ≥ 2 · 高机会=opportunity impact ≥ 4 ≥ 1 项</div>';
+}
+
+// ====== L3.A：今日要闻时间轴 =====================================
+function _renderOvTimeline() {
+  var el = document.getElementById('ov-timeline');
+  if (!el) return;
+  var alerts = (typeof ALERTS_DATA !== 'undefined' && ALERTS_DATA) || [];
+  var pu = (typeof PRODUCT_UPDATES !== 'undefined' && PRODUCT_UPDATES) || {};
+  var items = [];
+  alerts.forEach(function(a){
+    var d = (a.payload||{}).date || a.time;
+    if (!d || _ovDays(d) > 7) return;
+    items.push({
+      ts: d, sev: a.severity, mod: (a.payload||{}).module || 'alert',
+      title: a.title, comp: a.competitor,
+      kind: 'alert', payload: a,
+    });
+  });
+  (pu.items || []).forEach(function(it){
+    var d = it.date;
+    if (!d || _ovDays(d) > 7) return;
+    items.push({
+      ts: d, sev: 'info', mod: 'product',
+      title: it.competitor + ' v' + (it.version||'') + ' · ' + (it.summary||'').slice(0, 50),
+      comp: it.competitor,
+      kind: 'product', payload: it,
+    });
+  });
+  items.sort(function(a,b){ return (b.ts||'').localeCompare(a.ts||''); });
+  items = items.slice(0, 8);
+
+  if (!items.length) {
+    el.innerHTML = '<div style="padding:24px;color:var(--muted);font-size:12px;text-align:center">近 7 天暂无要闻</div>';
+    return;
+  }
+  var sevColors = { danger:'var(--danger)', warn:'var(--warn)', info:'var(--accent2)' };
+  el.innerHTML = items.map(function(it){
+    var color = sevColors[it.sev] || 'var(--muted)';
+    var modLabel = ALERT_MODULE_LABELS[it.mod] || it.mod;
+    var page = ({ rank:'ranking', review:'reviews', community:'community', product:'product', ads:'commercial', iap:'commercial', commercial:'commercial', download:'ranking' })[it.mod] || 'alerts';
+    return '<div onclick="showPage(\'' + page + '\')" style="display:flex;gap:12px;padding:10px 18px;border-bottom:1px solid var(--border);cursor:pointer;align-items:flex-start" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-top:5px;flex-shrink:0"></span>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:3px">' +
+          '<span style="font-size:10px;font-family:var(--mono);color:var(--muted)">' + (it.ts||'').slice(0,10) + '</span>' +
+          '<span style="padding:1px 7px;border-radius:3px;background:var(--surface2);color:var(--muted);font-size:9px;font-family:var(--mono)">' + escapeHtml(modLabel) + '</span>' +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(it.title || '') + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ====== L3.B：高频痛点 / 机会 ====================================
+function _renderOvPainOpp() {
+  var el = document.getElementById('ov-pain-opp');
+  if (!el) return;
+  var cd = (typeof COMMUNITY_DATA !== 'undefined' && COMMUNITY_DATA) || {};
+  var pains = {}, opps = {};
+  Object.keys(cd).forEach(function(name){
+    var ai = (cd[name] && cd[name].ai_analysis) || {};
+    (ai.pain_points_with_severity || []).forEach(function(p){
+      var k = p.topic || p.theme || '未分类';
+      if (!pains[k]) pains[k] = { topic: k, severity: 0, count: 0, comps: {} };
+      pains[k].severity = Math.max(pains[k].severity, p.severity || 0);
+      pains[k].count += (p.frequency || p.count || 1);
+      pains[k].comps[name] = true;
+    });
+    (ai.opportunity_matrix || []).forEach(function(o){
+      var k = o.theme || o.topic || '未分类';
+      if (!opps[k]) opps[k] = { topic: k, impact: 0, effort: 5, comps: {} };
+      opps[k].impact = Math.max(opps[k].impact, o.impact || 0);
+      opps[k].effort = Math.min(opps[k].effort, o.effort || 5);
+      opps[k].comps[name] = true;
+    });
+  });
+  var painArr = Object.values(pains).map(function(p){
+    p._w = p.severity * Math.log(p.count + 1);
+    return p;
+  }).sort(function(a,b){ return b._w - a._w; }).slice(0, 5);
+  var oppArr = Object.values(opps).map(function(o){
+    o._w = o.impact - o.effort * 0.3;
+    return o;
+  }).sort(function(a,b){ return b._w - a._w; }).slice(0, 5);
+
+  function stars(n) {
+    var s = ''; for (var i = 0; i < Math.min(5, Math.max(0, n)); i++) s += '★';
+    return s;
+  }
+
+  var painHtml = painArr.length
+    ? painArr.map(function(p){
+        var compsList = Object.keys(p.comps).slice(0, 3).join(' · ');
+        return '<div onclick="showPage(\'community\')" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);cursor:pointer">' +
+          '<span style="color:var(--danger);font-size:11px;min-width:60px">' + stars(p.severity) + '</span>' +
+          '<span style="font-size:12px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(p.topic) + '</span>' +
+          '<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">' + p.count + ' 次 · ' + Object.keys(p.comps).length + ' 家</span>' +
+        '</div>';
+      }).join('')
+    : '<div style="color:var(--muted);font-size:11px;padding:8px 0">尚无痛点信号</div>';
+
+  var oppHtml = oppArr.length
+    ? oppArr.map(function(o){
+        return '<div onclick="showPage(\'community\')" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);cursor:pointer">' +
+          '<span style="color:var(--accent);font-size:11px;min-width:60px">' + stars(o.impact) + '</span>' +
+          '<span style="font-size:12px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(o.topic) + '</span>' +
+          '<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">影响 ' + o.impact + ' / 难度 ' + o.effort + '</span>' +
+        '</div>';
+      }).join('')
+    : '<div style="color:var(--muted);font-size:11px;padding:8px 0">尚无机会信号</div>';
+
+  el.innerHTML =
+    '<div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">用户痛点 Top 5</div>' +
+    painHtml +
+    '<div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin:14px 0 6px">产品机会 Top 5</div>' +
+    oppHtml;
+}
+
+// ====== 总入口 ==================================================
+function renderOverviewPage() {
+  try { _renderOvL0(); }          catch(e) { console.error('ov L0', e); }
+  try { _renderOvAlertStrip(); }  catch(e) { console.error('ov L0.5', e); }
+  try { _renderOvL1(); }          catch(e) { console.error('ov L1', e); }
+  try { _renderOvL2A(); }         catch(e) { console.error('ov L2A', e); }
+  try { _renderOvL2B(); }         catch(e) { console.error('ov L2B', e); }
+  try { _renderOvTimeline(); }    catch(e) { console.error('ov L3A', e); }
+  try { _renderOvPainOpp(); }     catch(e) { console.error('ov L3B', e); }
+}
+
+
 function renderAlertPage() {
   if (!ALERTS_DATA) ALERTS_DATA = [];
   _loadAlertFilters();
@@ -5936,6 +6672,18 @@ function pollCommunityAI(competitor, statusEl) {
   _communityPolling[key] = promise;
   return promise;
 }
+
+// ====== 初次加载渲染（默认 overview 已显示）======================
+(function ovInit() {
+  function tryRender() {
+    try { renderOverviewPage(); } catch (e) { console.error('initial overview render failed', e); }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tryRender);
+  } else {
+    tryRender();
+  }
+})();
 </script>
 
 </body>

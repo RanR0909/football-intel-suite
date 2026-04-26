@@ -1543,6 +1543,7 @@ def generate():
         "<!-- ALERT_STRIP_PLACEHOLDER -->": build_alert_strip_html(alerts),
         "<!-- ALERT_PAGE_PLACEHOLDER -->": build_alert_page_html(alerts),
         "<!-- ALERTS_DATA_PLACEHOLDER -->": build_alerts_data_json(alerts),
+        "<!-- COMP_COLORS_PLACEHOLDER -->": json.dumps(COMP_COLORS, ensure_ascii=False),
         "<!-- ALERT_COUNT_PLACEHOLDER -->": str(len(alerts)),
         "<!-- FEED_ITEMS_PLACEHOLDER -->": build_feed_html(),
         "<!-- KEYWORD_CLOUD_PLACEHOLDER -->": build_keyword_cloud(),
