@@ -727,92 +727,85 @@ body::before {
 <div id="page-weekly-review" style="display:none">
   <div class="page-header">
     <div>
-      <div class="page-title">竞品评论周报</div>
-      <div class="page-sub">过去7天 · 跨竞品全量评论汇总 · 本地化专题分析</div>
+      <div class="page-title">评论周报</div>
+      <div class="page-sub" id="wr-period">分析周期：— · 共 — 条评论</div>
     </div>
-    <div class="header-actions">
-      <button class="btn" onclick="runWeeklyReview()">生成周报</button>
-      <button class="btn" onclick="showPage('overview')">← 返回总览</button>
-    </div>
-  </div>
-
-  <!-- 概览指标 -->
-  <div class="metrics-row" id="wr-metrics">
-    <div class="metric-card purple">
-      <div class="metric-label">分析周期</div>
-      <div class="metric-value" id="wr-days">7</div>
-      <div class="metric-change neutral" id="wr-days-label">天</div>
-    </div>
-    <div class="metric-card teal">
-      <div class="metric-label">总评论数</div>
-      <div class="metric-value" id="wr-total">—</div>
-      <div class="metric-change neutral" id="wr-total-detail">涉及 N 个竞品</div>
-    </div>
-    <div class="metric-card warn">
-      <div class="metric-label">本地化问题</div>
-      <div class="metric-value" id="wr-localization">—</div>
-      <div class="metric-change neutral" id="wr-localization-detail">条相关评论</div>
-    </div>
-    <div class="metric-card danger">
-      <div class="metric-label">生成时间</div>
-      <div class="metric-value" id="wr-time">—</div>
-      <div class="metric-change neutral" id="wr-time-detail">—</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="showPage('overview')">← 总览</button>
+      <button class="btn" onclick="downloadWeeklyPDF()">导出 PDF</button>
+      <button class="btn btn-primary" onclick="runWeeklyReview()">重新生成</button>
     </div>
   </div>
 
-  <!-- 核心发现 -->
-  <div class="card full-card">
-    <div class="card-head">
-      <div class="card-title">本周核心发现</div>
-      <div class="card-action">AI 生成 · 跨竞品趋势</div>
-    </div>
-    <div id="wr-summary" style="padding:20px;font-size:13px;line-height:1.8;color:var(--muted);white-space:pre-wrap">
-      暂无周报数据。请先运行 <code>python3 competitor_comment/weekly_review.py</code> 生成周报，或点击"生成周报"按钮。
-    </div>
-  </div>
+  <!-- ═══ 顶部：标签总结 ═══ -->
+  <div class="metrics-row" id="wr-kpi"></div>
 
-  <!-- 双列: 各竞品分析 + 本地化专题 -->
-  <div class="two-col">
+  <div class="three-col" style="margin-top:16px">
     <div class="card">
       <div class="card-head">
-        <div class="card-title">各竞品分析摘要</div>
-        <div class="card-action">评论数量 · Top信号</div>
+        <div class="card-title">主题分布</div>
+        <div class="card-action" style="color:var(--muted);font-size:11px">点击标签筛选下方本地化样本</div>
       </div>
-      <div id="wr-per-competitor" style="padding:16px 20px">
-        <div style="color:var(--muted);font-size:13px">暂无数据</div>
-      </div>
+      <div id="wr-topic-bars" style="padding:14px 20px"></div>
     </div>
     <div class="card">
       <div class="card-head">
-        <div class="card-title">本地化专题分析</div>
-        <div class="card-action">翻译 · 本地联赛 · 地区功能</div>
+        <div class="card-title">情绪占比</div>
+        <div class="card-action" id="wr-sentiment-meta" style="color:var(--muted);font-size:11px"></div>
       </div>
-      <div id="wr-localization-content" style="padding:16px 20px;font-size:13px;line-height:1.8;color:var(--muted);white-space:pre-wrap">
-        暂无本地化分析数据。
-      </div>
+      <div id="wr-sentiment-donut" style="padding:20px"></div>
     </div>
   </div>
 
-  <!-- 标签分布 -->
-  <div class="card full-card">
+  <div class="card full-card" style="margin-top:16px">
     <div class="card-head">
-      <div class="card-title">评论信号标签分布</div>
-      <div class="card-action">跨竞品汇总</div>
+      <div class="card-title">标签热力图（竞品 × 主题）</div>
+      <div class="card-action" style="color:var(--muted);font-size:11px">颜色深浅 = 提及次数</div>
     </div>
-    <div id="wr-label-dist" style="padding:16px 20px">
-      <div style="color:var(--muted);font-size:13px">暂无数据</div>
-    </div>
+    <div id="wr-heatmap" style="padding:16px 20px;overflow-x:auto"></div>
   </div>
 
-  <!-- 功能关键词 -->
-  <div class="card full-card">
+  <!-- ═══ 中部：本地化问题专区 ═══ -->
+  <div class="card full-card" style="margin-top:16px">
     <div class="card-head">
-      <div class="card-title">高频功能关键词</div>
-      <div class="card-action">用户提及最多的功能相关词</div>
+      <div class="card-title">本地化问题专区</div>
+      <div class="card-action" id="wr-loc-meta" style="color:var(--muted);font-size:11px"></div>
     </div>
-    <div id="wr-keywords" style="padding:16px 20px">
-      <div style="color:var(--muted);font-size:13px">暂无数据</div>
+    <div style="padding:16px 20px 8px">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">各地区问题数量（颜色 = 严重程度：≥10 高 · 5-9 中 · ≤4 低）</div>
+      <div id="wr-loc-bars"></div>
     </div>
+    <div id="wr-loc-cards" style="padding:8px 20px 20px"></div>
+  </div>
+
+  <!-- ═══ 底部：原始报告（折叠） ═══ -->
+  <div class="card full-card" id="wr-raw-summary" style="margin-top:16px">
+    <div class="card-head" style="cursor:pointer" onclick="toggleWrSection('summary')">
+      <div class="card-title">整体周报摘要 · 原始 AI 输出</div>
+      <div class="card-action" id="wr-summary-toggle">展开 ▼</div>
+    </div>
+    <div id="wr-summary-body" style="display:none;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--muted)"></div>
+  </div>
+
+  <div class="card full-card" id="wr-raw-per-comp" style="margin-top:12px">
+    <div class="card-head" style="cursor:pointer" onclick="toggleWrSection('per-comp')">
+      <div class="card-title">各竞品分析摘要</div>
+      <div class="card-action" id="wr-per-comp-toggle">展开 ▼</div>
+    </div>
+    <div id="wr-per-comp-body" style="display:none;padding:16px 20px"></div>
+  </div>
+
+  <div class="card full-card" id="wr-raw-loc" style="margin-top:12px">
+    <div class="card-head" style="cursor:pointer" onclick="toggleWrSection('loc')">
+      <div class="card-title">AI 本地化深度分析 · 原始 markdown</div>
+      <div class="card-action" id="wr-loc-toggle">展开 ▼</div>
+    </div>
+    <div id="wr-loc-body" style="display:none;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--muted)"></div>
+  </div>
+
+  <div class="card full-card" style="margin-top:12px">
+    <div class="card-head"><div class="card-title">高频功能关键词</div></div>
+    <div id="wr-keywords" style="padding:14px 20px"></div>
   </div>
 </div>
 
@@ -2260,126 +2253,305 @@ function refreshWeeklyReview(callback) {
 }
 
 // ====== 评论周报 ======
+// ============================================================
+// 评论周报（page-weekly-review）：三段式 — 顶部标签总结 / 中部本地化 / 底部原始报告
+// 数据来源：window.WEEKLY_REVIEW_DATA（AI 文本 + 分布）+ window.REVIEWS_ANALYSIS（情绪 + items）
+// ============================================================
+
+var _wrFilter = { topic: null };
+
 function renderWeeklyReview() {
-  var data = WEEKLY_REVIEW_DATA;
-  if (!data || !data.summary) {
-    document.getElementById('wr-summary').innerHTML = '暂无周报数据。请先运行 <code>python3 competitor_comment/weekly_review.py</code> 生成周报，或点击"生成周报"按钮。';
+  var w = WEEKLY_REVIEW_DATA || {};
+  var ra = REVIEWS_ANALYSIS || { metrics: {}, items: [] };
+
+  document.getElementById('wr-period').textContent =
+    '分析周期：近 ' + (w.days_analyzed || 7) + ' 天 · 共 ' + (w.total_reviews || 0) + ' 条评论';
+
+  renderWrKpi(w, ra);
+  renderWrTopicBars(w.label_distribution || {}, w.total_reviews || 0);
+  renderWrSentimentDonut(ra.metrics.sentiment_count || {});
+  renderWrHeatmap(w.per_competitor || {});
+  renderWrLocalization(w, ra);
+  renderWrKeywords(w.feature_keywords || {});
+  prepareWrRawReports(w);
+}
+
+function _wrPct(n, total) { return total ? Math.round((n||0) * 100 / total) + '%' : '—'; }
+
+function renderWrKpi(w, ra) {
+  var sc = ra.metrics.sentiment_count || {};
+  var total = w.total_reviews || 0;
+  var loc = w.localization_review_count || 0;
+  document.getElementById('wr-kpi').innerHTML =
+    '<div class="metric-card purple"><div class="metric-label">本周总评论</div><div class="metric-value">' + total + '</div><div class="metric-sub">近 ' + (w.days_analyzed || 7) + ' 天</div></div>' +
+    '<div class="metric-card teal"  ><div class="metric-label">正面</div>     <div class="metric-value">' + (sc.positive || 0) + '</div><div class="metric-sub">' + _wrPct(sc.positive, total) + '</div></div>' +
+    '<div class="metric-card warn"  ><div class="metric-label">中性</div>     <div class="metric-value">' + (sc.neutral || 0)  + '</div><div class="metric-sub">' + _wrPct(sc.neutral, total)  + '</div></div>' +
+    '<div class="metric-card danger"><div class="metric-label">负面 / 本地化</div><div class="metric-value">' + (sc.negative || 0) + '</div><div class="metric-sub">本地化相关 ' + loc + ' 条</div></div>';
+}
+
+function renderWrTopicBars(dist, total) {
+  var entries = Object.keys(dist).map(function(k){ return [k, dist[k]]; }).sort(function(a,b){ return b[1] - a[1]; });
+  var el = document.getElementById('wr-topic-bars');
+  if (!entries.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无标签数据</div>';
+    return;
+  }
+  var max = entries[0][1] || 1;
+  el.innerHTML = entries.map(function(kv) {
+    var w_pct = Math.round(kv[1] / max * 100);
+    var pPct = total ? Math.round(kv[1] * 100 / total) : 0;
+    var active = _wrFilter.topic === kv[0];
+    var border = active ? 'var(--accent)' : 'transparent';
+    return '<div onclick="setWrTopicFilter(\'' + kv[0] + '\')" ' +
+      'style="display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:11px;font-family:var(--mono);cursor:pointer;padding:4px 8px;border-radius:4px;border:1px solid ' + border + ';transition:.15s" ' +
+      'onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<span style="min-width:130px;color:var(--text)">' + escapeHtml(kv[0]) + '</span>' +
+      '<div style="flex:1;height:10px;background:var(--surface2);border-radius:3px;overflow:hidden"><div style="width:' + w_pct + '%;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))"></div></div>' +
+      '<span style="min-width:55px;text-align:right;color:var(--muted)">' + kv[1] + ' · ' + pPct + '%</span>' +
+    '</div>';
+  }).join('');
+}
+
+function setWrTopicFilter(topic) {
+  _wrFilter.topic = (_wrFilter.topic === topic) ? null : topic;
+  var w = WEEKLY_REVIEW_DATA || {};
+  renderWrTopicBars(w.label_distribution || {}, w.total_reviews || 0);
+  renderWrLocalization(w, REVIEWS_ANALYSIS || {});
+}
+
+function renderWrSentimentDonut(sc) {
+  var total = (sc.positive || 0) + (sc.neutral || 0) + (sc.negative || 0);
+  var el = document.getElementById('wr-sentiment-donut');
+  var meta = document.getElementById('wr-sentiment-meta');
+  if (meta) meta.textContent = total > 0 ? '共 ' + total + ' 条' : '';
+  if (!total) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无情绪数据</div>';
+    return;
+  }
+  var size = 160, r = 70, cx = 80, cy = 80;
+  var slices = ['positive','neutral','negative'];
+  var styles = (typeof REVIEW_SENTIMENT_STYLE !== 'undefined') ? REVIEW_SENTIMENT_STYLE : {
+    positive: {label:'正面', color:'var(--accent2)'},
+    neutral:  {label:'中性', color:'var(--muted)'},
+    negative: {label:'负面', color:'var(--danger)'},
+  };
+  var startAngle = -Math.PI / 2;
+  var html = '<div style="display:flex;align-items:center;gap:24px"><svg viewBox="0 0 ' + size + ' ' + size + '" xmlns="http://www.w3.org/2000/svg" style="width:160px;height:160px;flex-shrink:0">';
+  slices.forEach(function(s){
+    var n = sc[s] || 0;
+    if (!n) return;
+    var pct = n / total;
+    if (pct >= 1) {
+      html += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + styles[s].color + '" opacity="0.85"/>';
+      return;
+    }
+    var endAngle = startAngle + pct * 2 * Math.PI;
+    var x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
+    var x2 = cx + r * Math.cos(endAngle),   y2 = cy + r * Math.sin(endAngle);
+    var largeArc = pct > 0.5 ? 1 : 0;
+    var d = ['M', cx, cy, 'L', x1.toFixed(2), y1.toFixed(2), 'A', r, r, 0, largeArc, 1, x2.toFixed(2), y2.toFixed(2), 'Z'].join(' ');
+    html += '<path d="' + d + '" fill="' + styles[s].color + '" opacity="0.85"><title>' + styles[s].label + ' ' + n + ' 条</title></path>';
+    startAngle = endAngle;
+  });
+  html += '</svg><div style="font-size:12px;font-family:var(--mono);flex:1">';
+  slices.forEach(function(s){
+    var n = sc[s] || 0;
+    var p = total ? Math.round(n * 100 / total) : 0;
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + styles[s].color + '"></span><span style="color:var(--text);min-width:36px">' + styles[s].label + '</span><span style="color:var(--muted);margin-left:auto">' + n + ' · ' + p + '%</span></div>';
+  });
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+function renderWrHeatmap(perComp) {
+  var competitors = Object.keys(perComp || {}).sort();
+  var el = document.getElementById('wr-heatmap');
+  if (!competitors.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无竞品数据</div>';
+    return;
+  }
+  // 收集所有标签 + 构建 cells
+  var topicSet = {}, cells = {}, maxV = 1;
+  competitors.forEach(function(c){
+    cells[c] = {};
+    var labels = {};
+    Object.values(perComp[c].regions || {}).forEach(function(r){
+      Object.keys(r.labels || {}).forEach(function(t){
+        labels[t] = (labels[t] || 0) + r.labels[t];
+        topicSet[t] = true;
+      });
+    });
+    Object.keys(perComp[c].labels || {}).forEach(function(t){
+      labels[t] = (labels[t] || 0) + perComp[c].labels[t];
+      topicSet[t] = true;
+    });
+    Object.keys(labels).forEach(function(t){
+      cells[c][t] = labels[t];
+      if (labels[t] > maxV) maxV = labels[t];
+    });
+  });
+  var topics = Object.keys(topicSet);
+  if (!topics.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无标签命中数据</div>';
     return;
   }
 
-  // 指标卡片
-  document.getElementById('wr-days').textContent = data.days_analyzed || 7;
-  document.getElementById('wr-total').textContent = data.total_reviews || 0;
-  var compCount = Object.keys(data.per_competitor || {}).length;
-  document.getElementById('wr-total-detail').textContent = '涉及 ' + compCount + ' 个竞品';
-  document.getElementById('wr-localization').textContent = data.localization_review_count || 0;
-  document.getElementById('wr-localization-detail').textContent = '条本地化相关评论';
-  var genTime = data.generated_at || '';
-  document.getElementById('wr-time').textContent = genTime ? genTime.slice(0, 10) : '—';
-  document.getElementById('wr-time-detail').textContent = genTime ? genTime.slice(11, 16) : '—';
+  var html = '<table style="border-collapse:collapse;font-size:11px;font-family:var(--mono);min-width:100%"><tr>' +
+    '<th style="text-align:left;padding:6px 10px;color:var(--muted);font-weight:400"></th>';
+  topics.forEach(function(t){
+    html += '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:400;height:90px;vertical-align:bottom"><div style="writing-mode:vertical-rl;transform:rotate(180deg)">' + escapeHtml(t) + '</div></th>';
+  });
+  html += '</tr>';
+  competitors.forEach(function(c){
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[c]) || 'var(--accent)';
+    html += '<tr><td style="padding:6px 10px;color:var(--text);white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:6px;vertical-align:middle"></span>' + escapeHtml(c) + '</td>';
+    topics.forEach(function(t){
+      var v = cells[c][t] || 0;
+      var alpha = v ? (0.15 + 0.85 * v / maxV) : 0;
+      var bg = v ? 'rgba(123,110,246,' + alpha.toFixed(2) + ')' : 'var(--surface2)';
+      var txtColor = v > maxV * 0.55 ? '#fff' : 'var(--muted)';
+      html += '<td onclick="setWrTopicFilter(\'' + t + '\')" style="text-align:center;padding:8px;background:' + bg + ';color:' + txtColor + ';border:1px solid var(--bg);cursor:pointer" title="' + escapeHtml(c) + ' · ' + escapeHtml(t) + ': ' + v + '">' + (v || '·') + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</table>';
+  el.innerHTML = html;
+}
 
-  // 核心发现
-  if (data.summary) {
-    document.getElementById('wr-summary').innerHTML = '<div style="background:rgba(123,110,246,0.07);border:1px solid rgba(123,110,246,0.2);border-radius:10px;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--text)">' + markdownToHtml(data.summary) + '</div>';
+function renderWrLocalization(w, ra) {
+  var byRegion = w.localization_by_region || {};
+  var entries = Object.keys(byRegion).map(function(k){ return [k, byRegion[k]]; }).sort(function(a,b){ return b[1] - a[1]; });
+  document.getElementById('wr-loc-meta').textContent =
+    '本周本地化相关评论 ' + (w.localization_review_count || 0) + ' 条 · 涉及 ' + entries.length + ' 个地区' +
+    (_wrFilter.topic ? ' · 已筛选标签：' + _wrFilter.topic : '');
+
+  var barsEl = document.getElementById('wr-loc-bars');
+  var cardsEl = document.getElementById('wr-loc-cards');
+  if (!entries.length) {
+    barsEl.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无本地化问题</div>';
+    cardsEl.innerHTML = '';
+    return;
   }
 
-  // 各竞品分析摘要
-  var perCompHtml = '';
-  var competitors = data.per_competitor || {};
-  var compKeys = Object.keys(competitors);
-  if (compKeys.length > 0) {
-    compKeys.forEach(function(name) {
-      var info = competitors[name];
-      var total = info.total || 0;
-      var regions = info.regions || {};
-      var regionLabels = Object.keys(regions).map(function(code) {
-        return code.toUpperCase() + '(' + regions[code].count + '条)';
-      }).join(' ');
-      var labelSummary = '';
-      var allLabels = {};
-      for (var code in regions) {
-        var labels = regions[code].labels || {};
-        for (var l in labels) {
-          allLabels[l] = (allLabels[l] || 0) + labels[l];
-        }
-      }
-      var labelKeys = Object.keys(allLabels);
-      if (labelKeys.length > 0) {
-        labelSummary = labelKeys.map(function(l) {
-          var color = 'var(--accent)';
-          if (l.indexOf('高价值功能请求') > -1) color = 'var(--danger)';
-          else if (l.indexOf('问题抱怨') > -1) color = 'var(--warn)';
-          else if (l.indexOf('竞品对比') > -1) color = 'var(--accent2)';
-          else if (l.indexOf('流失信号') > -1) color = 'var(--danger)';
-          else if (l.indexOf('正向反馈') > -1) color = 'var(--accent)';
-          return '<span style="font-size:10px;font-family:var(--mono);color:' + color + ';background:rgba(123,110,246,0.08);padding:2px 8px;border-radius:4px;margin-right:4px">' + l + ': ' + allLabels[l] + '</span>';
+  var max = entries[0][1] || 1;
+  barsEl.innerHTML = entries.map(function(kv) {
+    var w_pct = Math.round(kv[1] / max * 100);
+    var color = kv[1] >= 10 ? 'var(--danger)' : kv[1] >= 5 ? 'var(--warn)' : 'var(--accent2)';
+    return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:11px;font-family:var(--mono)">' +
+      '<span style="min-width:100px;color:var(--text)">' + escapeHtml(kv[0]) + '</span>' +
+      '<div style="flex:1;height:10px;background:var(--surface2);border-radius:3px;overflow:hidden"><div style="width:' + w_pct + '%;height:100%;background:' + color + '"></div></div>' +
+      '<span style="min-width:30px;text-align:right;color:' + color + '">' + kv[1] + '</span>' +
+    '</div>';
+  }).join('');
+
+  // 卡片：每地区 Top 3 negative items（从 REVIEWS_ANALYSIS 派生）
+  var raItems = (ra && ra.items) || [];
+  var byRegionItems = {};
+  raItems.forEach(function(it){
+    if (it.sentiment === 'negative' && it.region_label) {
+      (byRegionItems[it.region_label] = byRegionItems[it.region_label] || []).push(it);
+    }
+  });
+
+  cardsEl.innerHTML = entries.map(function(kv) {
+    var region = kv[0], count = kv[1];
+    var items = (byRegionItems[region] || []);
+    if (_wrFilter.topic) {
+      items = items.filter(function(it){ return it.label === _wrFilter.topic; });
+    }
+    var top3 = items.slice(0, 3);
+    var color = count >= 10 ? 'var(--danger)' : count >= 5 ? 'var(--warn)' : 'var(--accent2)';
+    var samples = top3.length
+      ? top3.map(function(it){
+          return '<div style="border-left:2px solid ' + color + ';padding:6px 12px;margin-top:6px">' +
+            '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:3px">' + escapeHtml(it.competitor) + ' · ' + escapeHtml(it.label || '无标签') + ' · v' + escapeHtml(it.version || '?') + '</div>' +
+            '<div style="font-size:12px;color:var(--text);line-height:1.6">' + escapeHtml((it.content || '').slice(0, 200)) + '</div>' +
+          '</div>';
+        }).join('')
+      : '<div style="color:var(--muted);font-size:11px;margin-top:6px">无对应评论样本（仅有计数）</div>';
+    return '<div style="border:1px solid ' + color + ';border-radius:8px;padding:12px 16px;margin-bottom:10px;background:var(--surface2)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+        '<div style="font-size:13px;font-weight:600;color:var(--text)">' + escapeHtml(region) + '</div>' +
+        '<div style="font-size:11px;font-family:var(--mono);color:' + color + '">' + count + ' 条本地化问题</div>' +
+      '</div>' + samples +
+    '</div>';
+  }).join('');
+}
+
+function renderWrKeywords(keywords) {
+  var keys = Object.keys(keywords || {});
+  var el = document.getElementById('wr-keywords');
+  if (!keys.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无关键词数据</div>';
+    return;
+  }
+  var maxVal = Math.max.apply(null, keys.map(function(k){ return keywords[k]; }));
+  var minVal = Math.min.apply(null, keys.map(function(k){ return keywords[k]; }));
+  var palette = ['var(--text)', 'var(--accent)', 'var(--accent2)', 'var(--warn)', 'var(--danger)', 'var(--muted)'];
+  var html = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0">';
+  keys.slice(0, 30).forEach(function(word, i){
+    var fontSize = 11 + (keywords[word] - minVal) / Math.max(1, maxVal - minVal) * 16;
+    var color = palette[i % palette.length];
+    html += '<span style="font-size:' + fontSize.toFixed(0) + 'px;font-weight:' + (keywords[word] === maxVal ? '600' : '400') + ';color:' + color + ';font-family:var(--display)">' + escapeHtml(word) + '</span>';
+  });
+  html += '</div>';
+  html += '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);padding-top:8px;border-top:1px solid var(--border)">字号越大 = 提及越多 · 共 ' + keys.length + ' 个关键词</div>';
+  el.innerHTML = html;
+}
+
+function prepareWrRawReports(w) {
+  document.getElementById('wr-summary-body').innerHTML = w.summary
+    ? markdownToHtml(w.summary)
+    : '<div style="color:var(--muted);font-size:13px">暂无摘要 — 点击右上角"重新生成"</div>';
+
+  var pc = w.per_competitor || {};
+  var pcHtml = Object.keys(pc).length
+    ? Object.keys(pc).sort().map(function(name){
+        var c = pc[name];
+        var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[name]) || 'var(--accent)';
+        var regions = Object.keys(c.regions || {}).map(function(rk){
+          var r = c.regions[rk];
+          var labels = Object.keys(r.labels || {}).map(function(l){
+            return '<span style="font-size:10px;font-family:var(--mono);color:var(--muted);background:var(--surface2);padding:2px 8px;border-radius:4px;margin-right:4px">' + escapeHtml(l) + ': ' + r.labels[l] + '</span>';
+          }).join('');
+          return '<div style="margin-top:6px;padding:6px 10px;border-left:2px solid var(--border)">' +
+            '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">' +
+              escapeHtml(rk.toUpperCase()) + ' · ' + r.count + ' 条' +
+            '</div>' + (labels || '') +
+          '</div>';
         }).join('');
-      }
+        return '<div style="margin-bottom:18px">' +
+          '<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:8px;vertical-align:middle"></span>' + escapeHtml(name) + ' · ' + (c.total || 0) + ' 条评论</div>' +
+          regions +
+        '</div>';
+      }).join('')
+    : '<div style="color:var(--muted);font-size:13px">暂无数据</div>';
+  document.getElementById('wr-per-comp-body').innerHTML = pcHtml;
 
-      perCompHtml += '<div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">';
-      perCompHtml += '<div style="font-size:13px;font-weight:500;margin-bottom:4px">' + name + '</div>';
-      perCompHtml += '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">评论: ' + total + ' 条 · ' + regionLabels + '</div>';
-      if (labelSummary) perCompHtml += '<div style="display:flex;gap:4px;flex-wrap:wrap">' + labelSummary + '</div>';
-      perCompHtml += '</div>';
-    });
-  } else {
-    perCompHtml = '<div style="color:var(--muted);font-size:13px">暂无竞品数据</div>';
-  }
-  document.getElementById('wr-per-competitor').innerHTML = perCompHtml;
+  document.getElementById('wr-loc-body').innerHTML = w.localization_insight
+    ? markdownToHtml(w.localization_insight)
+    : '<div style="color:var(--muted);font-size:13px">暂无本地化深度分析</div>';
+}
 
-  // 本地化专题
-  if (data.localization_insight) {
-    document.getElementById('wr-localization-content').innerHTML = '<div style="background:rgba(78,204,163,0.07);border:1px solid rgba(78,204,163,0.2);border-radius:10px;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--text)">' + markdownToHtml(data.localization_insight) + '</div>';
-  }
+function toggleWrSection(key) {
+  var body = document.getElementById('wr-' + key + '-body');
+  var toggle = document.getElementById('wr-' + key + '-toggle');
+  if (!body) return;
+  var visible = body.style.display !== 'none';
+  body.style.display = visible ? 'none' : 'block';
+  if (toggle) toggle.textContent = visible ? '展开 ▼' : '折叠 ▲';
+}
 
-  // 标签分布
-  var labelDist = data.label_distribution || {};
-  var labelKeys = Object.keys(labelDist);
-  if (labelKeys.length > 0) {
-    var maxCount = Math.max.apply(null, labelKeys.map(function(k) { return labelDist[k]; }));
-    var labelHtml = '<div style="display:flex;flex-direction:column;gap:10px">';
-    labelKeys.forEach(function(l) {
-      var count = labelDist[l];
-      var pct = (count / (data.total_reviews || 1) * 100).toFixed(0);
-      var width = (count / maxCount * 100).toFixed(0);
-      var color = 'var(--accent)';
-      if (l.indexOf('高价值功能请求') > -1) color = 'var(--danger)';
-      else if (l.indexOf('问题抱怨') > -1) color = 'var(--warn)';
-      else if (l.indexOf('竞品对比') > -1) color = 'var(--accent2)';
-      else if (l.indexOf('流失信号') > -1) color = 'var(--danger)';
-      else if (l.indexOf('正向反馈') > -1) color = 'var(--accent)';
-      labelHtml += '<div style="display:flex;align-items:center;gap:12px">';
-      labelHtml += '<span style="font-size:12px;color:var(--muted);width:80px;flex-shrink:0">' + l + '</span>';
-      labelHtml += '<div style="flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden">';
-      labelHtml += '<div style="height:100%;width:' + width + '%;background:' + color + ';border-radius:4px"></div></div>';
-      labelHtml += '<span style="font-size:12px;font-family:var(--mono);color:' + color + ';width:60px;text-align:right">' + count + ' (' + pct + '%)</span>';
-      labelHtml += '</div>';
-    });
-    labelHtml += '</div>';
-    document.getElementById('wr-label-dist').innerHTML = labelHtml;
-  } else {
-    document.getElementById('wr-label-dist').innerHTML = '<div style="color:var(--muted);font-size:13px">暂无标签数据</div>';
-  }
-
-  // 功能关键词
-  var keywords = data.feature_keywords || {};
-  var kwKeys = Object.keys(keywords);
-  if (kwKeys.length > 0) {
-    var maxVal = Math.max.apply(null, kwKeys.map(function(k) { return keywords[k]; }));
-    var minVal = Math.min.apply(null, kwKeys.map(function(k) { return keywords[k]; }));
-    var kwColors = ['var(--text)', 'var(--accent)', 'var(--accent2)', 'var(--warn)', 'var(--danger)', 'var(--muted)'];
-    var kwHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0">';
-    kwKeys.slice(0, 30).forEach(function(word, i) {
-      var fontSize = 11 + (keywords[word] - minVal) / Math.max(1, maxVal - minVal) * 16;
-      var color = kwColors[i % kwColors.length];
-      kwHtml += '<span style="font-size:' + fontSize.toFixed(0) + 'px;font-weight:' + (keywords[word] === maxVal ? '600' : '400') + ';color:' + color + ';font-family:var(--display)">' + escapeHtml(word) + '</span>\n';
-    });
-    kwHtml += '</div>';
-    kwHtml += '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);padding-top:8px;border-top:1px solid var(--border)">字号越大 = 提及越多 · 共 ' + kwKeys.length + ' 个关键词</div>';
-    document.getElementById('wr-keywords').innerHTML = kwHtml;
-  } else {
-    document.getElementById('wr-keywords').innerHTML = '<div style="color:var(--muted);font-size:13px">暂无关键词数据</div>';
-  }
+function downloadWeeklyPDF() {
+  // 简单方案：浏览器打印对话框 → 用户保存 PDF（无外部依赖）
+  // 展开所有原始报告再打印，避免内容缺失
+  ['summary','per-comp','loc'].forEach(function(k){
+    var body = document.getElementById('wr-' + k + '-body');
+    if (body) body.style.display = 'block';
+    var toggle = document.getElementById('wr-' + k + '-toggle');
+    if (toggle) toggle.textContent = '折叠 ▲';
+  });
+  setTimeout(function(){ window.print(); }, 100);
 }
 
 // ====== HTML 转义 ======
@@ -2390,28 +2562,66 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// ====== Markdown 转 HTML（轻量版） ======
+// ====== Markdown 转 HTML（轻量版，支持表格 / 标题 / 列表 / 加粗 / 行内代码） ======
 function markdownToHtml(md) {
   if (!md) return '';
-  var html = escapeHtml(md);
-  // 标题: ## 标题 -> <h3>标题</h3>
+  // 1. 先抽出表格块作为占位符（escapeHtml 之前），避免 | 被破坏
+  var tablePlaceholders = [];
+  var tableRe = /(^\|[^\n]+\|\n\|[\s|:\-]+\|\n(?:\|[^\n]+\|\n?)+)/gm;
+  var withoutTables = md.replace(tableRe, function(match) {
+    var idx = tablePlaceholders.length;
+    tablePlaceholders.push(_renderMdTable(match.trim()));
+    return '\u0000TBL' + idx + '\u0000';
+  });
+
+  var html = escapeHtml(withoutTables);
+
+  // 标题
   html = html.replace(/^### (.+)$/gm, '<h3 style="font-size:15px;font-weight:600;margin:16px 0 8px;color:var(--text)">$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2 style="font-size:17px;font-weight:700;margin:18px 0 10px;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:6px">$1</h2>');
-  // 加粗: **text** -> <strong>text</strong>
+  html = html.replace(/^# (.+)$/gm, '<h1 style="font-size:19px;font-weight:700;margin:20px 0 12px;color:var(--text)">$1</h1>');
+  // 加粗 / 斜体 / 行内代码
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--accent)">$1</strong>');
-  // 列表: - item -> <li>item</li>
+  html = html.replace(/(?:^|[^_])_([^_\n]+)_(?!_)/g, function(_m, p1, off, str) {
+    var prev = off > 0 ? str.charAt(off - 1) : '';
+    return prev + '<em style="color:var(--text)">' + p1 + '</em>';
+  });
+  html = html.replace(/`([^`\n]+)`/g, '<code style="font-family:var(--mono);font-size:11px;background:var(--surface2);padding:1px 6px;border-radius:3px;color:var(--accent2)">$1</code>');
+  // 无序 / 有序列表
   html = html.replace(/^- (.+)$/gm, '<li style="margin:4px 0 4px 16px;color:var(--muted)">$1</li>');
-  // 数字列表: 1. item -> <li>item</li>
   html = html.replace(/^\d+\.\s+(.+)$/gm, '<li style="margin:4px 0 4px 16px;color:var(--muted)">$1</li>');
-  // 换行: 连续两个换行 -> </p><p>
+  // 换行
   html = html.replace(/\n\n/g, '</p><p style="margin:8px 0;line-height:1.8">');
-  // 单个换行 -> <br>
   html = html.replace(/\n/g, '<br>');
-  // 包裹段落
   html = '<p style="margin:8px 0;line-height:1.8">' + html + '</p>';
-  // 清理多余的嵌套
   html = html.replace(/<p[^>]*><\/p>/g, '');
+
+  // 2. 把表格占位符还原（已经是 HTML，不再转义）
+  html = html.replace(/\u0000TBL(\d+)\u0000/g, function(_m, i) { return tablePlaceholders[parseInt(i, 10)] || ''; });
+
   return html;
+}
+
+function _renderMdTable(block) {
+  var lines = block.split('\n').filter(function(l){ return l.trim(); });
+  if (lines.length < 2) return escapeHtml(block);
+  var rows = lines.map(function(l){
+    return l.split('|').slice(1, -1).map(function(c){ return c.trim(); });
+  });
+  rows.splice(1, 1);  // 去掉分隔行 |---|---|
+  var thead = '<tr>' + rows[0].map(function(c){
+    return '<th style="padding:8px 12px;border-bottom:1px solid var(--border);text-align:left;color:var(--text);font-size:12px;font-weight:600;background:var(--surface2)">' + escapeHtml(c) + '</th>';
+  }).join('') + '</tr>';
+  var tbody = rows.slice(1).map(function(r){
+    return '<tr>' + r.map(function(c){
+      // 行内 markdown：加粗 + 行内代码
+      var cell = escapeHtml(c)
+        .replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--accent)">$1</strong>')
+        .replace(/`([^`\n]+)`/g, '<code style="font-family:var(--mono);font-size:11px;background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--accent2)">$1</code>');
+      return '<td style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)">' + cell + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  return '<table style="border-collapse:collapse;margin:12px 0;width:100%;border:1px solid var(--border);border-radius:6px;overflow:hidden">' + thead + tbody + '</table>';
 }
 
 // ============================================================
