@@ -380,13 +380,21 @@ def build_competitor_list():
     return "\n".join(items) if items else '<div class="nav-item" style="color:var(--muted);font-size:12px">暂无竞品数据</div>'
 
 # ---------------------------------------------------------------------------
-# 构建预警（基于三条规则）
-# 规则1: 竞品出现低星评论
-# 规则2: 体育榜上app在一周内排名上升>10位
-# 规则3: 竞品app进行版本迭代，涉及功能内容，需要检查
+# 预警（v2 — 全部由 data_pipeline.alert_engine 产出）
+#
+# 旧版本曾在本文件 build_alerts() 内重复实现 4 条规则；v2 后台聚合层已统一
+# 通过 alert_engine 生成 dashboard_data.alerts，本文件直接消费。
+# 保留 build_alerts() 函数名只为减少调用方迁移成本，行为是一致读 JSON。
 # ---------------------------------------------------------------------------
 
+
 def build_alerts():
+    """读 dashboard_data.alerts（来自 alert_engine）并以 dict 形式返回。"""
+    return list(_dashboard_data.get("alerts") or [])
+
+
+def _legacy_build_alerts_disabled():
+    """旧 build_alerts 实现已禁用（保留以备回滚参考），不再执行。"""
     """根据三条预警规则生成预警列表"""
     alerts = []
 
@@ -593,15 +601,21 @@ def build_alert_strip_html(alerts):
 
 
 def build_alert_page_html(alerts):
-    """构建预警中心页面"""
-    if not alerts:
-        return """
-        <div class="card full-card">
-          <div style="padding:40px 20px;text-align:center;color:var(--muted);font-size:13px">
-            当前无预警，所有竞品状态正常
-          </div>
-        </div>
-        """
+    """v2: page-alerts 改为 JS 渲染，本函数返回空（保留接口兼容）。"""
+    return ""
+
+
+def build_alerts_data_json(alerts):
+    """把 alerts 列表序列化为 JS 字面量（注入到 ALERTS_DATA_PLACEHOLDER）。
+
+    每条 alert 必含字段：type / severity / severity_label / title / desc / time /
+    competitor / payload，与 schema.Alert.to_dict 完全一致。
+    """
+    return json.dumps(list(alerts or []), ensure_ascii=False)
+
+
+def _legacy_alert_page_disabled(alerts):
+    """旧 page-alerts HTML 渲染（保留参考）。"""
 
     severity_config = {
         "danger": {"border": "var(--danger)", "label": "高威胁", "cls": "ft-feature"},
@@ -1528,6 +1542,7 @@ def generate():
         "<!-- TOTAL_NEGATIVE_PLACEHOLDER -->": str(metrics["total_negative"]),
         "<!-- ALERT_STRIP_PLACEHOLDER -->": build_alert_strip_html(alerts),
         "<!-- ALERT_PAGE_PLACEHOLDER -->": build_alert_page_html(alerts),
+        "<!-- ALERTS_DATA_PLACEHOLDER -->": build_alerts_data_json(alerts),
         "<!-- ALERT_COUNT_PLACEHOLDER -->": str(len(alerts)),
         "<!-- FEED_ITEMS_PLACEHOLDER -->": build_feed_html(),
         "<!-- KEYWORD_CLOUD_PLACEHOLDER -->": build_keyword_cloud(),

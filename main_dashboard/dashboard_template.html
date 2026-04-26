@@ -433,12 +433,37 @@ body::before {
   <div class="page-header">
     <div>
       <div class="page-title">预警中心</div>
-      <div class="page-sub">本周高优先级事件需要关注</div>
+      <div class="page-sub" id="alerts-subtitle">本周高优先级事件需要关注</div>
     </div>
-    <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="resetAlertFilters()">重置筛选</button>
+      <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+    </div>
   </div>
-  <!-- ALERT_PAGE_PLACEHOLDER -->
 
+  <!-- 筛选条 -->
+  <div class="card full-card" style="padding:14px 20px;margin-bottom:16px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11px;font-family:var(--mono);color:var(--muted)">筛选</span>
+      <select id="alert-filter-module" class="prod-select" style="font-size:11px"></select>
+      <select id="alert-filter-comp" class="prod-select" style="font-size:11px"></select>
+      <select id="alert-filter-window" class="prod-select" style="font-size:11px"></select>
+      <div style="display:flex;gap:10px;align-items:center;font-size:11px;font-family:var(--mono);color:var(--muted)">
+        <span>风险</span>
+        <label style="cursor:pointer"><input type="checkbox" id="alert-sev-danger" style="vertical-align:middle;margin-right:3px"/><span style="color:var(--danger)">高</span></label>
+        <label style="cursor:pointer"><input type="checkbox" id="alert-sev-warn" style="vertical-align:middle;margin-right:3px"/><span style="color:var(--warn)">中</span></label>
+        <label style="cursor:pointer"><input type="checkbox" id="alert-sev-info" style="vertical-align:middle;margin-right:3px"/><span style="color:var(--accent2)">低</span></label>
+      </div>
+      <input id="alert-search" placeholder="搜索关键词 / 竞品..." style="font-size:11px;padding:5px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);width:180px;font-family:var(--mono)"/>
+      <span style="margin-left:auto;font-size:10px;color:var(--muted);font-family:var(--mono)" id="alert-filter-meta"></span>
+    </div>
+  </div>
+
+  <!-- KPI 行 -->
+  <div class="metrics-row" id="alert-kpi" style="grid-template-columns:repeat(4,minmax(160px,1fr))"></div>
+
+  <!-- 卡片信息流 -->
+  <div id="alert-list" style="margin-top:16px"></div>
 </div>
 
 <!-- PAGE: PRODUCT -->
@@ -1230,6 +1255,7 @@ var COMMUNITY_DATA = <!-- COMMUNITY_DATA_PLACEHOLDER -->;
 var RANK_DATA = <!-- RANK_DATA_PLACEHOLDER -->;
 var PRODUCT_UPDATES = <!-- PRODUCT_UPDATES_DATA_PLACEHOLDER -->;
 var REVIEWS_ANALYSIS = <!-- REVIEWS_ANALYSIS_DATA_PLACEHOLDER -->;
+var ALERTS_DATA = <!-- ALERTS_DATA_PLACEHOLDER -->;
 
 // ====== 页面切换 ======
 function showPage(name) {
@@ -1247,6 +1273,7 @@ function showPage(name) {
   if (name === 'commercial') { renderCommercialPage(); renderCommercialWeekly(); }
   if (name === 'community') renderCommunityPage();
   if (name === 'ranking') renderRankPage();
+  if (name === 'alerts') renderAlertPage();
   if (name === 'ranking-full') renderRankFullPage();
   if (name === 'product') renderProductPage();
   if (name === 'reviews') renderReviewsPage();
@@ -4640,6 +4667,312 @@ function renderCmtyAllPosts(comps, modeAll) {
     inp._cmtyInit = true;
   }
   _renderCmtyAllPostsBody();
+}
+
+// ============================================================
+// 预警中心 v2（JSON-driven · 筛选 · KPI · 折叠卡 · 跳转联动）
+// 数据：window.ALERTS_DATA = [Alert dict]
+// ============================================================
+
+var _alertFilters = {
+  module: 'all', competitor: 'all', window: 7,
+  search: '',
+  sev: { danger: true, warn: true, info: true },
+  expanded: {},
+};
+
+var ALERT_MODULE_LABELS = {
+  rank: '排名', review: '评论', community: '社媒', product: '产品',
+  ads: '广告', iap: 'IAP', commercial: '商业', download: '下载',
+};
+var ALERT_SEV_COLORS = { danger: 'var(--danger)', warn: 'var(--warn)', info: 'var(--accent2)' };
+var ALERT_SEV_LABELS = { danger: '高', warn: '中', info: '低' };
+
+function _alertModule(a) { return ((a.payload || {}).module) || 'other'; }
+function _alertDate(a)   { return ((a.payload || {}).date) || a.time || ''; }
+
+function _alertWithinWindow(a, days) {
+  if (days >= 9999) return true;
+  var d = _alertDate(a);
+  if (!d || d.length < 10) return true;
+  try {
+    var t = new Date(d.slice(0,10)).getTime();
+    if (isNaN(t)) return true;
+    return (Date.now() - t) / 86400000 <= days;
+  } catch(e) { return true; }
+}
+
+function _getAlertModules() {
+  var s = {};
+  (ALERTS_DATA || []).forEach(function(a){ s[_alertModule(a)] = true; });
+  return Object.keys(s).sort();
+}
+function _getAlertCompetitors() {
+  var s = {};
+  (ALERTS_DATA || []).forEach(function(a){ if (a.competitor) s[a.competitor] = true; });
+  return Object.keys(s).sort();
+}
+
+function _applyAlertFilters() {
+  var arr = ALERTS_DATA || [];
+  var f = _alertFilters;
+  return arr.filter(function(a){
+    if (!f.sev[a.severity]) return false;
+    if (f.module !== 'all' && _alertModule(a) !== f.module) return false;
+    if (f.competitor !== 'all' && a.competitor !== f.competitor) return false;
+    if (!_alertWithinWindow(a, f.window)) return false;
+    if (f.search) {
+      var s = f.search.toLowerCase();
+      var hay = ((a.title||'') + ' ' + (a.desc||'') + ' ' + (a.competitor||'')).toLowerCase();
+      if (hay.indexOf(s) < 0) return false;
+    }
+    return true;
+  });
+}
+
+function renderAlertPage() {
+  if (!ALERTS_DATA) ALERTS_DATA = [];
+  _loadAlertFilters();
+
+  // 筛选 select / input 初始化（幂等）
+  var modSel = document.getElementById('alert-filter-module');
+  if (modSel) {
+    modSel.innerHTML = '<option value="all">全部模块</option>' + _getAlertModules().map(function(m){
+      var sel = m === _alertFilters.module ? ' selected' : '';
+      return '<option value="' + m + '"' + sel + '>' + (ALERT_MODULE_LABELS[m] || m) + '</option>';
+    }).join('');
+    modSel.onchange = function(){ _alertFilters.module = this.value; _persistAlertFilters(); renderAlertPage(); };
+  }
+  var compSel = document.getElementById('alert-filter-comp');
+  if (compSel) {
+    compSel.innerHTML = '<option value="all">全部竞品</option>' + _getAlertCompetitors().map(function(n){
+      var sel = n === _alertFilters.competitor ? ' selected' : '';
+      return '<option value="' + n + '"' + sel + '>' + escapeHtml(n) + '</option>';
+    }).join('');
+    compSel.onchange = function(){ _alertFilters.competitor = this.value; _persistAlertFilters(); renderAlertPage(); };
+  }
+  var winSel = document.getElementById('alert-filter-window');
+  if (winSel) {
+    winSel.innerHTML =
+      '<option value="1">近 24h</option>' +
+      '<option value="7">近 7 天</option>' +
+      '<option value="30">近 30 天</option>' +
+      '<option value="9999">全部</option>';
+    winSel.value = String(_alertFilters.window);
+    winSel.onchange = function(){ _alertFilters.window = parseInt(this.value, 10); _persistAlertFilters(); renderAlertPage(); };
+  }
+  ['danger','warn','info'].forEach(function(sev){
+    var el = document.getElementById('alert-sev-' + sev);
+    if (!el) return;
+    el.checked = !!_alertFilters.sev[sev];
+    el.onchange = function(){ _alertFilters.sev[sev] = this.checked; _persistAlertFilters(); renderAlertPage(); };
+  });
+  var srch = document.getElementById('alert-search');
+  if (srch && document.activeElement !== srch) srch.value = _alertFilters.search;
+  if (srch && !srch._cmtyInit) {
+    srch.oninput = function(){ _alertFilters.search = this.value; _persistAlertFilters(); _renderAlertListOnly(); };
+    srch._cmtyInit = true;
+  }
+
+  _renderAlertListOnly();
+}
+
+function _renderAlertListOnly() {
+  var filtered = _applyAlertFilters();
+  var counts = { danger:0, warn:0, info:0 };
+  filtered.forEach(function(a){ counts[a.severity] = (counts[a.severity]||0) + 1; });
+
+  document.getElementById('alerts-subtitle').textContent =
+    filtered.length + ' 条 · 高 ' + (counts.danger||0) +
+    ' · 中 ' + (counts.warn||0) + ' · 低 ' + (counts.info||0);
+  document.getElementById('alert-filter-meta').textContent =
+    '共 ' + (ALERTS_DATA||[]).length + ' 条 · 当前 ' + filtered.length + ' 条匹配';
+
+  // KPI
+  var compCount = {};
+  filtered.forEach(function(a){
+    if (!a.competitor || a.competitor === '行业') return;
+    compCount[a.competitor] = (compCount[a.competitor]||0) + 1;
+  });
+  var topCompArr = Object.keys(compCount).map(function(k){ return [k, compCount[k]]; })
+    .sort(function(a,b){ return b[1]-a[1]; });
+  var topComp = topCompArr.length ? (topCompArr[0][0] + ' (' + topCompArr[0][1] + ')') : '—';
+  var weekNew = (ALERTS_DATA||[]).filter(function(a){ return _alertWithinWindow(a, 7); }).length;
+  document.getElementById('alert-kpi').innerHTML =
+    '<div class="metric-card purple"><div class="metric-label">待处理</div><div class="metric-value">' + filtered.length + '</div><div class="metric-sub">当前筛选下</div></div>' +
+    '<div class="metric-card teal"><div class="metric-label">本周新增</div><div class="metric-value">' + weekNew + '</div><div class="metric-sub">近 7 天内触发</div></div>' +
+    '<div class="metric-card danger"><div class="metric-label">高风险</div><div class="metric-value">' + (counts.danger||0) + '</div><div class="metric-sub">需立即介入</div></div>' +
+    '<div class="metric-card warn"><div class="metric-label">Top 异常竞品</div><div class="metric-value" style="font-size:18px;line-height:1.4;padding-top:6px">' + escapeHtml(topComp) + '</div><div class="metric-sub">告警条数最多</div></div>';
+
+  var listEl = document.getElementById('alert-list');
+  if (!filtered.length) {
+    listEl.innerHTML = '<div class="card full-card" style="padding:40px 20px;text-align:center;color:var(--muted);font-size:13px">当前筛选下无预警条目</div>';
+    return;
+  }
+  listEl.innerHTML = filtered.map(function(a){ return _renderAlertCard(a); }).join('');
+}
+
+function _alertFingerprint(a) {
+  var rid = (a.payload && a.payload.rule_id) || a.type || '';
+  var d = ((a.payload && a.payload.date) || a.time || '').slice(0, 10);
+  return rid + '|' + (a.competitor || '') + '|' + d;
+}
+
+function _renderAlertCard(a) {
+  var sev = a.severity || 'info';
+  var color = ALERT_SEV_COLORS[sev] || 'var(--muted)';
+  var sevLabel = ALERT_SEV_LABELS[sev] || '低';
+  var mod = _alertModule(a);
+  var modLabel = ALERT_MODULE_LABELS[mod] || mod;
+  var comp = a.competitor || '—';
+  var compColor = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[comp]) || 'var(--muted)';
+  var time = ((_alertDate(a) || a.time || '')).toString().slice(0, 10) || (a.time || '');
+  var fp = _alertFingerprint(a);
+  var fpAttr = fp.replace(/\\/g, '\\\\').replace(/\'/g, "\\'");
+  var expanded = !!_alertFilters.expanded[fp];
+
+  return '<div class="card" style="margin-bottom:12px;border-left:3px solid ' + color + '">' +
+    '<div style="padding:14px 18px;cursor:pointer" onclick="toggleAlertCard(\'' + fpAttr + '\')">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">' +
+        '<span style="padding:2px 9px;border-radius:4px;background:' + color + ';color:#fff;font-size:10px;font-family:var(--mono);font-weight:500">' + sevLabel + '</span>' +
+        '<span style="padding:1px 8px;border-radius:3px;background:var(--surface2);color:var(--muted);font-size:10px;font-family:var(--mono)">' + modLabel + '</span>' +
+        '<span style="font-family:var(--mono);font-size:11px;color:var(--text)"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + compColor + ';margin-right:6px;vertical-align:middle"></span>' + escapeHtml(comp) + '</span>' +
+        '<span style="margin-left:auto;font-size:10px;color:var(--muted);font-family:var(--mono)">' + escapeHtml(time) + '</span>' +
+        '<span style="font-size:11px;color:var(--muted);font-family:var(--mono)">' + (expanded ? '收起 ▲' : '展开 ▼') + '</span>' +
+      '</div>' +
+      '<div style="font-weight:500;font-size:13px;color:var(--text);margin-bottom:4px">' + escapeHtml(a.title || '') + '</div>' +
+      '<div style="font-size:11px;color:var(--muted);line-height:1.6">' + escapeHtml(a.desc || '') + '</div>' +
+    '</div>' +
+    (expanded ? _renderAlertCardBody(a) : '') +
+  '</div>';
+}
+
+function _renderAlertCardBody(a) {
+  var p = a.payload || {};
+  var trend = Array.isArray(p.trend) ? p.trend : [];
+  var trendSvg = trend.length >= 2 ? _renderAlertSparkline(trend) : '';
+  var jumpButtons = _renderAlertJumpButtons(a);
+
+  // 证据块（按 payload 内可用字段就近展示）
+  var samples = '';
+  if (Array.isArray(p.changes) && p.changes.length) {
+    samples = '<div style="font-size:11px;color:var(--muted);margin-top:8px"><div style="font-family:var(--mono);margin-bottom:4px;color:var(--accent)">变更点</div><ul style="margin:0;padding-left:18px">' + p.changes.map(function(c){ return '<li style="margin:2px 0">' + escapeHtml(String(c)) + '</li>'; }).join('') + '</ul></div>';
+  } else if (Array.isArray(p.pains) && p.pains.length) {
+    samples = '<div style="font-size:11px;color:var(--muted);margin-top:8px"><div style="font-family:var(--mono);margin-bottom:4px;color:var(--accent)">关联痛点</div><ul style="margin:0;padding-left:18px">' + p.pains.map(function(c){
+      var topic = c.topic || c.theme || '未分类';
+      return '<li style="margin:2px 0">' + escapeHtml(topic) + ' · severity ' + (c.severity || '?') + ' · ' + (c.frequency || c.count || 0) + ' 次</li>';
+    }).join('') + '</ul></div>';
+  } else if (Array.isArray(p.top_labels) && p.top_labels.length) {
+    samples = '<div style="font-size:11px;color:var(--muted);margin-top:8px"><div style="font-family:var(--mono);margin-bottom:4px;color:var(--accent)">高频标签</div><ul style="margin:0;padding-left:18px">' + p.top_labels.map(function(c){
+      return '<li style="margin:2px 0">' + escapeHtml(String(c[0])) + '（' + c[1] + ' 条）</li>';
+    }).join('') + '</ul></div>';
+  } else if (Array.isArray(p.top_topics) && p.top_topics.length) {
+    samples = '<div style="font-size:11px;color:var(--muted);margin-top:8px"><div style="font-family:var(--mono);margin-bottom:4px;color:var(--accent)">热门话题</div>' +
+      p.top_topics.map(function(t){ return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--surface2);color:var(--text);font-size:10px;margin:2px 4px 2px 0;font-family:var(--mono)">' + escapeHtml(String(t)) + '</span>'; }).join('') +
+    '</div>';
+  } else if (p.ai_summary) {
+    samples = '<div style="font-size:11px;color:var(--muted);margin-top:8px;border-left:2px solid var(--accent);padding-left:10px;font-style:italic">' + escapeHtml(p.ai_summary) + '</div>';
+  } else if (Array.isArray(p.changed_competitors) && p.changed_competitors.length) {
+    samples = '<div style="font-size:11px;color:var(--muted);margin-top:8px"><div style="font-family:var(--mono);margin-bottom:4px;color:var(--accent)">本期更新竞品</div>' +
+      p.changed_competitors.map(function(n){ return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--surface2);color:var(--text);font-size:10px;margin:2px 4px 2px 0;font-family:var(--mono)">' + escapeHtml(String(n)) + '</span>'; }).join('') +
+    '</div>';
+  }
+
+  // 计算依据
+  var stats = '';
+  function fmt(v){ return (v == null || isNaN(v)) ? '—' : (typeof v === 'number' ? v.toFixed(2) : v); }
+  if (p.baseline) {
+    stats = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);background:var(--surface2);padding:8px 12px;border-radius:4px;margin-top:8px">' +
+      '当前 = ' + fmt(p.value) +
+      '  μ = ' + fmt(p.baseline.mean) +
+      '  σ = ' + fmt(p.baseline.std) +
+      '  n = ' + (p.baseline.n || 0) +
+      (p.z != null ? '  z = ' + fmt(p.z) : '') +
+      (p.k != null ? '  k = ' + p.k : '') +
+      '</div>';
+  } else if (p.threshold != null || p.threshold_pct != null) {
+    var th = p.threshold != null ? p.threshold : (p.threshold_pct + ' (pct)');
+    stats = '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);background:var(--surface2);padding:8px 12px;border-radius:4px;margin-top:8px">' +
+      'rule_id = ' + (p.rule_id || a.type) +
+      '  metric = ' + (p.metric || '—') +
+      '  value = ' + fmt(p.value) +
+      '  threshold = ' + fmt(th) +
+      '</div>';
+  }
+
+  return '<div style="border-top:1px solid var(--border);padding:14px 18px;background:rgba(255,255,255,0.02)">' +
+    (trendSvg ? '<div style="margin-bottom:8px">' + trendSvg + '</div>' : '') +
+    stats +
+    samples +
+    '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">' + jumpButtons + '</div>' +
+  '</div>';
+}
+
+function _renderAlertSparkline(trend) {
+  var W = 360, H = 60, padX = 8, padY = 8;
+  var vals = trend.map(function(d){ return Number(d.value || 0); });
+  var minV = Math.min.apply(null, vals);
+  var maxV = Math.max.apply(null, vals);
+  var range = (maxV - minV) || 1;
+  var step = trend.length > 1 ? (W - padX*2) / (trend.length - 1) : 0;
+  var pts = trend.map(function(d, i){
+    var x = padX + i * step;
+    var y = H - padY - (Number(d.value||0) - minV) / range * (H - padY*2);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' L');
+  var lastX = padX + (trend.length-1) * step;
+  var lastY = H - padY - (Number(trend[trend.length-1].value||0) - minV) / range * (H - padY*2);
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-width:360px">' +
+    '<path d="M' + pts + '" fill="none" stroke="var(--accent)" stroke-width="1.4"/>' +
+    '<circle cx="' + lastX.toFixed(1) + '" cy="' + lastY.toFixed(1) + '" r="3" fill="var(--danger)"/>' +
+    '<text x="' + padX + '" y="11" font-family="DM Mono" font-size="9" fill="var(--muted)">' + minV + '</text>' +
+    '<text x="' + (W-padX) + '" y="11" font-family="DM Mono" font-size="9" fill="var(--muted)" text-anchor="end">' + maxV + '</text>' +
+  '</svg>';
+}
+
+function _renderAlertJumpButtons(a) {
+  var mod = _alertModule(a);
+  var btns = [];
+  function btn(label, page) {
+    return '<button class="btn" style="font-size:11px;padding:5px 12px" onclick="event.stopPropagation();showPage(\'' + page + '\')">' + escapeHtml(label) + '</button>';
+  }
+  if (mod === 'rank' || mod === 'download')      btns.push(btn('查看排名变化', 'ranking'));
+  if (mod === 'review')                          btns.push(btn('查看用户评论', 'reviews'));
+  if (mod === 'community')                       btns.push(btn('查看社媒舆情', 'community'));
+  if (mod === 'product')                         btns.push(btn('查看产品动态', 'product'));
+  if (mod === 'ads' || mod === 'iap' || mod === 'commercial') btns.push(btn('查看商业分析', 'commercial'));
+  return btns.join('');
+}
+
+function toggleAlertCard(fp) {
+  _alertFilters.expanded[fp] = !_alertFilters.expanded[fp];
+  _renderAlertListOnly();
+}
+
+function _persistAlertFilters() {
+  try {
+    localStorage.setItem('alertFilters', JSON.stringify({
+      module: _alertFilters.module, competitor: _alertFilters.competitor,
+      window: _alertFilters.window, search: _alertFilters.search, sev: _alertFilters.sev,
+    }));
+  } catch(e) {}
+}
+function _loadAlertFilters() {
+  if (_alertFilters._loaded) return;
+  try {
+    var s = localStorage.getItem('alertFilters');
+    if (s) {
+      var x = JSON.parse(s);
+      ['module','competitor','window','search'].forEach(function(k){ if (x[k] !== undefined) _alertFilters[k] = x[k]; });
+      if (x.sev) _alertFilters.sev = Object.assign({danger:true,warn:true,info:true}, x.sev);
+    }
+  } catch(e) {}
+  _alertFilters._loaded = true;
+}
+function resetAlertFilters() {
+  _alertFilters = { module:'all', competitor:'all', window:7, search:'', sev:{danger:true,warn:true,info:true}, expanded:{}, _loaded:true };
+  _persistAlertFilters();
+  renderAlertPage();
 }
 
 function _renderCmtyAllPostsBody() {

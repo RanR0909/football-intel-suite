@@ -162,6 +162,22 @@ def _load_ads_ai() -> dict:
     return _load_json("ads_ai_analysis.json") or {}
 
 
+def _load_market_history_csv() -> list[dict]:
+    """加载 market_history.csv 用于动态阈值（download_proxy / revenue_proxy 等）。"""
+    import csv
+    path = DATA_DIR / "market_history.csv"
+    if not path.exists():
+        return []
+    out: list[dict] = []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                out.append(row)
+    except Exception:
+        return []
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 竞品快照构建
 # ---------------------------------------------------------------------------
@@ -796,115 +812,14 @@ def _fill_commercial(snapshots: dict[str, CompetitorSnapshot], commercial: dict)
 # 预警 / Feed / 指标
 # ---------------------------------------------------------------------------
 
-def _build_alerts(snapshots: dict[str, CompetitorSnapshot]) -> list[Alert]:
-    """规则迁移自 generate_dashboard.build_alerts，逻辑保持一致。"""
-    alerts: list[Alert] = []
+def _build_alerts(
+    snapshots: dict[str, CompetitorSnapshot],
+    history: dict | None = None,
+) -> list[Alert]:
+    """委托给 alert_engine。所有规则、阈值、去重逻辑由引擎统一管理。"""
+    from data_pipeline.alert_engine import run as run_alert_engine
 
-    # 规则 1：低星评论
-    for name, snap in snapshots.items():
-        if snap.comments.negative <= 0:
-            continue
-        label_counter = Counter(snap.comments.labels)
-        top = "、".join(f"{lab}({c}条)" for lab, c in label_counter.most_common(3))
-        alerts.append(Alert(
-            type="negative_review",
-            severity="danger",
-            severity_label="高威胁",
-            icon="",
-            title=f"{name} 出现低星评论",
-            desc=f"近 3 天检测到 {snap.comments.negative} 条低星评论，共抓取 {snap.comments.total} 条评论。高频信号：{top or '暂无标签分布'}。",
-            time="今天",
-            competitor=name,
-        ))
-
-    # 规则 2：一周内排名上升 > 10 位
-    for name, snap in snapshots.items():
-        delta = snap.rank.delta_wow
-        if delta is not None and delta > 10:
-            old = (snap.rank.current or 0) + delta
-            alerts.append(Alert(
-                type="rank_rise",
-                severity="warn",
-                severity_label="中威胁",
-                icon="",
-                title=f"{name} 排名快速上升 {delta} 位",
-                desc=f"一周内从 #{old} 上升至 #{snap.rank.current}，上升 {delta} 位，买量或功能更新信号明显。",
-                time="本周",
-                competitor=name,
-                payload={"old_rank": old, "new_rank": snap.rank.current, "delta": delta},
-            ))
-
-    # 规则 3：版本迭代涉及功能内容
-    for name, snap in snapshots.items():
-        v = snap.version
-        if not (v.has_changed or v.version_changed):
-            continue
-        has_feature = bool(v.changes)
-        if not has_feature and v.release_notes:
-            notes_lower = v.release_notes.lower()
-            has_feature = any(kw.lower() in notes_lower for kw in VERSION_FEATURE_KEYWORDS)
-        if not has_feature:
-            continue
-        if v.changes:
-            change_summary = "；".join(v.changes[:3])
-        elif v.release_notes:
-            change_summary = v.release_notes[:100].replace("\n", " ").strip() + "..."
-        else:
-            change_summary = f"版本 {v.current} 有更新内容，建议立即评估差异化策略。"
-        alerts.append(Alert(
-            type="version_update",
-            severity="danger",
-            severity_label="高威胁 · 建议评估",
-            icon="",
-            title=f"{name} 版本更新至 v{v.current or '未知'}，涉及功能变更",
-            desc=change_summary,
-            time="今天",
-            competitor=name,
-            payload={"version": v.current},
-        ))
-
-    # 规则 4：商业策略变动
-    for name, snap in snapshots.items():
-        c = snap.commercial
-        for pa in c.price_alerts:
-            alerts.append(Alert(
-                type="commercial_change",
-                severity="danger",
-                severity_label="高威胁",
-                icon="",
-                title=f"{name} IAP {pa.get('direction', '变动')}: {pa.get('name', '')}",
-                desc=f"价格从 ${pa.get('prev', 0)} 变为 ${pa.get('curr', 0)}（{pa.get('direction', '')} ${abs(pa.get('delta', 0))}）",
-                time="今天",
-                competitor=name,
-                payload=dict(pa),
-            ))
-        for ic in c.iap_changes:
-            alerts.append(Alert(
-                type="commercial_change",
-                severity="warn",
-                severity_label="中威胁",
-                icon="",
-                title=f"{name} IAP {ic.get('type', '变动')}: {ic.get('name', '')}",
-                desc=f"检测到内购项「{ic.get('name', '')}」{ic.get('type', '变动')}，建议关注竞品商业策略调整。",
-                time="今天",
-                competitor=name,
-                payload=dict(ic),
-            ))
-        if c.betting_signals:
-            alerts.append(Alert(
-                type="commercial_change",
-                severity="warn",
-                severity_label="中威胁",
-                icon="",
-                title=f"{name} 检测到博彩导流信号",
-                desc=f"应用描述中包含博彩相关关键词: {', '.join(c.description_keywords)}",
-                time="今天",
-                competitor=name,
-            ))
-
-    severity_order = {"danger": 0, "warn": 1, "info": 2}
-    alerts.sort(key=lambda a: severity_order.get(a.severity, 99))
-    return alerts
+    return run_alert_engine(snapshots, history=history or {})
 
 
 def _build_feed(snapshots: dict[str, CompetitorSnapshot]) -> list[FeedItem]:
@@ -1084,7 +999,18 @@ def build_dashboard_data() -> DashboardData:
     product_updates = _build_product_updates(snapshots)
     reviews_analysis = _build_review_analysis(snapshots, regions_cfg)
 
-    alerts = _build_alerts(snapshots)
+    alerts = _build_alerts(snapshots, history={
+        "ranking_history": history,
+        "comments": comments,
+        "weekly_review": weekly,
+        "commercial_history": _load_json("commercial_history.json"),
+        "market_history": _load_market_history_csv(),
+        "strategy": strategy,
+        "commercial_weekly": commercial_weekly,
+        "fb_raw": fb_raw,
+        "market_rank": market,
+        "details": details,
+    })
     feed = _build_feed(snapshots)
     metrics = _build_metrics(snapshots, strategy)
     views = _build_views(snapshots, regions_cfg)
