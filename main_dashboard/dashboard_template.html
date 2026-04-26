@@ -2399,7 +2399,9 @@ function renderWrHeatmap(perComp) {
   var html = '<table style="border-collapse:collapse;font-size:11px;font-family:var(--mono);min-width:100%"><tr>' +
     '<th style="text-align:left;padding:6px 10px;color:var(--muted);font-weight:400"></th>';
   topics.forEach(function(t){
-    html += '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:400;height:90px;vertical-align:bottom"><div style="writing-mode:vertical-rl;transform:rotate(180deg)">' + escapeHtml(t) + '</div></th>';
+    html += '<th style="padding:0 6px;color:var(--muted);font-weight:400;height:110px;vertical-align:bottom;text-align:left">' +
+      '<div style="transform:rotate(-45deg);transform-origin:left bottom;white-space:nowrap;font-size:11px;font-family:var(--mono);width:0">' + escapeHtml(t) + '</div>' +
+    '</th>';
   });
   html += '</tr>';
   competitors.forEach(function(c){
