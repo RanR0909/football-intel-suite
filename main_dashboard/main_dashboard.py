@@ -282,7 +282,7 @@ st.sidebar.markdown(
     f"""
     <div style="margin-bottom: 16px; padding: 0 4px;">
         <a href="dashboard.html" target="_blank" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background-color: #1e2330; border: 1px solid #2a2f3a; border-radius: 8px; text-decoration: none; color: #7ab7ff; font-size: 13px; font-weight: 500; transition: all 0.2s;">
-            <span style="font-size: 16px;">🖥️</span>
+            <span style="font-size: 16px;">️</span>
             <span>打开新版 HTML 看板</span>
             <span style="margin-left: auto; font-size: 11px; color: #6b7280;">↗</span>
         </a>

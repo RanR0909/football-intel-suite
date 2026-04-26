@@ -362,7 +362,7 @@ body::before {
     <div class="page-sub"><!-- DATE_PLACEHOLDER --> · 监测 <!-- MONITORED_COUNT_PLACEHOLDER --> 个竞品</div>
   </div>
   <div class="header-actions">
-    <button class="btn" onclick="syncAllData()">🔄 同步数据</button>
+    <button class="btn" onclick="syncAllData()">同步数据</button>
     <button class="btn btn-primary" onclick="window.print()">导出报告</button>
   </div>
 </div>
@@ -463,8 +463,8 @@ body::before {
       <select id="prod-filter-window" class="prod-select"></select>
       <select id="prod-sort"          class="prod-select"></select>
       <span style="margin-left:auto;display:flex;gap:6px">
-        <button class="btn" onclick="setProdView('timeline')" id="prod-view-timeline">📅 时间轴</button>
-        <button class="btn" onclick="setProdView('grouped')"  id="prod-view-grouped">👥 按竞品分组</button>
+        <button class="btn" onclick="setProdView('timeline')" id="prod-view-timeline">时间轴</button>
+        <button class="btn" onclick="setProdView('grouped')"  id="prod-view-grouped">按竞品分组</button>
       </span>
     </div>
   </div>
@@ -504,7 +504,7 @@ body::before {
   <div class="card full-card" id="rank-baseline-card">
     <div class="card-head">
       <div class="card-title" id="rank-baseline-title">vs All Football · 相对表现</div>
-      <div class="card-action" style="color:var(--muted);font-size:11px">🟢 领先 · 🔴 落后 · ⚪ 持平 (±10%)</div>
+      <div class="card-action" style="color:var(--muted);font-size:11px">领先 · 落后 · 持平 (±10%)</div>
     </div>
     <div id="rank-baseline-cards"></div>
   </div>
@@ -639,7 +639,7 @@ body::before {
   <!-- 排名详情（链回 page-ranking） -->
   <div class="card full-card" id="detail-rank-card" style="display:none">
     <div class="card-head">
-      <div class="card-title">📊 排名详情</div>
+      <div class="card-title">排名详情</div>
       <div class="card-action" onclick="showPage('ranking')">查看排名总表 →</div>
     </div>
     <div id="detail-rank-section" style="padding:16px 20px"></div>
@@ -648,7 +648,7 @@ body::before {
   <!-- Meta 广告投放摘要（链回 page-commercial） -->
   <div class="card full-card" id="detail-ads-card" style="display:none">
     <div class="card-head">
-      <div class="card-title">📺 Meta 广告投放</div>
+      <div class="card-title">Meta 广告投放</div>
       <div class="card-action" onclick="showPage('commercial')">查看商业分析 →</div>
     </div>
     <div id="detail-ads-section" style="padding:16px 20px"></div>
@@ -657,7 +657,7 @@ body::before {
   <!-- 社媒舆情摘要（链回 page-community） -->
   <div class="card full-card" id="detail-community-card" style="display:none">
     <div class="card-head">
-      <div class="card-title">💬 社媒舆情</div>
+      <div class="card-title">社媒舆情</div>
       <div class="card-action" onclick="showPage('community')">查看社媒分析 →</div>
     </div>
     <div id="detail-community-section" style="padding:16px 20px"></div>
@@ -666,7 +666,7 @@ body::before {
   <!-- 原始数据来源 -->
   <div class="card full-card">
     <div class="card-head">
-      <div class="card-title">🔗 原始数据来源</div>
+      <div class="card-title">原始数据来源</div>
       <div class="card-action" style="color:var(--muted);font-size:11px">点击外链查看抓取源</div>
     </div>
     <div id="detail-data-sources" style="padding:12px 20px"></div>
@@ -681,7 +681,7 @@ body::before {
       <div class="page-sub">过去7天 · 跨竞品全量评论汇总 · 本地化专题分析</div>
     </div>
     <div class="header-actions">
-      <button class="btn" onclick="runWeeklyReview()">🔄 生成周报</button>
+      <button class="btn" onclick="runWeeklyReview()">生成周报</button>
       <button class="btn" onclick="showPage('overview')">← 返回总览</button>
     </div>
   </div>
@@ -806,18 +806,18 @@ body::before {
   <!-- Meta Ad Library 广告投放策略（Phase 1：规模 + 节奏 + 趋势） -->
   <div class="card full-card" id="cm-ads-card" style="margin-bottom:20px;display:none">
     <div class="card-head">
-      <div class="card-title">📺 Meta 广告投放策略</div>
+      <div class="card-title">Meta 广告投放策略</div>
       <div class="card-action" id="cm-ads-meta" style="color:var(--muted);font-size:11px"></div>
     </div>
     <div id="cm-ads-tabs" style="display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 12px"></div>
     <div id="cm-ads-kpi" class="metrics-row" style="padding:0 20px"></div>
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;padding:16px 20px">
       <div>
-        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">📈 投放数量趋势 · 按天</div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">投放数量趋势 · 按天</div>
         <div id="cm-ads-trend"></div>
       </div>
       <div>
-        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">🌍 国家分布</div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">国家分布</div>
         <div id="cm-ads-countries"></div>
       </div>
     </div>
@@ -825,29 +825,29 @@ body::before {
     <!-- Phase 2: themes / segments / patterns -->
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;padding:0 20px 12px">
       <div>
-        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">🔥 主推卖点</div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">主推卖点</div>
         <div id="cm-ads-themes"></div>
       </div>
       <div>
-        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">👥 用户画像</div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">用户画像</div>
         <div id="cm-ads-segments"></div>
       </div>
       <div>
-        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">🎨 创意模式 · 多样度 <span id="cm-ads-diversity" style="color:var(--text)"></span></div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">创意模式 · 多样度 <span id="cm-ads-diversity" style="color:var(--text)"></span></div>
         <div id="cm-ads-patterns"></div>
       </div>
     </div>
 
     <!-- Phase 2: top creatives -->
     <div style="padding:0 20px 16px">
-      <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">🖼️ 热门广告 · 按持续投放天数</div>
+      <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">️ 热门广告 · 按持续投放天数</div>
       <div id="cm-ads-creatives" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"></div>
     </div>
 
     <!-- Phase 3: AI 战略解读 -->
     <div style="border-top:1px solid var(--border);padding:16px 20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-size:13px;font-weight:600;color:var(--accent)">🤖 AI 投放策略解读</div>
+        <div style="font-size:13px;font-weight:600;color:var(--accent)">AI 投放策略解读</div>
         <div id="cm-ads-ai-meta" style="color:var(--muted);font-size:11px"></div>
       </div>
       <div id="cm-ads-ai-body"></div>
@@ -890,14 +890,14 @@ body::before {
       <!-- 热门帖子 -->
       <div class="card">
         <div class="card-head">
-          <div class="card-title">🔥 热门帖子</div>
+          <div class="card-title">热门帖子</div>
           <div class="card-action" id="cmty-window-label" style="color:var(--muted);font-size:11px">近 7 天</div>
         </div>
         <div id="cmty-hot-posts"></div>
       </div>
       <!-- 最近评论 -->
       <div class="card">
-        <div class="card-head"><div class="card-title">💬 最近评论</div></div>
+        <div class="card-head"><div class="card-title">最近评论</div></div>
         <div id="cmty-recent-comments"></div>
       </div>
     </div>
@@ -906,7 +906,7 @@ body::before {
       <!-- AI 分析区 -->
       <div class="card" id="cmty-ai-card">
         <div class="card-head">
-          <div class="card-title">🤖 AI 舆情分析</div>
+          <div class="card-title">AI 舆情分析</div>
           <div class="card-action" id="cmty-ai-meta" style="color:var(--muted);font-size:11px"></div>
         </div>
         <div id="cmty-ai-body" style="padding:16px 20px"></div>
@@ -914,7 +914,7 @@ body::before {
 
       <!-- subreddit 分布 -->
       <div class="card">
-        <div class="card-head"><div class="card-title">📊 Subreddit 分布</div></div>
+        <div class="card-head"><div class="card-title">Subreddit 分布</div></div>
         <div id="cmty-subreddits" style="padding:12px 20px"></div>
       </div>
     </div>
@@ -922,7 +922,7 @@ body::before {
 
   <!-- 时间趋势 -->
   <div class="card full-card" style="margin-top:20px">
-    <div class="card-head"><div class="card-title">📈 时间趋势 · 帖子 / 评论数</div></div>
+    <div class="card-head"><div class="card-title">时间趋势 · 帖子 / 评论数</div></div>
     <div id="cmty-trend" style="padding:16px 20px"></div>
   </div>
 </div>
@@ -1415,9 +1415,9 @@ function renderDetailRegions(data) {
     html += '<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">';
     html += '<div style="font-size:13px;font-weight:500;margin-bottom:8px">' + label + ' (' + code.toUpperCase() + ')</div>';
     html += '<div style="display:flex;gap:16px;margin-bottom:6px;font-size:12px;color:var(--muted)">';
-    html += '<span>📱 Google Play: ' + gpCount + '条</span>';
-    html += '<span>🍎 App Store: ' + iosCount + '条</span>';
-    html += '<span>📊 总计: ' + total + '条</span>';
+    html += '<span>Google Play: ' + gpCount + '条</span>';
+    html += '<span>App Store: ' + iosCount + '条</span>';
+    html += '<span>总计: ' + total + '条</span>';
     html += '</div>';
 
     // 标签分布
@@ -1519,7 +1519,7 @@ function renderDetailRankSection(name) {
   var dodArrow = rd.delta_dod == null ? '—' : (rd.delta_dod > 0 ? '↑ +' : rd.delta_dod < 0 ? '↓ ' : '→ ');
   var wowArrow = rd.delta_wow == null ? '—' : (rd.delta_wow > 0 ? '↑ +' : rd.delta_wow < 0 ? '↓ ' : '→ ');
   var fastTag = rd.delta_wow != null && Math.abs(rd.delta_wow) > 20
-    ? '<span style="margin-left:8px;padding:2px 8px;border-radius:4px;background:rgba(255,92,92,0.15);color:var(--danger);font-size:10px;font-family:var(--mono)">⚡ 周变化 > 20</span>'
+    ? '<span style="margin-left:8px;padding:2px 8px;border-radius:4px;background:rgba(255,92,92,0.15);color:var(--danger);font-size:10px;font-family:var(--mono)">周变化 > 20</span>'
     : '';
 
   // 构造 14 天历史趋势 SVG
@@ -1566,7 +1566,7 @@ function renderDetailRankSection(name) {
         '<div style="font-size:20px;font-weight:600;color:' + wowColor + '">' + wowArrow + (rd.delta_wow != null ? rd.delta_wow : '—') + '</div>' +
       '</div>' +
     '</div>' +
-    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">📈 历史排名（最近 ' + dates.length + ' 天）— 越往上排名越好</div>' +
+    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">历史排名（最近 ' + dates.length + ' 天）— 越往上排名越好</div>' +
     trendSvg;
 }
 
@@ -1639,7 +1639,7 @@ function renderDetailCommunitySection(name) {
       ? '<a href="' + escapeHtml(p.url) + '" target="_blank" style="color:var(--text);text-decoration:none">' + escapeHtml(p.title || '') + '</a>'
       : escapeHtml(p.title || '');
     return '<div style="border-left:2px solid var(--accent);padding:6px 12px;margin-bottom:6px">' +
-      '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">r/' + escapeHtml(p.subreddit || '?') + ' · ' + (p.score || 0) + '↑ · ' + (p.num_comments || 0) + '💬 · ' + date + '</div>' +
+      '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">r/' + escapeHtml(p.subreddit || '?') + ' · ' + (p.score || 0) + '↑ · ' + (p.num_comments || 0) + '· ' + date + '</div>' +
       '<div style="font-size:12px;line-height:1.5">' + titleHtml + '</div>' +
     '</div>';
   }).join('');
@@ -1695,18 +1695,18 @@ function syncAllData() {
       // 所有脚本运行完毕，生成看板
       runScript('generate_dashboard', function(result) {
         if (!result || !result.success) {
-          if (btn) { btn.textContent = '🔄 同步数据'; btn.disabled = false; }
+          if (btn) { btn.textContent = '同步数据'; btn.disabled = false; }
           alert('看板生成失败：' + ((result && result.message) || '未知错误'));
           return;
         }
-        if (btn) { btn.textContent = '✅ 已同步'; btn.disabled = false; }
+        if (btn) { btn.textContent = '已同步'; btn.disabled = false; }
         setTimeout(function() { location.reload(); }, 1000);
       });
       return;
     }
     runScript(scripts[idx], function(result) {
       if (!result || !result.success) {
-        if (btn) { btn.textContent = '🔄 同步数据'; btn.disabled = false; }
+        if (btn) { btn.textContent = '同步数据'; btn.disabled = false; }
         alert('同步失败：' + ((result && result.label) || scripts[idx]) + '\n' + ((result && result.message) || '未知错误'));
         return;
       }
@@ -1890,7 +1890,7 @@ function runDetailAnalysis() {
           refreshCompetitorDetail(name, function() {
             _detailBatchStatus[name] = 'done';
             renderDetailBatchStatus();
-            btn.textContent = '✅ 已分析';
+            btn.textContent = '已分析';
             btn.disabled = false;
           });
         });
@@ -2014,13 +2014,13 @@ function renderCommercialPage() {
     if (c.betting_signals) bettingCount++;
     if ((c.rpd_index || 0) > maxRpd) maxRpd = c.rpd_index;
     (c.price_alerts || []).forEach(function(a) {
-      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--danger);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--danger);font-weight:600">💰 ' + escapeHtml(n) + ' · ' + escapeHtml(a.direction) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(a.name) + ': $' + a.prev + ' → $' + a.curr + '</div></div>');
+      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--danger);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--danger);font-weight:600">' + escapeHtml(n) + ' · ' + escapeHtml(a.direction) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(a.name) + ': $' + a.prev + ' → $' + a.curr + '</div></div>');
     });
     (c.iap_changes || []).forEach(function(ic) {
-      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--warn);font-weight:600">💰 ' + escapeHtml(n) + ' · IAP ' + escapeHtml(ic.type) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(ic.name) + '</div></div>');
+      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--warn);font-weight:600">' + escapeHtml(n) + ' · IAP ' + escapeHtml(ic.type) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(ic.name) + '</div></div>');
     });
     if (c.betting_signals) {
-      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--warn);font-weight:600">🎰 ' + escapeHtml(n) + ' · 博彩导流信号</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml((c.description_keywords || []).join(', ')) + '</div></div>');
+      allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--warn);font-weight:600">' + escapeHtml(n) + ' · 博彩导流信号</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml((c.description_keywords || []).join(', ')) + '</div></div>');
     }
   });
   document.getElementById('cm-alerts').textContent = totalAlerts || '0';
@@ -2169,25 +2169,25 @@ function runWeeklyReview() {
         pollTaskStatus('weekly_review', function(result) {
           if (!result || !result.success) {
             alert('周报生成失败: ' + ((result && result.message) || '未知错误'));
-            if (btn) { btn.textContent = '🔄 生成周报'; btn.disabled = false; }
+            if (btn) { btn.textContent = '生成周报'; btn.disabled = false; }
             return;
           }
           // 完成后刷新周报数据
           refreshWeeklyReview(function() {
             fetch(API_BASE + '/api/run?script=generate_dashboard&api_key=' + encodeURIComponent(_apiKey()))
               .finally(function() {
-                if (btn) { btn.textContent = '✅ 已生成'; btn.disabled = false; }
+                if (btn) { btn.textContent = '已生成'; btn.disabled = false; }
               });
           });
         });
       } else {
         alert('启动失败: ' + (data.message || '未知错误'));
-        if (btn) { btn.textContent = '🔄 生成周报'; btn.disabled = false; }
+        if (btn) { btn.textContent = '生成周报'; btn.disabled = false; }
       }
     })
     .catch(function(err) {
       alert('请求失败: ' + err.message);
-      if (btn) { btn.textContent = '🔄 生成周报'; btn.disabled = false; }
+      if (btn) { btn.textContent = '生成周报'; btn.disabled = false; }
     });
 }
 
@@ -2368,10 +2368,10 @@ function markdownToHtml(md) {
 // ============================================================
 
 var PROD_TYPE_STYLE = {
-  feature:      { label: '✨ 功能',     color: 'var(--accent)',  bg: 'rgba(123,110,246,0.15)' },
-  pricing:      { label: '💰 定价',     color: 'var(--danger)',  bg: 'rgba(255,92,92,0.15)' },
-  localization: { label: '🌍 本地化',   color: 'var(--warn)',    bg: 'rgba(245,166,35,0.15)' },
-  bugfix:       { label: '🔧 修复',     color: 'var(--accent2)', bg: 'rgba(78,204,163,0.15)' },
+  feature:      { label: '功能',     color: 'var(--accent)',  bg: 'rgba(123,110,246,0.15)' },
+  pricing:      { label: '定价',     color: 'var(--danger)',  bg: 'rgba(255,92,92,0.15)' },
+  localization: { label: '本地化',   color: 'var(--warn)',    bg: 'rgba(245,166,35,0.15)' },
+  bugfix:       { label: '修复',     color: 'var(--accent2)', bg: 'rgba(78,204,163,0.15)' },
 };
 var _prodFilter = { comp: 'all', type: 'all', windowDays: 7, sort: 'date_desc', view: 'timeline' };
 var _prodCollapsed = {};
@@ -2387,9 +2387,9 @@ function renderProductPage() {
 function renderProdMetrics(m) {
   document.getElementById('prod-metrics').innerHTML =
     '<div class="metric-card purple"><div class="metric-label">本周更新总数</div><div class="metric-value">' + (m.week_total || 0) + '</div><div class="metric-sub">近 7 天</div></div>' +
-    '<div class="metric-card teal"  ><div class="metric-label">✨ 功能</div>     <div class="metric-value">' + (m.week_feature || 0) + '</div><div class="metric-sub">新功能 / redesign</div></div>' +
-    '<div class="metric-card warn"  ><div class="metric-label">🔧 修复</div>     <div class="metric-value">' + (m.week_bugfix || 0)  + '</div><div class="metric-sub">bug / 稳定性</div></div>' +
-    '<div class="metric-card danger"><div class="metric-label">💰 定价</div>     <div class="metric-value">' + (m.week_pricing || 0) + '</div><div class="metric-sub">订阅 / IAP</div></div>';
+    '<div class="metric-card teal"  ><div class="metric-label">功能</div>     <div class="metric-value">' + (m.week_feature || 0) + '</div><div class="metric-sub">新功能 / redesign</div></div>' +
+    '<div class="metric-card warn"  ><div class="metric-label">修复</div>     <div class="metric-value">' + (m.week_bugfix || 0)  + '</div><div class="metric-sub">bug / 稳定性</div></div>' +
+    '<div class="metric-card danger"><div class="metric-label">定价</div>     <div class="metric-value">' + (m.week_pricing || 0) + '</div><div class="metric-sub">订阅 / IAP</div></div>';
 }
 
 function renderProdFilters(items) {
@@ -2402,7 +2402,7 @@ function renderProdFilters(items) {
     }).join('');
 
   // 类型下拉
-  var typeOpts = [['all','全部类型'],['feature','✨ 功能'],['bugfix','🔧 修复'],['pricing','💰 定价'],['localization','🌍 本地化']];
+  var typeOpts = [['all','全部类型'],['feature','功能'],['bugfix','修复'],['pricing','定价'],['localization','本地化']];
   document.getElementById('prod-filter-type').innerHTML = typeOpts.map(function(o){
     return '<option value="' + o[0] + '"' + (_prodFilter.type === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
   }).join('');
@@ -2414,7 +2414,7 @@ function renderProdFilters(items) {
   }).join('');
 
   // 排序
-  var sortOpts = [['date_desc','📅 最新在前'],['date_asc','📅 最早在前'],['importance','⚡ 重要性']];
+  var sortOpts = [['date_desc','最新在前'],['date_asc','最早在前'],['importance','重要性']];
   document.getElementById('prod-sort').innerHTML = sortOpts.map(function(o){
     return '<option value="' + o[0] + '"' + (_prodFilter.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
   }).join('');
@@ -2579,7 +2579,7 @@ function renderRankFilters() {
     { key: 'top100', label: 'Top 100',         desc: '当前排名（默认）' },
     { key: 'up',     label: '↑ 增幅',           desc: '按日变化升序（最大涨幅在前）' },
     { key: 'down',   label: '↓ 减幅',           desc: '按日变化降序（最大跌幅在前）' },
-    { key: 'fast',   label: '⚡ 周变化 > 20',    desc: '本周排名波动剧烈' },
+    { key: 'fast',   label: '周变化 > 20',    desc: '本周排名波动剧烈' },
   ];
   document.getElementById('rank-filter-bar').innerHTML = filters.map(function(f) {
     var active = _rankFilter === f.key;
@@ -2668,7 +2668,7 @@ function renderFastMoversBanner() {
   }).join('');
   el.innerHTML =
     '<div style="background:rgba(255,92,92,0.06);border:1px solid rgba(255,92,92,0.2);border-radius:8px;padding:12px 16px;margin-bottom:16px">' +
-      '<div style="font-size:11px;font-family:var(--mono);color:var(--danger);margin-bottom:8px">⚡ 本周排名波动剧烈（>20 位）— 建议立即查看</div>' +
+      '<div style="font-size:11px;font-family:var(--mono);color:var(--danger);margin-bottom:8px">本周排名波动剧烈（>20 位）— 建议立即查看</div>' +
       '<div>' + chips + '</div>' +
     '</div>';
 }
@@ -2952,13 +2952,13 @@ function renderAdsAI(competitor, ai) {
     '<div style="font-size:13px;line-height:1.8;color:var(--text);background:rgba(123,110,246,0.06);border:1px solid rgba(123,110,246,0.18);border-radius:8px;padding:12px 14px;margin-bottom:14px;white-space:pre-wrap">' + escapeHtml(ai.core_strategy || '') + '</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
       '<div>' +
-        '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">🎯 目标用户</div>' + chips(ai.target_persona, 'rgba(123,110,246,0.4)') +
-        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">💎 主推卖点</div>' + chips(ai.value_props, 'rgba(78,204,163,0.4)') +
-        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">🌍 重点市场</div>' + chips(ai.geo_focus, 'rgba(245,166,35,0.4)') +
+        '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">目标用户</div>' + chips(ai.target_persona, 'rgba(123,110,246,0.4)') +
+        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">主推卖点</div>' + chips(ai.value_props, 'rgba(78,204,163,0.4)') +
+        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">重点市场</div>' + chips(ai.geo_focus, 'rgba(245,166,35,0.4)') +
       '</div>' +
       '<div>' +
-        '<div style="font-size:11px;font-family:var(--mono);color:var(--accent2);margin-bottom:4px">💡 我方机会</div>' + bullets(ai.opportunities) +
-        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--danger);margin-bottom:4px">⚠️ 风险 · 含响应时效</div>' + bullets(ai.risks) +
+        '<div style="font-size:11px;font-family:var(--mono);color:var(--accent2);margin-bottom:4px">我方机会</div>' + bullets(ai.opportunities) +
+        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--danger);margin-bottom:4px">️ 风险 · 含响应时效</div>' + bullets(ai.risks) +
       '</div>' +
     '</div>' +
     '<div id="ads-ai-status-' + competitor + '" style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--mono)"></div>';
@@ -3160,7 +3160,7 @@ function renderCommunityRaw(raw) {
       var titleHtml = p.url
         ? '<a href="' + escapeHtml(p.url) + '" target="_blank" style="color:var(--text);text-decoration:none">' + escapeHtml(p.title || '') + '</a>'
         : escapeHtml(p.title || '');
-      return '<div class="feed-item"><div class="feed-meta"><span class="feed-source" style="color:var(--accent)">r/' + escapeHtml(p.subreddit || '?') + '</span><span class="feed-type ft-feature">' + (p.score || 0) + '↑ · ' + (p.num_comments || 0) + '💬</span></div><div class="feed-title">' + titleHtml + '</div><div class="feed-time">' + date + '</div></div>';
+      return '<div class="feed-item"><div class="feed-meta"><span class="feed-source" style="color:var(--accent)">r/' + escapeHtml(p.subreddit || '?') + '</span><span class="feed-type ft-feature">' + (p.score || 0) + '↑ · ' + (p.num_comments || 0) + '</span></div><div class="feed-title">' + titleHtml + '</div><div class="feed-time">' + date + '</div></div>';
     }).join('');
   }
 
@@ -3271,11 +3271,11 @@ function renderCommunityAI(competitor, ai) {
     '</div>' +
     '<div style="font-size:13px;line-height:1.8;color:var(--text);background:rgba(123,110,246,0.06);border:1px solid rgba(123,110,246,0.18);border-radius:8px;padding:12px 14px;margin-bottom:14px;white-space:pre-wrap">' + escapeHtml(ai.overall_summary || '') + '</div>' +
     '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">情绪分布</div>' + sentimentBar +
-    '<div style="margin-top:14px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">🔥 热门话题</div><div>' + chips(ai.top_topics, 'rgba(123,110,246,0.4)') + '</div>' +
-    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">⚠️ 用户痛点</div>' + bullets(ai.pain_points) +
-    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">💡 产品机会</div>' + bullets(ai.opportunities) +
-    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">⚔️ 被提及竞品</div><div>' + chips(ai.competitor_mentions, 'rgba(245,166,35,0.4)') + '</div>' +
-    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">💬 代表原话</div>' + quotes(ai.representative_quotes) +
+    '<div style="margin-top:14px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">热门话题</div><div>' + chips(ai.top_topics, 'rgba(123,110,246,0.4)') + '</div>' +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">️ 用户痛点</div>' + bullets(ai.pain_points) +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">产品机会</div>' + bullets(ai.opportunities) +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">️ 被提及竞品</div><div>' + chips(ai.competitor_mentions, 'rgba(245,166,35,0.4)') + '</div>' +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">代表原话</div>' + quotes(ai.representative_quotes) +
     '<div id="cmty-ai-status-' + competitor + '" style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--mono)"></div>';
 }
 

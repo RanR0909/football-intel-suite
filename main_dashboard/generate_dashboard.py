@@ -401,7 +401,7 @@ def build_alerts():
                     "type": "negative_review",
                     "severity": "danger",
                     "severity_label": "高威胁",
-                    "icon": "🔴",
+                    "icon": "",
                     "title": f"{comp_name} 出现低星评论",
                     "desc": f"近3天检测到 {total_negative} 条低星评论，共抓取 {total_comments} 条评论。高频信号：{label_str}。",
                     "time": "今天",
@@ -461,7 +461,7 @@ def build_alerts():
                             "type": "rank_rise",
                             "severity": "warn",
                             "severity_label": "中威胁",
-                            "icon": "📈",
+                            "icon": "",
                             "title": f"{app_name} 排名快速上升 {delta} 位",
                             "desc": f"一周内从 #{old_rank} 上升至 #{current_rank}，上升 {delta} 位，买量或功能更新信号明显。",
                             "time": "本周",
@@ -504,7 +504,7 @@ def build_alerts():
                         "type": "version_update",
                         "severity": "danger",
                         "severity_label": "高威胁 · 建议评估",
-                        "icon": "⚡",
+                        "icon": "",
                         "title": f"{comp_name} 版本更新至 v{version}，涉及功能变更",
                         "desc": change_summary if change_summary else f"版本 {version} 有更新内容，建议立即评估差异化策略。",
                         "time": "今天",
@@ -521,7 +521,7 @@ def build_alerts():
                     "type": "commercial_change",
                     "severity": "danger",
                     "severity_label": "高威胁",
-                    "icon": "💰",
+                    "icon": "",
                     "title": f"{comp_name} IAP {pa.get('direction','变动')}: {pa.get('name','')}",
                     "desc": f"价格从 ${pa.get('prev',0)} 变为 ${pa.get('curr',0)}（{pa.get('direction','')} ${abs(pa.get('delta',0))}）",
                     "time": "今天",
@@ -533,7 +533,7 @@ def build_alerts():
                     "type": "commercial_change",
                     "severity": "warn",
                     "severity_label": "中威胁",
-                    "icon": "💰",
+                    "icon": "",
                     "title": f"{comp_name} IAP {ic.get('type','变动')}: {ic.get('name','')}",
                     "desc": f"检测到内购项「{ic.get('name','')}」{ic.get('type','变动')}，建议关注竞品商业策略调整。",
                     "time": "今天",
@@ -545,7 +545,7 @@ def build_alerts():
                     "type": "commercial_change",
                     "severity": "warn",
                     "severity_label": "中威胁",
-                    "icon": "🎰",
+                    "icon": "",
                     "title": f"{comp_name} 检测到博彩导流信号",
                     "desc": f"应用描述中包含博彩相关关键词: {', '.join(comp_info.get('description_keywords', []))}",
                     "time": "今天",
@@ -564,7 +564,7 @@ def build_alert_strip_html(alerts):
     if not alerts:
         return """
         <div class="alert-strip" style="background:rgba(78,204,163,0.08);border-color:rgba(78,204,163,0.2)" onclick="showPage('alerts')">
-          <span class="alert-icon">✅</span>
+          <span class="alert-icon"></span>
           <span class="alert-text" style="color:var(--accent2)">当前无预警，所有竞品状态正常</span>
           <span class="alert-count" style="background:rgba(78,204,163,0.15);color:var(--accent2)">查看全部 →</span>
         </div>
@@ -579,7 +579,7 @@ def build_alert_strip_html(alerts):
 
     return f"""
     <div class="alert-strip" style="background:{bg_colors.get(sev, 'rgba(245,166,35,0.08)')};border-color:{border_colors.get(sev, 'rgba(245,166,35,0.2)')}" onclick="showPage('alerts')">
-      <span class="alert-icon">{top_alert.get('icon', '⚡')}</span>
+      <span class="alert-icon">{top_alert.get('icon', '')}</span>
       <span class="alert-text" style="color:{severity_colors.get(sev, 'var(--warn)')}"><strong>{top_alert['title']}</strong>：{top_alert['desc'][:60]}{'...' if len(top_alert['desc']) > 60 else ''}</span>
       <span class="alert-count" style="background:{bg_colors.get(sev, 'rgba(245,166,35,0.15)')};color:{severity_colors.get(sev, 'var(--warn)')}">共 {len(alerts)} 条预警 →</span>
     </div>
@@ -592,7 +592,7 @@ def build_alert_page_html(alerts):
         return """
         <div class="card full-card">
           <div style="padding:40px 20px;text-align:center;color:var(--muted);font-size:13px">
-            ✅ 当前无预警，所有竞品状态正常
+            当前无预警，所有竞品状态正常
           </div>
         </div>
         """
@@ -1574,4 +1574,4 @@ if __name__ == "__main__":
         metrics = compute_metrics()
 
     output = generate()
-    print(f"\n💡 使用浏览器打开: file://{output}")
+    print(f"\n使用浏览器打开: file://{output}")
