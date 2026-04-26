@@ -1009,8 +1009,17 @@ body::before {
     </div>
   </div>
 
-  <!-- 区 1：5 张 KPI -->
-  <div class="metrics-row" id="cmty-kpi"></div>
+  <!-- 区 1：5 张 KPI（强制单行 5 列） -->
+  <div class="metrics-row" id="cmty-kpi" style="grid-template-columns:repeat(5,minmax(140px,1fr))"></div>
+
+  <!-- 汇总模式：竞品声量份额（仅在选中"汇总" tab 时可见） -->
+  <div id="cmty-voice-share-wrap" class="card full-card" style="margin-top:16px;display:none">
+    <div class="card-head">
+      <div class="card-title">竞品声量份额</div>
+      <div class="card-action" style="color:var(--muted);font-size:11px">按提及数 · 颜色显示情绪占比 · 点击竞品查看详情</div>
+    </div>
+    <div id="cmty-voice-share" style="padding:14px 20px"></div>
+  </div>
 
   <!-- 区 2：核心可视化（情绪时序 + 跨平台 + 雷达 三栏并排） -->
   <div class="three-col" style="grid-template-columns:1.4fr 1fr 1fr;margin-top:16px">
@@ -1070,6 +1079,22 @@ body::before {
       </div>
       <div id="cmty-recent-comments"></div>
     </div>
+  </div>
+
+  <!-- 全部相关帖子（带跳转链接） -->
+  <div class="card full-card" id="cmty-all-posts-wrap" style="margin-top:16px">
+    <div class="card-head">
+      <div class="card-title">全部相关帖子</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="cmty-allposts-search" placeholder="搜索标题 / 子版 / 竞品..." style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);width:180px;font-family:var(--mono)"/>
+        <select id="cmty-allposts-sort" class="prod-select" style="font-size:11px"></select>
+        <span id="cmty-allposts-meta" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+      </div>
+    </div>
+    <div id="cmty-all-posts-head" style="display:grid;grid-template-columns:80px 110px 50px 110px 1fr 80px 36px;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:10px;font-family:var(--mono);color:var(--muted)">
+      <span>日期</span><span>竞品</span><span>平台</span><span>子版</span><span>标题</span><span style="text-align:right">互动</span><span style="text-align:center">外链</span>
+    </div>
+    <div id="cmty-all-posts" style="max-height:520px;overflow-y:auto"></div>
   </div>
 
   <!-- 区 5：AI 分析卡（默认折叠） -->
@@ -4396,6 +4421,7 @@ function renderAdsCountries(byCountry) {
 // 社媒舆情 v2（PRD v2 — 五区结构）
 // ============================================================
 
+var COMMUNITY_ALL_KEY = '__all__';
 var _selectedCommunityComp = null;
 var _communityPolling = {};
 var _cmtyFilter = { platform: 'all', windowDays: 7 };
@@ -4413,12 +4439,21 @@ function renderCommunityPage() {
     document.getElementById('cmty-tabs').innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px">暂无竞品配置</div>';
     return;
   }
-  if (!_selectedCommunityComp || comps.indexOf(_selectedCommunityComp) === -1) {
-    _selectedCommunityComp = comps[0];
+  if (!_selectedCommunityComp) _selectedCommunityComp = COMMUNITY_ALL_KEY;
+  if (_selectedCommunityComp !== COMMUNITY_ALL_KEY && comps.indexOf(_selectedCommunityComp) === -1) {
+    _selectedCommunityComp = COMMUNITY_ALL_KEY;
   }
+  var allActive = _selectedCommunityComp === COMMUNITY_ALL_KEY;
 
-  // tabs：全部竞品都显示，无数据者标灰
-  document.getElementById('cmty-tabs').innerHTML = comps.map(function(name) {
+  // tabs：先"汇总"，再各竞品（无数据者标灰）
+  var allBg = allActive ? 'rgba(123,110,246,0.20)' : 'var(--surface2)';
+  var allBorder = allActive ? 'var(--accent)' : 'var(--border)';
+  var tabsHtml = '<button onclick="selectCommunityComp(\'' + COMMUNITY_ALL_KEY + '\')" ' +
+    'style="padding:6px 14px;border-radius:6px;border:1px solid ' + allBorder +
+    ';background:' + allBg + ';color:var(--text);font-size:12px;cursor:pointer;font-family:var(--mono);font-weight:600">' +
+    '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));margin-right:6px;vertical-align:middle"></span>' +
+    '汇总 <span style="font-size:9px;color:var(--muted);margin-left:4px">' + comps.length + '</span></button>';
+  tabsHtml += comps.map(function(name) {
     var entry = COMMUNITY_DATA[name] || {};
     var hasData = !!entry.has_data;
     var active = name === _selectedCommunityComp;
@@ -4432,14 +4467,32 @@ function renderCommunityPage() {
            '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + color + ';margin-right:6px;vertical-align:middle"></span>' +
            escapeHtml(name) + emptyHint + '</button>';
   }).join('');
+  document.getElementById('cmty-tabs').innerHTML = tabsHtml;
+
+  // 副标题 / 声量份额卡 visibility
+  var subtitleEl = document.getElementById('cmty-subtitle');
+  if (subtitleEl) {
+    subtitleEl.textContent = allActive
+      ? '全竞品汇总 · ' + comps.length + ' 个竞品 · 跨平台数据融合'
+      : 'Reddit + X 跨平台讨论 · 痛点 / 机会自动派生';
+  }
+  var vsWrap = document.getElementById('cmty-voice-share-wrap');
+  if (vsWrap) vsWrap.style.display = allActive ? 'block' : 'none';
 
   renderCmtyFilterBar();
+
+  if (allActive) {
+    renderCommunityAggregate(comps);
+    return;
+  }
+
   var entry = COMMUNITY_DATA[_selectedCommunityComp] || {};
   var raw = entry.raw || {};
   var ai = entry.ai_analysis || null;
 
   if (!entry.has_data) {
     renderCmtyEmptyState();
+    renderCmtyAllPosts([_selectedCommunityComp], false);
     renderCmtyAI(_selectedCommunityComp, ai);
     return;
   }
@@ -4452,6 +4505,7 @@ function renderCommunityPage() {
   renderCmtyOppMatrix(ai, raw);
   renderCmtyHotPosts(raw.hot_posts || []);
   renderCmtyRecentComments(raw.recent_comments || []);
+  renderCmtyAllPosts([_selectedCommunityComp], false);
   renderCmtyAI(_selectedCommunityComp, ai);
 }
 
@@ -4459,6 +4513,501 @@ function selectCommunityComp(name) {
   _selectedCommunityComp = name;
   _cmtyDayFilter = null;
   renderCommunityPage();
+}
+
+// ============================================================
+// 汇总模式（全竞品聚合）
+// ============================================================
+
+function renderCommunityAggregate(comps) {
+  var withData = comps.filter(function(n){ return (COMMUNITY_DATA[n] || {}).has_data; });
+  if (!withData.length) {
+    renderCmtyEmptyState();
+    var vs = document.getElementById('cmty-voice-share');
+    if (vs) vs.innerHTML = '<div style="color:var(--muted);font-size:13px">尚无任何竞品社媒数据</div>';
+    document.getElementById('cmty-ai-meta').textContent = '汇总模式 · 0 竞品有数据';
+    document.getElementById('cmty-ai-alert-badge').innerHTML = '';
+    document.getElementById('cmty-ai-body').innerHTML =
+      '<div style="color:var(--muted);font-size:13px">尚无任何竞品数据可供汇总</div>';
+    return;
+  }
+
+  // 区 1：聚合 KPI
+  var totalMentions = 0, totalEng = 0, allSubs = {};
+  var weightedPos = 0, weightedNeg = 0;
+  var alertCount = { low: 0, medium: 0, high: 0 };
+  withData.forEach(function(name){
+    var entry = COMMUNITY_DATA[name];
+    var raw = entry.raw || {};
+    var ai = entry.ai_analysis || {};
+    var s = ai.sentiment || {};
+    var m = raw.mention_count || 0;
+    totalMentions += m;
+    totalEng += raw.total_engagement || 0;
+    Object.keys(raw.subreddit_distribution || {}).forEach(function(k){
+      allSubs[k] = (allSubs[k] || 0) + (raw.subreddit_distribution[k] || 0);
+    });
+    weightedPos += (s.positive || 0) * m;
+    weightedNeg += (s.negative || 0) * m;
+    var lvl = ai.alert_level || 'low';
+    alertCount[lvl] = (alertCount[lvl] || 0) + 1;
+  });
+  var sentNet = totalMentions ? Math.round((weightedPos - weightedNeg) / totalMentions * 100) : 0;
+  var sentColor = sentNet > 10 ? 'var(--accent2)' : (sentNet < -10 ? 'var(--danger)' : 'var(--muted)');
+  var topSubs = Object.keys(allSubs).sort(function(a,b){ return allSubs[b]-allSubs[a]; }).slice(0, 3).join(' · ');
+  document.getElementById('cmty-kpi').innerHTML =
+    '<div class="metric-card purple"><div class="metric-label">总提及数</div><div class="metric-value">' + totalMentions + '</div><div class="metric-sub">' + withData.length + ' / ' + comps.length + ' 竞品</div></div>' +
+    '<div class="metric-card teal"><div class="metric-label">总互动量</div><div class="metric-value">' + totalEng + '</div><div class="metric-sub">跨平台合计</div></div>' +
+    '<div class="metric-card warn"><div class="metric-label">活跃 sub-channel</div><div class="metric-value">' + Object.keys(allSubs).length + '</div><div class="metric-sub">' + (topSubs || '—') + '</div></div>' +
+    '<div class="metric-card" style="border-color:' + sentColor + '"><div class="metric-label">整体情绪净值</div><div class="metric-value" style="color:' + sentColor + '">' + (sentNet>=0?'+':'') + sentNet + '%</div><div class="metric-sub">按提及数加权</div></div>' +
+    '<div class="metric-card danger"><div class="metric-label">高风险竞品</div><div class="metric-value">' + (alertCount.high || 0) + '</div><div class="metric-sub">中 ' + (alertCount.medium||0) + ' · 低 ' + (alertCount.low||0) + '</div></div>';
+
+  // 声量份额
+  renderCmtyVoiceShare(withData);
+
+  // 区 2：聚合情绪时序 / 平台 / 全竞品雷达
+  renderCmtySentimentTime(_aggregateSentimentDaily(withData));
+  var aggPb = {};
+  withData.forEach(function(name){
+    var pb = ((COMMUNITY_DATA[name] || {}).raw || {}).platform_breakdown || {};
+    Object.keys(pb).forEach(function(plat){
+      if (!aggPb[plat]) aggPb[plat] = { mentions: 0, engagement: 0 };
+      aggPb[plat].mentions += pb[plat].mentions || 0;
+      aggPb[plat].engagement += pb[plat].engagement || 0;
+    });
+  });
+  renderCmtyPlatformChart(aggPb);
+  var prevMode = _cmtyRadarMode; _cmtyRadarMode = 'all';
+  renderCmtyRadar();
+  _cmtyRadarMode = prevMode;
+
+  // 区 3：聚合痛点 / 机会
+  renderCmtyAggregatePainCloud(withData);
+  renderCmtyAggregateOppMatrix(withData);
+
+  // 区 4：跨竞品热门 / 评论
+  var allHot = [];
+  withData.forEach(function(name){
+    var hp = ((COMMUNITY_DATA[name] || {}).raw || {}).hot_posts || [];
+    hp.forEach(function(p){ allHot.push(Object.assign({}, p, { _comp: name })); });
+  });
+  allHot.sort(function(a,b){ return (b.score||0) - (a.score||0); });
+  renderCmtyHotPostsAggregate(allHot.slice(0, 20));
+
+  var allRecent = [];
+  withData.forEach(function(name){
+    var rc = ((COMMUNITY_DATA[name] || {}).raw || {}).recent_comments || [];
+    rc.forEach(function(c){ allRecent.push(Object.assign({}, c, { _comp: name })); });
+  });
+  allRecent.sort(function(a,b){ return (b.created_utc||0) - (a.created_utc||0); });
+  renderCmtyRecentCommentsAggregate(allRecent.slice(0, 20));
+
+  // 全部相关帖子（汇总模式：所有竞品）
+  renderCmtyAllPosts(withData, true);
+
+  // 区 5：跨竞品 AI 对比
+  renderCmtyAggregateAI(withData);
+}
+
+// ============================================================
+// 全部相关帖子（带跳转链接）— 汇总 / 单竞品两用
+// ============================================================
+var _cmtyAllPostsState = { search: '', sort: 'date_desc' };
+var _cmtyAllPostsCache = { items: [], modeAll: false };
+
+function renderCmtyAllPosts(comps, modeAll) {
+  var pool = [];
+  comps.forEach(function(name){
+    var hp = ((COMMUNITY_DATA[name] || {}).raw || {}).hot_posts || [];
+    hp.forEach(function(p){ pool.push(Object.assign({}, p, { _comp: name })); });
+  });
+  _cmtyAllPostsCache.items = pool;
+  _cmtyAllPostsCache.modeAll = modeAll;
+
+  var sortSel = document.getElementById('cmty-allposts-sort');
+  if (sortSel && !sortSel._cmtyInit) {
+    sortSel.innerHTML =
+      '<option value="date_desc">按日期 ↓</option>' +
+      '<option value="engagement_desc">按互动量 ↓</option>';
+    sortSel.value = _cmtyAllPostsState.sort;
+    sortSel.onchange = function(){ _cmtyAllPostsState.sort = this.value; _renderCmtyAllPostsBody(); };
+    sortSel._cmtyInit = true;
+  }
+  var inp = document.getElementById('cmty-allposts-search');
+  if (inp && !inp._cmtyInit) {
+    inp.value = _cmtyAllPostsState.search;
+    inp.oninput = function(){ _cmtyAllPostsState.search = this.value; _renderCmtyAllPostsBody(); };
+    inp._cmtyInit = true;
+  }
+  _renderCmtyAllPostsBody();
+}
+
+function _renderCmtyAllPostsBody() {
+  var pool = _cmtyAllPostsCache.items || [];
+  var search = (_cmtyAllPostsState.search || '').toLowerCase().trim();
+  var filtered = pool.filter(_matchCmtyDayPlatform).filter(function(p){
+    if (!search) return true;
+    return ((p.title||'').toLowerCase().indexOf(search) >= 0)
+        || ((p.subreddit||'').toLowerCase().indexOf(search) >= 0)
+        || ((p._comp||'').toLowerCase().indexOf(search) >= 0);
+  });
+  if (_cmtyAllPostsState.sort === 'engagement_desc') {
+    filtered.sort(function(a,b){ return ((b.score||0)+(b.num_comments||0)) - ((a.score||0)+(a.num_comments||0)); });
+  } else {
+    filtered.sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
+  }
+  document.getElementById('cmty-allposts-meta').textContent = filtered.length + ' / ' + pool.length + ' 条';
+
+  var el = document.getElementById('cmty-all-posts');
+  if (!filtered.length) {
+    el.innerHTML = '<div style="padding:24px;color:var(--muted);font-size:12px;text-align:center">无符合筛选的帖子</div>';
+    return;
+  }
+  el.innerHTML = filtered.map(function(p){
+    var date = (p.created_at || '').slice(0, 10) || '—';
+    var platLabel = p.platform === 'twitter' ? 'X' : 'reddit';
+    var platColor = p.platform === 'twitter' ? 'rgba(96,165,250,0.85)' : 'var(--accent)';
+    var compColor = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[p._comp]) || 'var(--accent2)';
+    var sub = p.subreddit ? 'r/' + escapeHtml(p.subreddit) : '—';
+    var titleSafe = escapeHtml(p.title || '(无标题)');
+    return '<div style="display:grid;grid-template-columns:80px 110px 50px 110px 1fr 80px 36px;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:11px;align-items:center" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<span style="font-family:var(--mono);color:var(--muted)">' + date + '</span>' +
+      '<span style="color:' + compColor + ';font-family:var(--mono);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(p._comp || '') + '</span>' +
+      '<span style="color:' + platColor + ';font-family:var(--mono);font-size:10px">' + platLabel + '</span>' +
+      '<span style="color:var(--muted);font-family:var(--mono);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + sub + '</span>' +
+      (p.url
+        ? '<a href="' + escapeHtml(p.url) + '" target="_blank" style="color:var(--text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + titleSafe + '">' + titleSafe + '</a>'
+        : '<span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + titleSafe + '">' + titleSafe + '</span>') +
+      '<span style="color:var(--muted);font-family:var(--mono);font-size:10px;text-align:right">' + (p.score||0) + '↑ · ' + (p.num_comments||0) + '</span>' +
+      (p.url
+        ? '<a href="' + escapeHtml(p.url) + '" target="_blank" style="color:var(--accent);text-decoration:none;font-size:14px;text-align:center" title="打开原帖">↗</a>'
+        : '<span style="color:var(--muted);font-size:11px;text-align:center">—</span>') +
+    '</div>';
+  }).join('');
+}
+
+function _aggregateSentimentDaily(withData) {
+  var byDate = {};
+  withData.forEach(function(name){
+    var sd = ((COMMUNITY_DATA[name] || {}).raw || {}).sentiment_daily || [];
+    sd.forEach(function(d){
+      if (!byDate[d.date]) byDate[d.date] = { date: d.date, positive: 0, neutral: 0, negative: 0 };
+      byDate[d.date].positive += d.positive || 0;
+      byDate[d.date].neutral  += d.neutral  || 0;
+      byDate[d.date].negative += d.negative || 0;
+    });
+  });
+  return Object.keys(byDate).sort().map(function(k){ return byDate[k]; });
+}
+
+function renderCmtyVoiceShare(withData) {
+  var el = document.getElementById('cmty-voice-share');
+  if (!el) return;
+  var rows = withData.map(function(name){
+    var entry = COMMUNITY_DATA[name];
+    var raw = entry.raw || {};
+    var ai = entry.ai_analysis || {};
+    var s = ai.sentiment || {};
+    return {
+      name: name,
+      mentions: raw.mention_count || 0,
+      engagement: raw.total_engagement || 0,
+      pos: s.positive || 0, neu: s.neutral || 0, neg: s.negative || 0,
+      alert: ai.alert_level || 'low',
+    };
+  }).sort(function(a,b){ return b.mentions - a.mentions; });
+  var maxMentions = rows.reduce(function(m, r){ return Math.max(m, r.mentions); }, 1);
+  var totalMentions = rows.reduce(function(m, r){ return m + r.mentions; }, 0) || 1;
+
+  el.innerHTML = rows.map(function(r){
+    var pct = Math.round(r.mentions / totalMentions * 100);
+    var widthPct = Math.max(8, Math.round(r.mentions / maxMentions * 100));
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[r.name]) || 'var(--accent)';
+    var sumS = (r.pos + r.neu + r.neg) || 1;
+    var posPct = (r.pos / sumS) * 100;
+    var neuPct = (r.neu / sumS) * 100;
+    var negPct = (r.neg / sumS) * 100;
+    var alertBadge = r.alert === 'high' ? '<span style="margin-left:6px;color:var(--danger);font-size:9px;font-family:var(--mono)">[高]</span>' :
+                     r.alert === 'medium' ? '<span style="margin-left:6px;color:var(--warn);font-size:9px;font-family:var(--mono)">[中]</span>' : '';
+    return '<div onclick="selectCommunityComp(\'' + r.name + '\')" style="display:flex;align-items:center;gap:12px;margin-bottom:10px;cursor:pointer;padding:6px 8px;border-radius:6px" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<span style="min-width:120px;font-size:12px;font-family:var(--mono);color:var(--text)">' +
+        '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + color + ';margin-right:6px;vertical-align:middle"></span>' +
+        escapeHtml(r.name) + alertBadge +
+      '</span>' +
+      '<div style="flex:1">' +
+        '<div style="display:flex;height:14px;background:var(--surface2);border-radius:3px;overflow:hidden;width:' + widthPct + '%;min-width:40px">' +
+          '<div style="flex:' + posPct.toFixed(1) + ';background:rgba(78,204,163,0.75)" title="正面 ' + Math.round(posPct) + '%"></div>' +
+          '<div style="flex:' + neuPct.toFixed(1) + ';background:rgba(150,150,150,0.55)" title="中性 ' + Math.round(neuPct) + '%"></div>' +
+          '<div style="flex:' + negPct.toFixed(1) + ';background:rgba(255,92,92,0.75)" title="负面 ' + Math.round(negPct) + '%"></div>' +
+        '</div>' +
+      '</div>' +
+      '<span style="min-width:70px;text-align:right;font-size:11px;font-family:var(--mono);color:var(--text)">' + r.mentions + ' <span style="color:var(--muted)">· ' + pct + '%</span></span>' +
+      '<span style="min-width:70px;text-align:right;font-size:10px;font-family:var(--mono);color:var(--muted)">' + r.engagement + ' 互动</span>' +
+    '</div>';
+  }).join('') +
+  '<div style="display:flex;gap:14px;justify-content:center;margin-top:10px;font-size:10px;font-family:var(--mono);color:var(--muted);padding-top:8px;border-top:1px solid var(--border)">' +
+    '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(78,204,163,0.75);margin-right:4px;vertical-align:middle"></span>正面</span>' +
+    '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(150,150,150,0.55);margin-right:4px;vertical-align:middle"></span>中性</span>' +
+    '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(255,92,92,0.75);margin-right:4px;vertical-align:middle"></span>负面</span>' +
+  '</div>';
+}
+
+function renderCmtyAggregatePainCloud(withData) {
+  var el = document.getElementById('cmty-pain-cloud');
+  var byTopic = {};
+  withData.forEach(function(name){
+    var entry = COMMUNITY_DATA[name];
+    var ai = entry.ai_analysis || {};
+    var raw = entry.raw || {};
+    var src = (ai.pain_points_with_severity && ai.pain_points_with_severity.length)
+      ? ai.pain_points_with_severity : (raw.pain_points || []);
+    src.forEach(function(p){
+      var topic = p.topic || p.theme || '未分类';
+      if (!byTopic[topic]) {
+        byTopic[topic] = { topic: topic, severity: 0, count: 0, sample: '', comps: {} };
+      }
+      var cnt = p.count || p.frequency || 1;
+      var sev = p.severity || 1;
+      byTopic[topic].comps[name] = (byTopic[topic].comps[name] || 0) + cnt;
+      byTopic[topic].count += cnt;
+      if (sev > byTopic[topic].severity) byTopic[topic].severity = sev;
+      var sample = p.sample_quote || p.sample || '';
+      if (!byTopic[topic].sample && sample) byTopic[topic].sample = sample;
+    });
+  });
+  var arr = Object.keys(byTopic).map(function(k){ return byTopic[k]; });
+  if (!arr.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px">尚无任何竞品的痛点信号</div>';
+    return;
+  }
+  arr.forEach(function(p){ p._w = p.severity * Math.log(p.count + 1); });
+  arr.sort(function(a,b){ return b._w - a._w; });
+  var max = arr[0]._w || 1;
+  _cmtyPainSamples = {};
+  el.innerHTML = arr.slice(0, 12).map(function(p, idx){
+    _cmtyPainSamples[p.topic] = p.sample;
+    var sevColors = ['rgba(255,92,92,0.20)','rgba(255,92,92,0.32)','rgba(255,92,92,0.44)','rgba(255,92,92,0.58)','rgba(255,92,92,0.72)'];
+    var sevColor = sevColors[Math.min(4, p.severity - 1)] || sevColors[0];
+    var weightPct = Math.round(p._w / max * 100);
+    var fontSize = 11 + Math.round(weightPct / 100 * 5);
+    var compsList = Object.keys(p.comps).slice(0, 3).map(escapeHtml).join(' · ');
+    return '<div onclick="showCmtyPainDetail(\'' + escapeHtml(p.topic).replace(/\'/g,"&apos;") + '\')" ' +
+      'style="display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:6px 10px;border-radius:6px;background:' + sevColor + ';border:1px solid rgba(255,92,92,0.35);cursor:pointer">' +
+      '<span style="min-width:24px;text-align:right;font-size:10px;font-family:var(--mono);color:var(--muted)">#' + (idx + 1) + '</span>' +
+      '<span style="flex:1;font-size:' + fontSize + 'px;color:var(--text);font-family:var(--mono)">' + escapeHtml(p.topic) +
+        ' <span style="font-size:9px;color:var(--muted);margin-left:6px">[' + compsList + ']</span></span>' +
+      '<span style="font-size:10px;font-family:var(--mono);color:var(--muted)">严重度 ' + p.severity + ' · ' + p.count + ' 次</span>' +
+    '</div>';
+  }).join('');
+}
+
+function renderCmtyAggregateOppMatrix(withData) {
+  var el = document.getElementById('cmty-opp-matrix');
+  var oppos = [];
+  withData.forEach(function(name){
+    var entry = COMMUNITY_DATA[name];
+    var ai = entry.ai_analysis || {};
+    var raw = entry.raw || {};
+    var src = (ai.opportunity_matrix && ai.opportunity_matrix.length)
+      ? ai.opportunity_matrix
+      : (raw.opportunity_signals || []).map(function(o){ return { theme: o.theme || o.topic, impact: 3, effort: 3, sample: o.sample_quote || '' }; });
+    src.forEach(function(o){ oppos.push(Object.assign({}, o, { _comp: name })); });
+  });
+  if (!oppos.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px">尚无机会信号</div>';
+    return;
+  }
+  _cmtyOppSamples = {};
+  oppos.forEach(function(o){ _cmtyOppSamples[o.theme] = o.sample; });
+
+  var W = 320, H = 240, padL = 30, padR = 16, padT = 18, padB = 30;
+  var x0 = padL, x1 = W - padR;
+  var y0 = padT, y1 = H - padB;
+  var quad = '<rect x="' + x0 + '" y="' + y0 + '" width="' + ((x1-x0)/2) + '" height="' + ((y1-y0)/2) + '" fill="rgba(78,204,163,0.06)"/>' +
+             '<rect x="' + (x0+(x1-x0)/2) + '" y="' + y0 + '" width="' + ((x1-x0)/2) + '" height="' + ((y1-y0)/2) + '" fill="rgba(255,92,92,0.06)"/>' +
+             '<rect x="' + x0 + '" y="' + (y0+(y1-y0)/2) + '" width="' + ((x1-x0)/2) + '" height="' + ((y1-y0)/2) + '" fill="rgba(150,150,150,0.05)"/>' +
+             '<rect x="' + (x0+(x1-x0)/2) + '" y="' + (y0+(y1-y0)/2) + '" width="' + ((x1-x0)/2) + '" height="' + ((y1-y0)/2) + '" fill="rgba(245,166,35,0.05)"/>';
+  var grid = '<line x1="' + ((x0+x1)/2) + '" y1="' + y0 + '" x2="' + ((x0+x1)/2) + '" y2="' + y1 + '" stroke="var(--border)"/>' +
+             '<line x1="' + x0 + '" y1="' + ((y0+y1)/2) + '" x2="' + x1 + '" y2="' + ((y0+y1)/2) + '" stroke="var(--border)"/>';
+  var axes = '<text x="' + ((x0+x1)/2) + '" y="' + (H - 8) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="middle">实施难度 →</text>' +
+             '<text x="8" y="' + ((y0+y1)/2) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="middle" transform="rotate(-90 8,' + ((y0+y1)/2) + ')">影响力 →</text>';
+  var quadLabels = '<text x="' + (x0 + 8) + '" y="' + (y0 + 12) + '" font-size="9" font-family="DM Mono" fill="var(--accent2)">高优先级</text>' +
+                   '<text x="' + (x1 - 8) + '" y="' + (y0 + 12) + '" font-size="9" font-family="DM Mono" fill="var(--danger)" text-anchor="end">大牌项目</text>' +
+                   '<text x="' + (x0 + 8) + '" y="' + (y1 - 6) + '" font-size="9" font-family="DM Mono" fill="var(--muted)">低价值</text>' +
+                   '<text x="' + (x1 - 8) + '" y="' + (y1 - 6) + '" font-size="9" font-family="DM Mono" fill="var(--warn)" text-anchor="end">低 ROI</text>';
+
+  var bubbles = oppos.map(function(o){
+    var impact = Math.max(1, Math.min(5, o.impact || 3));
+    var effort = Math.max(1, Math.min(5, o.effort || 3));
+    var bx = x0 + (effort - 1) / 4 * (x1 - x0);
+    var by = y1 - (impact - 1) / 4 * (y1 - y0);
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[o._comp]) || 'var(--accent)';
+    return '<circle cx="' + bx.toFixed(1) + '" cy="' + by.toFixed(1) + '" r="8" fill="' + color + '" fill-opacity="0.7" stroke="' + color + '" stroke-width="1.2" style="cursor:pointer" onclick="showCmtyOppDetail(\'' + escapeHtml(o.theme || '').replace(/\'/g,"&apos;") + '\')"><title>' + escapeHtml(o._comp) + ' · ' + escapeHtml(o.theme || '') + ' · 影响 ' + impact + ' / 难度 ' + effort + '</title></circle>';
+  }).join('');
+
+  el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-width:320px;display:block;margin:0 auto">' +
+    quad + grid + axes + quadLabels + bubbles +
+  '</svg>' +
+  '<div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">' +
+    oppos.slice(0, 6).map(function(o){
+      var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[o._comp]) || 'var(--accent)';
+      return '<div onclick="showCmtyOppDetail(\'' + escapeHtml(o.theme || '').replace(/\'/g,"&apos;") + '\')" style="font-size:11px;font-family:var(--mono);color:var(--text);cursor:pointer;padding:3px 6px;border-radius:3px" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'transparent\'">' +
+        '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + color + ';margin-right:6px;vertical-align:middle"></span>' +
+        '<span style="color:var(--muted);margin-right:6px">' + escapeHtml(o._comp) + '</span>' + escapeHtml(o.theme || '') +
+        ' <span style="color:var(--muted);font-size:10px">影响 ' + (o.impact || '?') + ' · 难度 ' + (o.effort || '?') + '</span>' +
+      '</div>';
+    }).join('') +
+  '</div>';
+}
+
+function renderCmtyHotPostsAggregate(allHot) {
+  var el = document.getElementById('cmty-hot-posts');
+  var filtered = allHot.filter(_matchCmtyDayPlatform);
+  document.getElementById('cmty-content-meta').textContent = filtered.length + ' / ' + allHot.length + ' 条 · 跨竞品';
+  if (!filtered.length) {
+    el.innerHTML = '<div style="padding:18px;color:var(--muted);font-size:12px">无符合筛选的帖子</div>';
+    return;
+  }
+  el.innerHTML = filtered.slice(0, 15).map(function(p) {
+    var date = (p.created_at || '').slice(0, 10);
+    var titleHtml = p.url
+      ? '<a href="' + escapeHtml(p.url) + '" target="_blank" style="color:var(--text);text-decoration:none">' + escapeHtml(p.title || '') + '</a>'
+      : escapeHtml(p.title || '');
+    var platLabel = p.platform === 'twitter' ? 'X' : 'reddit';
+    var platColor = p.platform === 'twitter' ? 'rgba(96,165,250,0.85)' : 'var(--accent)';
+    var compColor = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[p._comp]) || 'var(--accent2)';
+    return '<div class="feed-item" style="padding:8px 14px">' +
+      '<div class="feed-meta">' +
+        '<span style="padding:1px 6px;border-radius:3px;background:rgba(255,255,255,0.04);color:' + compColor + ';font-size:9px;font-family:var(--mono)">' + escapeHtml(p._comp || '') + '</span>' +
+        '<span style="padding:1px 6px;border-radius:3px;background:rgba(255,255,255,0.04);color:' + platColor + ';font-size:9px;font-family:var(--mono)">' + platLabel + '</span>' +
+        '<span class="feed-source" style="color:var(--muted);font-size:10px">' + (p.subreddit ? 'r/' + escapeHtml(p.subreddit) : '—') + '</span>' +
+        '<span class="feed-type ft-feature" style="font-size:10px">' + (p.score || 0) + '↑ · ' + (p.num_comments || 0) + '</span>' +
+      '</div>' +
+      '<div class="feed-title" style="font-size:12px">' + titleHtml + '</div>' +
+      '<div class="feed-time" style="font-size:10px">' + date + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderCmtyRecentCommentsAggregate(allRecent) {
+  var el = document.getElementById('cmty-recent-comments');
+  var filtered = allRecent.filter(_matchCmtyDayPlatform);
+  if (!filtered.length) {
+    el.innerHTML = '<div style="padding:18px;color:var(--muted);font-size:12px">无符合筛选的评论</div>';
+    return;
+  }
+  el.innerHTML = filtered.slice(0, 12).map(function(c) {
+    var body = (c.body || '').slice(0, 180);
+    var date = c.created_utc ? new Date(c.created_utc * 1000).toISOString().slice(0, 10) : '';
+    var sentColors = { positive: 'var(--accent2)', neutral: 'var(--muted)', negative: 'var(--danger)' };
+    var sColor = sentColors[c.sentiment] || 'var(--muted)';
+    var platLabel = c.platform === 'twitter' ? 'X' : 'reddit';
+    var compColor = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[c._comp]) || 'var(--accent2)';
+    return '<div class="feed-item" style="padding:8px 14px;border-left:2px solid ' + sColor + '">' +
+      '<div class="feed-meta">' +
+        '<span style="padding:1px 6px;border-radius:3px;background:rgba(255,255,255,0.04);color:' + compColor + ';font-size:9px;font-family:var(--mono)">' + escapeHtml(c._comp || '') + '</span>' +
+        '<span style="padding:1px 6px;border-radius:3px;background:rgba(255,255,255,0.04);color:var(--muted);font-size:9px;font-family:var(--mono)">' + platLabel + '</span>' +
+        '<span class="feed-source" style="color:var(--muted);font-size:10px">' + (c.subreddit ? 'r/' + escapeHtml(c.subreddit) : '—') + '</span>' +
+        '<span class="feed-type ft-bug" style="font-size:10px">' + (c.score || 0) + '↑</span>' +
+      '</div>' +
+      '<div class="feed-desc" style="font-size:11px;color:var(--muted)">' + escapeHtml(body) + '</div>' +
+      '<div class="feed-time" style="font-size:10px">on: ' + escapeHtml((c.post_title || '').slice(0, 50)) + ' · ' + date + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderCmtyAggregateAI(withData) {
+  var head = document.getElementById('cmty-ai-head');
+  var body = document.getElementById('cmty-ai-body');
+  var meta = document.getElementById('cmty-ai-meta');
+  var alertBadge = document.getElementById('cmty-ai-alert-badge');
+
+  head.onclick = function(e) {
+    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+    toggleCmtyAI();
+  };
+
+  var signals = [];
+  var totalSamples = 0;
+  var compsWithAI = 0;
+  var maxAlert = 'low';
+  var alertRank = { low: 0, medium: 1, high: 2 };
+  withData.forEach(function(name){
+    var ai = (COMMUNITY_DATA[name] || {}).ai_analysis;
+    if (!ai) return;
+    compsWithAI++;
+    totalSamples += ai.sample_size || 0;
+    if (alertRank[ai.alert_level || 'low'] > alertRank[maxAlert]) maxAlert = ai.alert_level;
+    if (ai.cross_competitor_signals && ai.cross_competitor_signals.length) {
+      ai.cross_competitor_signals.forEach(function(s){
+        signals.push(typeof s === 'string' ? { text: s, _src: name } : Object.assign({}, s, { _src: name }));
+      });
+    }
+  });
+
+  meta.textContent = compsWithAI + ' / ' + withData.length + ' 竞品已生成 AI · 样本 ' + totalSamples;
+  if (compsWithAI) {
+    var alertColors = { low: 'var(--accent2)', medium: 'var(--warn)', high: 'var(--danger)' };
+    var alertLabels = { low: '低', medium: '中', high: '高' };
+    alertBadge.innerHTML = '<span style="padding:2px 8px;border-radius:4px;background:' + (alertColors[maxAlert]||'var(--muted)') + ';color:#fff;font-size:10px;font-family:var(--mono)">最高风险 ' + (alertLabels[maxAlert]||maxAlert) + '</span>';
+  } else {
+    alertBadge.innerHTML = '';
+  }
+
+  if (!compsWithAI) {
+    body.innerHTML = '<div style="color:var(--muted);font-size:13px;line-height:1.7">尚未生成任何竞品的 AI 分析。请进入单一竞品 tab，分别触发 AI 分析。</div>';
+    return;
+  }
+
+  // 竞品 AI 摘要对比表
+  var lvlColors = { low: 'var(--accent2)', medium: 'var(--warn)', high: 'var(--danger)' };
+  var lvlLabels = { low: '低', medium: '中', high: '高' };
+  var rows = withData.map(function(name){
+    var entry = COMMUNITY_DATA[name];
+    var ai = entry.ai_analysis;
+    if (!ai) {
+      return '<tr><td style="padding:6px 8px;font-family:var(--mono);font-size:11px;color:var(--text)">' + escapeHtml(name) + '</td>' +
+             '<td colspan="4" style="padding:6px 8px;color:var(--muted);font-size:11px">— 未生成 —</td></tr>';
+    }
+    var s = ai.sentiment || {};
+    var pos = Math.round((s.positive || 0) * 100);
+    var neg = Math.round((s.negative || 0) * 100);
+    var lvl = ai.alert_level || 'low';
+    var summary = (ai.overall_summary || '').slice(0, 80);
+    return '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:7px 8px;font-family:var(--mono);font-size:11px;color:var(--text)">' + escapeHtml(name) + '</td>' +
+      '<td style="padding:7px 8px;font-size:11px;color:var(--accent2);font-family:var(--mono)">' + pos + '%</td>' +
+      '<td style="padding:7px 8px;font-size:11px;color:var(--danger);font-family:var(--mono)">' + neg + '%</td>' +
+      '<td style="padding:7px 8px;font-size:11px;color:' + (lvlColors[lvl] || 'var(--muted)') + ';font-family:var(--mono)">' + (lvlLabels[lvl] || '—') + '</td>' +
+      '<td style="padding:7px 8px;font-size:11px;color:var(--muted)">' + escapeHtml(summary) + (summary.length === 80 ? '...' : '') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  body.innerHTML =
+    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">竞品 AI 摘要对比</div>' +
+    '<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:16px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--surface2)">' +
+        '<thead><tr style="background:rgba(123,110,246,0.10)">' +
+          '<th style="padding:7px 8px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">竞品</th>' +
+          '<th style="padding:7px 8px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">正面</th>' +
+          '<th style="padding:7px 8px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">负面</th>' +
+          '<th style="padding:7px 8px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">风险</th>' +
+          '<th style="padding:7px 8px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">摘要</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>' +
+    '</div>' +
+    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">跨竞品信号</div>' +
+    (signals.length
+      ? '<ul style="margin:0;padding-left:18px">' + signals.slice(0, 12).map(function(s){
+          var text = s.signal || s.theme || s.text || s.description || '';
+          if (!text && typeof s === 'object') text = JSON.stringify(s);
+          return '<li style="font-size:12px;color:var(--text);margin:4px 0;line-height:1.6">' +
+            '<span style="color:var(--muted);font-family:var(--mono);font-size:10px;margin-right:6px">[' + escapeHtml(s._src || '') + ']</span>' +
+            escapeHtml(text) + '</li>';
+        }).join('') + '</ul>'
+      : '<div style="color:var(--muted);font-size:11px">尚无跨竞品信号 — 各竞品 AI 分析未返回 cross_competitor_signals 字段</div>'
+    );
 }
 
 function renderCmtyEmptyState() {
