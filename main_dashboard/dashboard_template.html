@@ -814,7 +814,7 @@ body::before {
   <div class="page-header">
     <div>
       <div class="page-title">商业变现策略</div>
-      <div class="page-sub">IAP 监测 · 变现模式分析 · RPD 指数 · 商业动作 Feed</div>
+      <div class="page-sub">IAP 监测 · 变现模式分析 · 投放策略 · 商业动作 Feed</div>
     </div>
     <div class="header-actions">
       <button class="btn" id="commercial-run-btn" onclick="runCommercialAnalysis()">运行分析</button>
@@ -823,28 +823,52 @@ body::before {
     </div>
   </div>
 
-  <!-- KPI 卡片 -->
-  <div class="grid-4" style="margin-bottom:16px">
-    <div class="card" style="padding:16px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">监控竞品</div>
-      <div id="cm-total" style="font-size:28px;font-weight:700;color:var(--text);margin-top:4px">—</div>
-    </div>
-    <div class="card" style="padding:16px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">价格预警</div>
-      <div id="cm-alerts" style="font-size:28px;font-weight:700;color:var(--danger);margin-top:4px">—</div>
-    </div>
-    <div class="card" style="padding:16px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">博彩导流信号</div>
-      <div id="cm-betting" style="font-size:28px;font-weight:700;color:var(--warn);margin-top:4px">—</div>
-    </div>
-    <div class="card" style="padding:16px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">最高 RPD 指数</div>
-      <div id="cm-rpd" style="font-size:28px;font-weight:700;color:var(--accent2);margin-top:4px">—</div>
+  <!-- KPI 卡片：活跃竞品 / 投放国家 / 近 3 天新增 / 本周价格预警 -->
+  <div class="metrics-row" id="cm-summary-cards"></div>
+
+  <!-- 全局筛选栏 -->
+  <div class="card full-card" style="padding:14px 20px;margin:16px 0">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11px;font-family:var(--mono);color:var(--muted)">筛选</span>
+      <select id="cm-filter-comp"     class="prod-select"></select>
+      <select id="cm-filter-window"   class="prod-select"></select>
+      <select id="cm-filter-store"    class="prod-select"></select>
+      <span style="margin-left:auto;font-size:10px;color:var(--muted);font-family:var(--mono)" id="cm-filter-meta"></span>
     </div>
   </div>
 
   <!-- 商业预警区域 -->
   <div id="cm-alerts-list" style="margin-bottom:16px"></div>
+
+  <!-- IAP 分析模块（商业模式画像 + 价格区间分布 + 商品明细） -->
+  <div class="card full-card" id="cm-iap-analysis" style="display:none;margin-bottom:16px">
+    <div class="card-head">
+      <div class="card-title">IAP 商业模式分析</div>
+      <div class="card-action" id="cm-iap-meta" style="color:var(--muted);font-size:11px"></div>
+    </div>
+
+    <!-- 顶部：竞品商业模式画像 -->
+    <div style="padding:8px 20px 4px">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">竞品商业模式画像（点击进入价格分布）</div>
+      <div id="cm-iap-portraits"></div>
+    </div>
+
+    <!-- 中部：价格区间分布堆叠柱 -->
+    <div style="padding:14px 20px 6px;border-top:1px solid var(--border);margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted)">价格区间分布（按 IAP 类目堆叠）</div>
+        <select id="cm-iap-price-comp" class="prod-select"></select>
+      </div>
+      <div id="cm-iap-price-chart"></div>
+      <div id="cm-iap-price-legend" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:10px;font-family:var(--mono);color:var(--muted)"></div>
+    </div>
+
+    <!-- 底部：商品明细 -->
+    <div style="padding:14px 20px 18px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">IAP 商品明细（按竞品折叠）</div>
+      <div id="cm-iap-table"></div>
+    </div>
+  </div>
 
   <!-- Meta Ad Library 广告投放策略（Phase 1：规模 + 节奏 + 趋势） -->
   <div class="card full-card" id="cm-ads-card" style="margin-bottom:20px;display:none">
@@ -903,11 +927,62 @@ body::before {
   <!-- 多源收入数据 (Sensor Tower) -->
   <!-- MULTI_SOURCE_REVENUE_PLACEHOLDER -->
 
-  <!-- 商业策略周报 -->
-  <div class="card" id="cm-weekly-report" style="margin-top:16px;padding:20px;display:none">
-    <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:8px">商业变现策略周报</div>
-    <div id="cm-weekly-period" style="font-size:11px;color:var(--muted);margin-bottom:12px"></div>
-    <div id="cm-weekly-content" style="font-size:13px;line-height:1.8;color:var(--text);white-space:pre-wrap"></div>
+  <!-- 商业分析报告（v2：mini-KPI + 标签云 + Top3 + 结构化卡 + markdown 折叠） -->
+  <div id="cm-weekly-report-v2" style="margin-top:16px;display:none">
+    <!-- 顶部：4 张 mini-KPI -->
+    <div class="card full-card">
+      <div class="card-head">
+        <div class="card-title">本周期商业动态摘要</div>
+        <div class="card-action" id="cm-report-meta" style="color:var(--muted);font-size:11px"></div>
+      </div>
+      <div class="metrics-row" id="cm-report-mini-kpi" style="padding:0 0 8px"></div>
+      <!-- 关键变化标签云 -->
+      <div style="padding:8px 20px 6px">
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">关键变化（按重要性排序）</div>
+        <div id="cm-report-tag-cloud"></div>
+      </div>
+      <!-- Top 3 商业事件 -->
+      <div style="padding:14px 20px 18px;border-top:1px solid var(--border);margin-top:8px">
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">Top 3 商业事件</div>
+        <div id="cm-report-top-events"></div>
+      </div>
+    </div>
+
+    <!-- 中部：结构化卡片 -->
+    <div class="three-col" style="margin-top:12px">
+      <div class="card">
+        <div class="card-head"><div class="card-title">投放策略变化</div></div>
+        <div id="cm-report-ads-shifts" style="padding:14px 20px"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-title">商业模式变动</div></div>
+        <div id="cm-report-iap-changes" style="padding:14px 20px"></div>
+      </div>
+    </div>
+
+    <div class="three-col" style="margin-top:12px">
+      <div class="card">
+        <div class="card-head"><div class="card-title">我方机会</div></div>
+        <div id="cm-report-opportunities" style="padding:14px 20px"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-title">风险提示</div></div>
+        <div id="cm-report-risks" style="padding:14px 20px"></div>
+      </div>
+    </div>
+
+    <!-- 底部：原始 AI 周报（折叠） -->
+    <div class="card full-card" style="margin-top:12px">
+      <div class="card-head" style="cursor:pointer" onclick="toggleCmReportRaw()">
+        <div class="card-title">原始 AI 周报全文 · markdown</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn" style="font-size:11px;padding:3px 10px" onclick="event.stopPropagation();copyCmReportMarkdown()">复制 markdown</button>
+          <button class="btn" style="font-size:11px;padding:3px 10px" onclick="event.stopPropagation();downloadCmReportPDF()">导出 PDF</button>
+          <span id="cm-report-raw-toggle" style="color:var(--muted);font-size:11px;font-family:var(--mono)">展开 ▼</span>
+        </div>
+      </div>
+      <div id="cm-report-raw-body" style="display:none;padding:16px 20px;font-size:13px;line-height:1.8;color:var(--muted)"></div>
+    </div>
   </div>
 </div>
 
@@ -2042,35 +2117,79 @@ function refreshAllCompetitorDetails(callback) {
 }
 
 // ====== 商业分析页 ======
+var _cmFilter = { comp: 'all', windowDays: 7, store: 'all' };
+
 function renderCommercialPage() {
   var data = COMMERCIAL_DATA || {};
-  var comps = data.competitors || {};
+  var allComps = data.competitors || {};
+  renderCmFilterBar(allComps);
+  var comps = applyCmFilter(allComps);
   var names = Object.keys(comps);
 
   renderAdsSection(comps);
+  renderIapSection(comps);
 
-  document.getElementById('cm-total').textContent = names.length || '—';
-
-  var totalAlerts = 0, bettingCount = 0, maxRpd = 0;
+  // ───── 顶部 KPI（PRD v2：删 RPD，加投放国家 / 近 3 天新增 / 价格预警） ─────
+  var activeCount = 0;
+  var countrySet = {};
+  var totalNewAds = 0;
+  var totalAlerts = 0;
+  var alertBreakdown = { up: 0, down: 0, add: 0, remove: 0 };
   var allAlertItems = [];
+
   names.forEach(function(n) {
     var c = comps[n];
-    totalAlerts += (c.price_alerts || []).length + (c.iap_changes || []).length;
-    if (c.betting_signals) bettingCount++;
-    if ((c.rpd_index || 0) > maxRpd) maxRpd = c.rpd_index;
+    var hasIap = (c.iap_items || []).length > 0;
+    var hasAds = ((c.ads || {}).active_count || 0) > 0;
+    if (hasIap || hasAds) activeCount++;
+
+    var byCountry = ((c.ads || {}).by_country || {});
+    Object.keys(byCountry).forEach(function(cc) { countrySet[cc] = true; });
+    totalNewAds += ((c.ads || {}).new_ads || 0);
+
     (c.price_alerts || []).forEach(function(a) {
+      totalAlerts++;
+      if (a.direction === '涨价' || a.direction === 'up') alertBreakdown.up++;
+      else alertBreakdown.down++;
       allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--danger);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--danger);font-weight:600">' + escapeHtml(n) + ' · ' + escapeHtml(a.direction) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(a.name) + ': $' + a.prev + ' → $' + a.curr + '</div></div>');
     });
     (c.iap_changes || []).forEach(function(ic) {
+      totalAlerts++;
+      if (ic.type === '新增' || ic.type === 'add') alertBreakdown.add++;
+      else alertBreakdown.remove++;
       allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--warn);font-weight:600">' + escapeHtml(n) + ' · IAP ' + escapeHtml(ic.type) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(ic.name) + '</div></div>');
     });
     if (c.betting_signals) {
       allAlertItems.push('<div class="feed-item" style="border-left:3px solid var(--warn);padding:10px 14px;margin-bottom:8px;border-radius:8px;background:var(--surface2)"><div style="font-size:12px;color:var(--warn);font-weight:600">' + escapeHtml(n) + ' · 博彩导流信号</div><div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml((c.description_keywords || []).join(', ')) + '</div></div>');
     }
   });
-  document.getElementById('cm-alerts').textContent = totalAlerts || '0';
-  document.getElementById('cm-betting').textContent = bettingCount || '0';
-  document.getElementById('cm-rpd').textContent = maxRpd ? maxRpd.toFixed(1) : '—';
+
+  var topCountries = Object.keys(countrySet).slice(0, 3).join(' · ') || '—';
+  var alertSub = '涨价 ' + alertBreakdown.up + ' · 降价 ' + alertBreakdown.down +
+                 ' · 新增 ' + alertBreakdown.add + ' · 移除 ' + alertBreakdown.remove;
+
+  document.getElementById('cm-summary-cards').innerHTML =
+    '<div class="metric-card purple" onclick="document.getElementById(\'cm-iap-analysis\').scrollIntoView({behavior:\'smooth\'})" style="cursor:pointer">' +
+      '<div class="metric-label">活跃竞品</div>' +
+      '<div class="metric-value">' + (activeCount || names.length || 0) + '</div>' +
+      '<div class="metric-sub">已抓取 IAP / 广告数据</div>' +
+    '</div>' +
+    '<div class="metric-card teal" onclick="document.getElementById(\'cm-ads-card\').scrollIntoView({behavior:\'smooth\'})" style="cursor:pointer">' +
+      '<div class="metric-label">投放国家数</div>' +
+      '<div class="metric-value">' + Object.keys(countrySet).length + '</div>' +
+      '<div class="metric-sub">' + escapeHtml(topCountries) + '</div>' +
+    '</div>' +
+    '<div class="metric-card warn" onclick="document.getElementById(\'cm-ads-card\').scrollIntoView({behavior:\'smooth\'})" style="cursor:pointer">' +
+      '<div class="metric-label">近 3 天新增投放</div>' +
+      '<div class="metric-value">+' + totalNewAds + '</div>' +
+      '<div class="metric-sub">Meta 广告新增</div>' +
+    '</div>' +
+    '<div class="metric-card danger" onclick="document.getElementById(\'cm-alerts-list\').scrollIntoView({behavior:\'smooth\'})" style="cursor:pointer">' +
+      '<div class="metric-label">本周价格预警</div>' +
+      '<div class="metric-value">' + totalAlerts + '</div>' +
+      '<div class="metric-sub">' + escapeHtml(alertSub) + '</div>' +
+    '</div>';
+
   document.getElementById('cm-alerts-list').innerHTML = allAlertItems.length ? allAlertItems.join('') : '';
 
   var html = '';
@@ -2087,10 +2206,11 @@ function renderCommercialPage() {
       return '<tr><td style="padding:4px 8px">' + escapeHtml(i.name) + '</td><td style="padding:4px 8px;color:var(--accent2)">' + (i.price_usd != null ? '$' + i.price_usd : '—') + '</td><td style="padding:4px 8px;color:var(--muted)">' + escapeHtml(i.category || '') + '</td></tr>';
     }).join('');
 
+    var iapCount = (c.iap_items || []).length;
     html += '<div class="card" style="margin-bottom:12px;padding:16px">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
     html += '<span style="font-weight:600;font-size:15px">' + escapeHtml(n) + '</span>';
-    html += '<span style="font-size:12px;color:var(--muted)">RPD: ' + (c.rpd_index || 0).toFixed(1) + '</span></div>';
+    html += '<span style="font-size:12px;color:var(--muted);font-family:var(--mono)">IAP 商品 ' + iapCount + ' 个</span></div>';
     if (tags) html += '<div style="margin-bottom:8px">' + tags + '</div>';
     if (c.ai_intent) html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + escapeHtml(c.ai_intent) + '</div>';
     if (alerts) html += '<div style="margin-bottom:8px">' + alerts + '</div>';
@@ -2136,12 +2256,326 @@ function runCommercialAnalysis() {
 
 function renderCommercialWeekly() {
   var data = COMMERCIAL_WEEKLY_DATA || {};
-  var el = document.getElementById('cm-weekly-report');
-  if (!data.summary) { el.style.display = 'none'; return; }
+  var comps = ((COMMERCIAL_DATA || {}).competitors) || {};
+  var el = document.getElementById('cm-weekly-report-v2');
+  if (!data.summary && !Object.keys(comps).length) {
+    el.style.display = 'none';
+    return;
+  }
   el.style.display = 'block';
+
+  // meta
   var dates = (data.dates_covered || []).join(', ');
-  document.getElementById('cm-weekly-period').textContent = '覆盖日期: ' + (dates || '—') + ' | 生成时间: ' + (data.generated_at || '—').slice(0, 16);
-  document.getElementById('cm-weekly-content').textContent = data.summary;
+  var generated = (data.generated_at || '').replace('T', ' ').slice(0, 16);
+  document.getElementById('cm-report-meta').textContent =
+    '覆盖日期 ' + (dates || '—') + ' · 生成于 ' + (generated || '—');
+
+  renderCmReportMiniKpi(comps);
+  renderCmReportTagCloud(comps);
+  renderCmReportTopEvents(comps);
+  renderCmReportShiftsAndChanges(comps);
+  renderCmReportActionable(comps);
+  prepareCmReportRaw(data);
+}
+
+function renderCmReportMiniKpi(comps) {
+  var hotCompCount = 0;
+  var increasingCount = 0;
+  var decreasingCount = 0;
+  var totalNewAds = 0;
+  var totalAds = 0;
+  var riskCount = 0;
+  var oppCount = 0;
+  var topActive = [];
+
+  Object.keys(comps).forEach(function(name){
+    var c = comps[name] || {};
+    var ads = c.ads || {};
+    var hot = ((c.price_alerts || []).length > 0) ||
+              ((c.iap_changes || []).length > 0) ||
+              (ads.trend === 'increasing');
+    if (hot) hotCompCount++;
+    if (ads.trend === 'increasing') increasingCount++;
+    if (ads.trend === 'decreasing') decreasingCount++;
+    totalNewAds += (ads.new_ads || 0);
+    totalAds += (ads.active_count || 0);
+    if (c.betting_signals) riskCount++;
+    (c.price_alerts || []).forEach(function(pa){
+      if (pa.direction === '涨价' && Math.abs(pa.delta || 0) >= ((pa.prev || 1) * 0.2)) riskCount++;
+    });
+    if (ads.ai_analysis && (ads.ai_analysis.opportunities || []).length) {
+      oppCount += ads.ai_analysis.opportunities.length;
+    }
+    topActive.push({ name: name, score: (ads.active_count || 0) + (c.price_alerts || []).length * 5 + (c.iap_changes || []).length * 3 });
+  });
+  topActive.sort(function(a, b){ return b.score - a.score; });
+
+  var topNames = topActive.slice(0, 3).filter(function(t){ return t.score > 0; }).map(function(t){ return t.name; });
+  var topNamesText = topNames.length ? topNames.join(' · ') : '本周期无突出竞品';
+
+  var trendArrow = increasingCount > decreasingCount ? '↑' : (increasingCount < decreasingCount ? '↓' : '→');
+  var trendColor = increasingCount > decreasingCount ? 'var(--danger)' : (increasingCount < decreasingCount ? 'var(--accent2)' : 'var(--muted)');
+  var trendNet = increasingCount - decreasingCount;
+  var trendLabel = (trendNet > 0 ? '加码 ' + trendNet : (trendNet < 0 ? '收缩 ' + Math.abs(trendNet) : '稳态')) + ' 个竞品';
+
+  document.getElementById('cm-report-mini-kpi').innerHTML =
+    '<div class="metric-card purple"><div class="metric-label">重点竞品</div><div class="metric-value">' + hotCompCount + '</div><div class="metric-sub">' + escapeHtml(topNamesText) + '</div></div>' +
+    '<div class="metric-card teal"><div class="metric-label">投放趋势</div><div class="metric-value" style="color:' + trendColor + '">' + trendArrow + '</div><div class="metric-sub">' + trendLabel + '</div></div>' +
+    '<div class="metric-card warn"><div class="metric-label">风险信号</div><div class="metric-value">' + riskCount + '</div><div class="metric-sub">博彩 / 涨价 ≥20%</div></div>' +
+    '<div class="metric-card danger"><div class="metric-label">机会点</div><div class="metric-value">' + oppCount + '</div><div class="metric-sub">来自 AI 投放分析</div></div>';
+}
+
+function _cmReportTags(comps) {
+  // 派生事件：涨价 / 降价 / IAP 新增 / IAP 移除 / 投放扩张 / 投放收缩 / 博彩信号
+  var tags = [];
+  Object.keys(comps).forEach(function(name){
+    var c = comps[name] || {};
+    var ads = c.ads || {};
+    (c.price_alerts || []).forEach(function(pa){
+      var sign = pa.delta > 0 ? '+' : '';
+      tags.push({
+        kind: pa.direction === '涨价' ? 'price_up' : 'price_down',
+        weight: pa.direction === '涨价' ? 100 : 80,
+        label: name + ' ' + escapeHtml(pa.name) + ' ' + escapeHtml(pa.direction) + ' ' + sign + '$' + Number(pa.delta || 0).toFixed(2),
+      });
+    });
+    (c.iap_changes || []).forEach(function(ic){
+      tags.push({
+        kind: ic.type === '新增' ? 'iap_add' : 'iap_remove',
+        weight: ic.type === '新增' ? 60 : 50,
+        label: name + ' IAP ' + escapeHtml(ic.type) + ': ' + escapeHtml(ic.name),
+      });
+    });
+    if (ads.trend === 'increasing' && (ads.new_ads || 0) > 0) {
+      tags.push({
+        kind: 'ads_up',
+        weight: 70,
+        label: name + ' 投放扩张 +' + ads.new_ads + ' 条 (近 3 天)',
+      });
+    } else if (ads.trend === 'decreasing') {
+      tags.push({
+        kind: 'ads_down',
+        weight: 30,
+        label: name + ' 投放收缩 ' + Math.round((ads.trend_pct || 0) * 100) + '%',
+      });
+    }
+    if (c.betting_signals) {
+      tags.push({ kind: 'betting', weight: 90, label: name + ' 博彩导流信号' });
+    }
+  });
+  tags.sort(function(a, b){ return b.weight - a.weight; });
+  return tags;
+}
+
+function renderCmReportTagCloud(comps) {
+  var tags = _cmReportTags(comps);
+  var el = document.getElementById('cm-report-tag-cloud');
+  if (!tags.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:11px">本周期无重大商业变动</div>';
+    return;
+  }
+  var styles = {
+    price_up:    { color: 'var(--danger)',  bg: 'rgba(255,92,92,0.12)'  },
+    price_down:  { color: 'var(--accent2)', bg: 'rgba(78,204,163,0.12)' },
+    iap_add:     { color: 'var(--accent)',  bg: 'rgba(123,110,246,0.12)' },
+    iap_remove:  { color: 'var(--muted)',   bg: 'rgba(150,150,150,0.10)' },
+    ads_up:      { color: 'var(--warn)',    bg: 'rgba(245,166,35,0.12)' },
+    ads_down:    { color: 'var(--accent2)', bg: 'rgba(78,204,163,0.10)' },
+    betting:     { color: 'var(--danger)',  bg: 'rgba(255,92,92,0.20)'  },
+  };
+  el.innerHTML = tags.slice(0, 12).map(function(t){
+    var s = styles[t.kind] || { color: 'var(--text)', bg: 'var(--surface2)' };
+    return '<span style="display:inline-block;padding:4px 12px;border-radius:6px;background:' + s.bg + ';color:' + s.color + ';font-size:11px;font-family:var(--mono);margin:3px 6px 3px 0">' + t.label + '</span>';
+  }).join('') + (tags.length > 12 ? '<span style="display:inline-block;padding:4px 8px;color:var(--muted);font-size:11px;font-family:var(--mono)">…还有 ' + (tags.length - 12) + ' 条</span>' : '');
+}
+
+function renderCmReportTopEvents(comps) {
+  var events = [];
+  Object.keys(comps).forEach(function(name){
+    var c = comps[name] || {};
+    var ads = c.ads || {};
+    (c.price_alerts || []).forEach(function(pa){
+      var pct = pa.prev ? Math.round(Math.abs(pa.delta || 0) / pa.prev * 100) : 0;
+      events.push({
+        score: 100 + pct,
+        title: name + ' ' + pa.name + ' ' + pa.direction + (pct ? ' ' + pct + '%' : ''),
+        comp: name,
+        facts: ['$' + pa.prev + ' → $' + pa.curr, (pa.direction === '涨价' ? '+' : '-') + '$' + Math.abs(pa.delta || 0).toFixed(2)],
+        suggestion: pa.direction === '涨价'
+          ? '建议 30 天内评估我方对应 IAP 是否需要跟进调价；优先看付费转化弹性。'
+          : '可观察是否带来下载量增长，作为我方降价决策的参考样本。',
+        anchor: 'cm-iap-analysis',
+      });
+    });
+    if (ads.trend === 'increasing' && (ads.new_ads || 0) > 0) {
+      events.push({
+        score: 80 + (ads.new_ads || 0) * 2,
+        title: name + ' 加大 Meta 投放，近 3 天新增 ' + ads.new_ads + ' 条',
+        comp: name,
+        facts: ['活跃 ' + (ads.active_count || 0) + ' 条', '环比 ' + (ads.trend_pct ? '+' + Math.round(ads.trend_pct * 100) + '%' : '—'), '覆盖 ' + Object.keys(ads.by_country || {}).length + ' 国'],
+        suggestion: '建议 7 天内观察素材主推卖点，评估是否影响我方核心市场份额。',
+        anchor: 'cm-ads-card',
+      });
+    }
+    (c.iap_changes || []).forEach(function(ic){
+      events.push({
+        score: 60,
+        title: name + ' IAP ' + ic.type + '：' + ic.name,
+        comp: name,
+        facts: [ic.type === '新增' ? '新增商品' : '商品下架'],
+        suggestion: ic.type === '新增'
+          ? '关注新增 IAP 的价格档位，评估是否在我方变现矩阵留出对应空位。'
+          : '商品下架可能预示策略调整，留意后续替代品。',
+        anchor: 'cm-iap-analysis',
+      });
+    });
+  });
+  events.sort(function(a, b){ return b.score - a.score; });
+
+  var top3 = events.slice(0, 3);
+  var el = document.getElementById('cm-report-top-events');
+  if (!top3.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:11px">本周期无显著商业事件</div>';
+    return;
+  }
+  el.innerHTML = top3.map(function(e, i){
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[e.comp]) || 'var(--accent)';
+    var factsHtml = e.facts.map(function(f){
+      return '<span style="font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--surface2);padding:2px 8px;border-radius:4px;margin-right:6px">' + escapeHtml(f) + '</span>';
+    }).join('');
+    var anchor = e.anchor
+      ? '<a onclick="document.getElementById(\'' + e.anchor + '\').scrollIntoView({behavior:\'smooth\'})" style="font-size:11px;color:var(--accent);font-family:var(--mono);cursor:pointer;text-decoration:none">查看详情 →</a>'
+      : '';
+    return '<div style="border-left:3px solid ' + color + ';padding:10px 14px;margin-bottom:10px;background:var(--surface2);border-radius:0 6px 6px 0">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+        '<div style="font-size:13px;font-weight:600;color:var(--text)"><span style="color:var(--muted);font-family:var(--mono);margin-right:6px">#' + (i + 1) + '</span>' + escapeHtml(e.title) + '</div>' +
+        anchor +
+      '</div>' +
+      '<div style="margin:6px 0">' + factsHtml + '</div>' +
+      '<div style="font-size:11px;color:var(--muted);line-height:1.6">' + escapeHtml(e.suggestion) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderCmReportShiftsAndChanges(comps) {
+  var groups = { increasing: [], stable: [], decreasing: [] };
+  Object.keys(comps).forEach(function(name){
+    var ads = comps[name].ads || {};
+    var t = ads.trend || 'stable';
+    if (groups[t]) {
+      var topCountries = Object.keys(ads.by_country || {}).slice(0, 2).join(' · ') || '—';
+      groups[t].push({ name: name, label: topCountries });
+    }
+  });
+  var labels = { increasing: '加码', stable: '稳态', decreasing: '收缩' };
+  var colors = { increasing: 'var(--danger)', stable: 'var(--muted)', decreasing: 'var(--accent2)' };
+
+  var shiftsHtml = ['increasing', 'stable', 'decreasing'].map(function(k){
+    var arr = groups[k];
+    if (!arr.length) {
+      return '<div style="margin-bottom:10px"><div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">' + labels[k] + '</div><div style="font-size:11px;color:var(--muted)">无</div></div>';
+    }
+    var items = arr.map(function(a){
+      var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[a.name]) || colors[k];
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;font-family:var(--mono)"><span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + color + ';margin-right:6px;vertical-align:middle"></span>' + escapeHtml(a.name) + '</span><span style="color:var(--muted)">' + escapeHtml(a.label) + '</span></div>';
+    }).join('');
+    return '<div style="margin-bottom:10px"><div style="font-size:10px;font-family:var(--mono);color:' + colors[k] + ';margin-bottom:4px">' + labels[k] + ' (' + arr.length + ')</div>' + items + '</div>';
+  }).join('');
+  document.getElementById('cm-report-ads-shifts').innerHTML = shiftsHtml;
+
+  // 商业模式变动：时间轴样式
+  var changes = [];
+  Object.keys(comps).forEach(function(name){
+    var c = comps[name];
+    (c.price_alerts || []).forEach(function(pa){
+      changes.push({ comp: name, type: pa.direction, item: pa.name, detail: '$' + pa.prev + ' → $' + pa.curr, color: pa.direction === '涨价' ? 'var(--danger)' : 'var(--accent2)' });
+    });
+    (c.iap_changes || []).forEach(function(ic){
+      changes.push({ comp: name, type: 'IAP ' + ic.type, item: ic.name, detail: '', color: 'var(--warn)' });
+    });
+    if (c.betting_signals) {
+      changes.push({ comp: name, type: '博彩信号', item: '描述含博彩关键词', detail: (c.description_keywords || []).join(', '), color: 'var(--danger)' });
+    }
+  });
+  var changesEl = document.getElementById('cm-report-iap-changes');
+  if (!changes.length) {
+    changesEl.innerHTML = '<div style="color:var(--muted);font-size:11px">本周期无商业模式变动</div>';
+  } else {
+    changesEl.innerHTML = changes.map(function(ch){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px;font-family:var(--mono)">' +
+        '<span style="padding:2px 8px;border-radius:4px;background:' + ch.color + ';color:#fff;font-size:10px;min-width:60px;text-align:center">' + escapeHtml(ch.type) + '</span>' +
+        '<span style="color:var(--text);min-width:80px">' + escapeHtml(ch.comp) + '</span>' +
+        '<span style="color:var(--muted);flex:1">' + escapeHtml(ch.item) + (ch.detail ? '<br><span style="font-size:10px">' + escapeHtml(ch.detail) + '</span>' : '') + '</span>' +
+      '</div>';
+    }).join('');
+  }
+}
+
+function renderCmReportActionable(comps) {
+  var oppList = [];
+  var riskList = [];
+  Object.keys(comps).forEach(function(name){
+    var ads = (comps[name] || {}).ads || {};
+    var ai = ads.ai_analysis || {};
+    (ai.opportunities || []).forEach(function(o){
+      oppList.push({ comp: name, text: o });
+    });
+    (ai.risks || []).forEach(function(r){
+      riskList.push({ comp: name, text: r });
+    });
+  });
+
+  function renderList(arr, color, emptyText) {
+    if (!arr.length) return '<div style="color:var(--muted);font-size:11px">' + emptyText + '</div>';
+    return arr.slice(0, 8).map(function(item){
+      var ccolor = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[item.comp]) || color;
+      return '<div style="border-left:3px solid ' + color + ';padding:6px 12px;margin-bottom:6px;background:var(--surface2);border-radius:0 4px 4px 0">' +
+        '<div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:2px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + ccolor + ';margin-right:6px;vertical-align:middle"></span>' + escapeHtml(item.comp) + '</div>' +
+        '<div style="font-size:12px;color:var(--text);line-height:1.5">' + escapeHtml(item.text) + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  document.getElementById('cm-report-opportunities').innerHTML = renderList(oppList, 'var(--accent2)', '尚无机会点 — 请先生成 AI 投放策略分析');
+  document.getElementById('cm-report-risks').innerHTML        = renderList(riskList, 'var(--danger)',  '尚无风险信号');
+}
+
+function prepareCmReportRaw(data) {
+  var body = document.getElementById('cm-report-raw-body');
+  body.innerHTML = data.summary
+    ? markdownToHtml(data.summary)
+    : '<div style="color:var(--muted);font-size:13px">尚未生成 AI 周报 — 点击右上角"生成周报"</div>';
+}
+
+function toggleCmReportRaw() {
+  var body = document.getElementById('cm-report-raw-body');
+  var toggle = document.getElementById('cm-report-raw-toggle');
+  if (!body) return;
+  var visible = body.style.display !== 'none';
+  body.style.display = visible ? 'none' : 'block';
+  if (toggle) toggle.textContent = visible ? '展开 ▼' : '折叠 ▲';
+}
+
+function copyCmReportMarkdown() {
+  var data = COMMERCIAL_WEEKLY_DATA || {};
+  if (!data.summary) { alert('暂无 AI 周报内容'); return; }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(data.summary).then(function(){
+      alert('已复制 markdown 到剪贴板');
+    }, function(){
+      alert('复制失败，请手动从展开的全文复制');
+    });
+  } else {
+    alert('当前浏览器不支持自动复制 — 请手动展开后复制');
+  }
+}
+
+function downloadCmReportPDF() {
+  var body = document.getElementById('cm-report-raw-body');
+  if (body) body.style.display = 'block';
+  var toggle = document.getElementById('cm-report-raw-toggle');
+  if (toggle) toggle.textContent = '折叠 ▲';
+  setTimeout(function(){ window.print(); }, 100);
 }
 
 function runCommercialWeekly() {
@@ -3028,6 +3462,318 @@ function downloadReviewsCSV() {
   a.href = URL.createObjectURL(blob);
   a.download = 'reviews_' + new Date().toISOString().slice(0,10) + '.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+// ============================================================
+// 商业分析全局筛选栏（PRD v2 Phase D）
+// ============================================================
+
+function renderCmFilterBar(allComps) {
+  var names = Object.keys(allComps).sort();
+  var compHtml = '<option value="all">全部竞品</option>' + names.map(function(n){
+    return '<option value="' + escapeHtml(n) + '"' + (_cmFilter.comp === n ? ' selected' : '') + '>' + escapeHtml(n) + '</option>';
+  }).join('');
+  document.getElementById('cm-filter-comp').innerHTML = compHtml;
+
+  var windowOpts = [[3,'近 3 天'],[7,'近 7 天'],[14,'近 14 天'],[30,'近 30 天'],[0,'全部时间']];
+  document.getElementById('cm-filter-window').innerHTML = windowOpts.map(function(o){
+    return '<option value="' + o[0] + '"' + (_cmFilter.windowDays === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+  }).join('');
+
+  var storeOpts = [['all','全部商店'],['Apple','App Store'],['Google','Google Play']];
+  document.getElementById('cm-filter-store').innerHTML = storeOpts.map(function(o){
+    return '<option value="' + o[0] + '"' + (_cmFilter.store === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+  }).join('');
+
+  document.getElementById('cm-filter-comp').onchange = function(){
+    _cmFilter.comp = this.value; renderCommercialPage(); renderCommercialWeekly();
+  };
+  document.getElementById('cm-filter-window').onchange = function(){
+    _cmFilter.windowDays = parseInt(this.value, 10); renderCommercialPage(); renderCommercialWeekly();
+  };
+  document.getElementById('cm-filter-store').onchange = function(){
+    _cmFilter.store = this.value; renderCommercialPage(); renderCommercialWeekly();
+  };
+
+  document.getElementById('cm-filter-meta').textContent =
+    (_cmFilter.comp === 'all' ? '全部竞品' : _cmFilter.comp) +
+    ' · ' + (_cmFilter.windowDays > 0 ? '近 ' + _cmFilter.windowDays + ' 天' : '全部时间') +
+    ' · ' + (_cmFilter.store === 'all' ? '全部商店' : _cmFilter.store);
+}
+
+function applyCmFilter(allComps) {
+  // 仅 comp 筛选影响整页竞品数；store 筛选只影响 IAP（iap_items 不带 source 字段时仅过滤标记字段）；
+  // windowDays 留作未来扩展（当前 ads.daily_trend 已自带 7 天聚合，IAP 无时间维度）
+  if (_cmFilter.comp === 'all') return allComps;
+  var picked = {};
+  if (allComps[_cmFilter.comp]) picked[_cmFilter.comp] = allComps[_cmFilter.comp];
+  return picked;
+}
+
+// ============================================================
+// IAP 分析（商业模式画像 + 价格区间分布 + 商品明细）
+// 数据来源：COMMERCIAL_DATA.competitors[*].iap_items / monetization_tags / price_alerts
+// ============================================================
+
+var IAP_CATEGORY_COLORS = {
+  '订阅':         { bg: 'rgba(123,110,246,0.85)', label: '订阅' },
+  'Subscription': { bg: 'rgba(123,110,246,0.85)', label: '订阅' },
+  '高级数据包':    { bg: 'rgba(78,204,163,0.85)',  label: '高级数据包' },
+  '去广告':        { bg: 'rgba(245,166,35,0.85)',  label: '去广告' },
+  'Ad-Free':      { bg: 'rgba(245,166,35,0.85)',  label: '去广告' },
+  '消耗品':        { bg: 'rgba(96,165,250,0.85)',  label: '消耗品' },
+  '其他':          { bg: 'rgba(167,139,250,0.85)', label: '其他' },
+};
+var IAP_PRICE_BUCKETS = [
+  { min: 0,   max: 2,   label: '$0–2'   },
+  { min: 2,   max: 5,   label: '$2–5'   },
+  { min: 5,   max: 10,  label: '$5–10'  },
+  { min: 10,  max: 20,  label: '$10–20' },
+  { min: 20,  max: 50,  label: '$20–50' },
+  { min: 50,  max: Infinity, label: '$50+' },
+];
+var _selectedIapComp = '__all__';
+
+function _iapCatStyle(cat) {
+  return IAP_CATEGORY_COLORS[cat] || IAP_CATEGORY_COLORS['其他'];
+}
+
+function renderIapSection(comps) {
+  var card = document.getElementById('cm-iap-analysis');
+  var names = Object.keys(comps || {}).filter(function(n){
+    return ((comps[n].iap_items || []).length > 0) || ((comps[n].monetization_tags || []).length > 0);
+  }).sort();
+  if (!names.length) {
+    if (card) card.style.display = 'none';
+    return;
+  }
+  if (card) card.style.display = 'block';
+
+  var totalItems = 0;
+  names.forEach(function(n){ totalItems += (comps[n].iap_items || []).length; });
+  document.getElementById('cm-iap-meta').textContent =
+    names.length + ' 个竞品 · 共 ' + totalItems + ' 个 IAP 商品';
+
+  renderIapPortraits(comps, names);
+  renderIapPriceCompSelect(names);
+  renderIapPriceChart(comps);
+  renderIapTable(comps, names);
+}
+
+function renderIapPortraits(comps, names) {
+  document.getElementById('cm-iap-portraits').innerHTML = names.map(function(n){
+    var c = comps[n] || {};
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[n]) || 'var(--accent)';
+    var iapItems = c.iap_items || [];
+    var iapCount = iapItems.length;
+
+    // category 分布 → Top 3 + 微型堆叠条
+    var catCount = {};
+    iapItems.forEach(function(it){
+      var cat = it.category || '其他';
+      catCount[cat] = (catCount[cat] || 0) + 1;
+    });
+    var sortedCats = Object.keys(catCount).map(function(k){ return [k, catCount[k]]; })
+                                          .sort(function(a,b){ return b[1] - a[1]; });
+    var totalCats = sortedCats.reduce(function(s, kv){ return s + kv[1]; }, 0) || 1;
+    var stackedBar = sortedCats.map(function(kv){
+      var pct = Math.round(kv[1] / totalCats * 100);
+      var s = _iapCatStyle(kv[0]);
+      return '<div style="flex:' + kv[1] + ';height:18px;background:' + s.bg + ';display:flex;align-items:center;justify-content:center;font-size:9px;font-family:var(--mono);color:#fff" title="' + escapeHtml(kv[0]) + ': ' + kv[1] + ' 个 (' + pct + '%)">' + (pct >= 12 ? pct + '%' : '') + '</div>';
+    }).join('');
+    if (!stackedBar) stackedBar = '<div style="height:18px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--muted)">无 IAP</div>';
+
+    // 价格区间
+    var prices = iapItems.map(function(it){ return it.price_usd; }).filter(function(p){ return p != null; });
+    var priceRange = prices.length
+      ? '$' + Math.min.apply(null, prices).toFixed(2) + ' – $' + Math.max.apply(null, prices).toFixed(2)
+      : '—';
+
+    // 商业模式 chips
+    var tags = (c.monetization_tags || []).slice(0, 4).map(function(t){
+      return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:rgba(123,110,246,0.12);color:var(--accent);font-size:10px;font-family:var(--mono);margin-right:4px">' + escapeHtml(t) + '</span>';
+    }).join('');
+
+    // AI 意图（截断）
+    var ai = (c.ai_intent || '').replace(/\n/g, ' ').slice(0, 110);
+
+    return '<div onclick="selectIapComp(\'' + escapeHtml(n) + '\')" style="display:grid;grid-template-columns:160px 1fr 120px;gap:14px;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--surface2);cursor:pointer;transition:.15s" onmouseover="this.style.borderColor=\'' + color + '\'" onmouseout="this.style.borderColor=\'var(--border)\'">' +
+      '<div>' +
+        '<div style="font-size:13px;font-weight:600;color:var(--text)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:8px;vertical-align:middle"></span>' + escapeHtml(n) + '</div>' +
+        '<div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-top:4px">IAP ' + iapCount + ' 个 · ' + priceRange + '</div>' +
+      '</div>' +
+      '<div>' +
+        (tags ? '<div style="margin-bottom:6px">' + tags + '</div>' : '') +
+        '<div style="display:flex;border-radius:4px;overflow:hidden;border:1px solid var(--bg)">' + stackedBar + '</div>' +
+        (ai ? '<div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.4" title="' + escapeHtml(c.ai_intent || '') + '">' + escapeHtml(ai) + (c.ai_intent && c.ai_intent.length > 110 ? '…' : '') + '</div>' : '') +
+      '</div>' +
+      '<div style="text-align:right;font-size:10px;font-family:var(--mono);color:var(--muted)">' +
+        ((c.price_alerts || []).length ? '<span style="color:var(--danger)">价格变动 ' + c.price_alerts.length + '</span><br>' : '') +
+        ((c.iap_changes || []).length ? '<span style="color:var(--warn)">商品变动 ' + c.iap_changes.length + '</span>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function selectIapComp(name) {
+  _selectedIapComp = (_selectedIapComp === name) ? '__all__' : name;
+  var sel = document.getElementById('cm-iap-price-comp');
+  if (sel) sel.value = _selectedIapComp;
+  renderIapPriceChart((COMMERCIAL_DATA || {}).competitors || {});
+}
+
+function renderIapPriceCompSelect(names) {
+  var opts = ['<option value="__all__">全部竞品</option>'].concat(names.map(function(n){
+    return '<option value="' + escapeHtml(n) + '"' + (_selectedIapComp === n ? ' selected' : '') + '>' + escapeHtml(n) + '</option>';
+  }));
+  var sel = document.getElementById('cm-iap-price-comp');
+  sel.innerHTML = opts.join('');
+  sel.onchange = function(){
+    _selectedIapComp = this.value;
+    renderIapPriceChart((COMMERCIAL_DATA || {}).competitors || {});
+  };
+}
+
+function renderIapPriceChart(comps) {
+  // 收集 items（按当前选中竞品）
+  var items = [];
+  Object.keys(comps).forEach(function(n){
+    if (_selectedIapComp !== '__all__' && _selectedIapComp !== n) return;
+    (comps[n].iap_items || []).forEach(function(it){
+      if (it.price_usd != null) items.push({ name: n, item: it });
+    });
+  });
+
+  // 分桶 + 按 category 聚合
+  var bucketCats = IAP_PRICE_BUCKETS.map(function(){ return {}; });
+  var allCats = {};
+  items.forEach(function(entry){
+    var p = entry.item.price_usd;
+    var cat = entry.item.category || '其他';
+    allCats[cat] = true;
+    for (var i = 0; i < IAP_PRICE_BUCKETS.length; i++) {
+      var b = IAP_PRICE_BUCKETS[i];
+      if (p >= b.min && p < b.max) {
+        bucketCats[i][cat] = (bucketCats[i][cat] || 0) + 1;
+        break;
+      }
+    }
+  });
+
+  // 找最大柱总高度
+  var maxBucket = 1;
+  bucketCats.forEach(function(bc){
+    var sum = Object.values(bc).reduce(function(s,v){ return s+v; }, 0);
+    if (sum > maxBucket) maxBucket = sum;
+  });
+
+  var W = 600, H = 200, padL = 30, padR = 10, padT = 10, padB = 30;
+  var barW = (W - padL - padR) / IAP_PRICE_BUCKETS.length * 0.7;
+  var barGap = (W - padL - padR) / IAP_PRICE_BUCKETS.length * 0.3;
+  var step = (W - padL - padR) / IAP_PRICE_BUCKETS.length;
+
+  var bars = '';
+  bucketCats.forEach(function(bc, i){
+    var x = padL + i * step + barGap / 2;
+    var yCursor = H - padB;
+    var sum = Object.values(bc).reduce(function(s,v){ return s+v; }, 0);
+    Object.keys(bc).sort().forEach(function(cat){
+      var v = bc[cat];
+      var h = (H - padT - padB) * v / maxBucket;
+      var y = yCursor - h;
+      var s = _iapCatStyle(cat);
+      bars += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + s.bg + '"><title>' + escapeHtml(cat) + ' · ' + IAP_PRICE_BUCKETS[i].label + ': ' + v + ' 个</title></rect>';
+      yCursor = y;
+    });
+    if (sum) {
+      bars += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' + (yCursor - 4).toFixed(1) + '" font-size="10" font-family="DM Mono" fill="var(--muted)" text-anchor="middle">' + sum + '</text>';
+    }
+    bars += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' + (H - padB + 14) + '" font-size="10" font-family="DM Mono" fill="var(--muted)" text-anchor="middle">' + IAP_PRICE_BUCKETS[i].label + '</text>';
+  });
+
+  // Y 轴 0 / max
+  var yAxis = '<text x="' + padL + '" y="' + padT + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="end" dx="-4">' + maxBucket + '</text>' +
+              '<text x="' + padL + '" y="' + (H - padB) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="end" dx="-4">0</text>' +
+              '<line x1="' + padL + '" y1="' + (H - padB) + '" x2="' + (W - padR) + '" y2="' + (H - padB) + '" stroke="var(--border)"/>';
+
+  var chartEl = document.getElementById('cm-iap-price-chart');
+  if (!items.length) {
+    chartEl.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">所选竞品暂无 IAP 价格数据</div>';
+    document.getElementById('cm-iap-price-legend').innerHTML = '';
+    return;
+  }
+  chartEl.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">' + yAxis + bars + '</svg>';
+
+  // legend
+  var cats = Object.keys(allCats).sort();
+  document.getElementById('cm-iap-price-legend').innerHTML = cats.map(function(cat){
+    var s = _iapCatStyle(cat);
+    return '<div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + s.bg + '"></span><span style="color:var(--text)">' + escapeHtml(s.label) + '</span></div>';
+  }).join('');
+}
+
+var _iapTableCollapsed = {};
+
+function renderIapTable(comps, names) {
+  document.getElementById('cm-iap-table').innerHTML = names.map(function(n){
+    var c = comps[n];
+    var items = c.iap_items || [];
+    if (!items.length) return '';
+    var collapsed = !!_iapTableCollapsed[n];
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[n]) || 'var(--accent)';
+    var alertNames = {};
+    (c.price_alerts || []).forEach(function(a){ alertNames[a.name] = a; });
+    var changeNames = {};
+    (c.iap_changes || []).forEach(function(ic){ changeNames[ic.name] = ic; });
+
+    var rows = collapsed ? '' : items.map(function(it){
+      var s = _iapCatStyle(it.category || '其他');
+      var price = it.price_usd != null ? '$' + Number(it.price_usd).toFixed(2) : '—';
+      var statusBadge = '';
+      if (alertNames[it.name]) {
+        var pa = alertNames[it.name];
+        var dc = pa.direction === '涨价' ? 'var(--danger)' : 'var(--accent2)';
+        var sign = pa.delta > 0 ? '+' : '';
+        statusBadge = '<span style="padding:1px 7px;border-radius:3px;background:rgba(255,92,92,0.12);color:' + dc + ';font-size:10px;font-family:var(--mono)">' + escapeHtml(pa.direction) + ' ' + sign + '$' + Number(pa.delta || 0).toFixed(2) + '</span>';
+      } else if (changeNames[it.name]) {
+        statusBadge = '<span style="padding:1px 7px;border-radius:3px;background:rgba(245,166,35,0.12);color:var(--warn);font-size:10px;font-family:var(--mono)">' + escapeHtml(changeNames[it.name].type) + '</span>';
+      }
+      return '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:7px 10px;font-size:12px;color:var(--text)">' + escapeHtml(it.name) + '</td>' +
+        '<td style="padding:7px 10px"><span style="padding:2px 8px;border-radius:4px;background:' + s.bg + ';color:#fff;font-size:10px;font-family:var(--mono)">' + escapeHtml(it.category || '其他') + '</span></td>' +
+        '<td style="padding:7px 10px;font-size:12px;font-family:var(--mono);color:var(--accent2)">' + price + '</td>' +
+        '<td style="padding:7px 10px;font-size:11px;font-family:var(--mono);color:var(--muted)">' + escapeHtml(it.currency || 'USD') + '</td>' +
+        '<td style="padding:7px 10px;text-align:right">' + statusBadge + '</td>' +
+      '</tr>';
+    }).join('');
+
+    var body = collapsed
+      ? ''
+      : '<table style="width:100%;border-collapse:collapse">' +
+          '<thead><tr style="border-bottom:1px solid var(--border)">' +
+            '<th style="text-align:left;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:400;font-family:var(--mono)">商品名</th>' +
+            '<th style="text-align:left;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:400;font-family:var(--mono)">类目</th>' +
+            '<th style="text-align:left;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:400;font-family:var(--mono)">美元价</th>' +
+            '<th style="text-align:left;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:400;font-family:var(--mono)">货币</th>' +
+            '<th style="text-align:right;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:400;font-family:var(--mono)">变动状态</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+    return '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">' +
+      '<div onclick="toggleIapTable(\'' + escapeHtml(n) + '\')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--surface2);cursor:pointer">' +
+        '<div style="font-size:13px;font-weight:600;color:var(--text)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:8px;vertical-align:middle"></span>' + escapeHtml(n) + ' <span style="color:var(--muted);font-size:11px;margin-left:6px">' + items.length + ' 个商品</span></div>' +
+        '<div style="font-size:11px;color:var(--muted);font-family:var(--mono)">' + (collapsed ? '展开 ▼' : '折叠 ▲') + '</div>' +
+      '</div>' + body +
+    '</div>';
+  }).join('');
+}
+
+function toggleIapTable(name) {
+  _iapTableCollapsed[name] = !_iapTableCollapsed[name];
+  var comps = (COMMERCIAL_DATA || {}).competitors || {};
+  var names = Object.keys(comps).filter(function(n){
+    return ((comps[n].iap_items || []).length > 0) || ((comps[n].monetization_tags || []).length > 0);
+  }).sort();
+  renderIapTable(comps, names);
 }
 
 // ============================================================
