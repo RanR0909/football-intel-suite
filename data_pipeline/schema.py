@@ -53,6 +53,40 @@ class CommentInfo:
 
 
 @dataclass
+class CommunityRaw:
+    """Reddit 等社媒的原始数据切片，不含 AI 分析。"""
+    mention_count: int = 0
+    total_engagement: int = 0                          # sum(score + num_comments)
+    hot_posts: list = field(default_factory=list)     # top N by score
+    recent_comments: list = field(default_factory=list)
+    subreddit_distribution: dict = field(default_factory=dict)
+    daily_trend: list = field(default_factory=list)   # [{date, posts, comments}]
+    date_range_days: int = 7                          # 当前窗口（用于前端展示）
+
+
+@dataclass
+class CommunityAI:
+    """AI 分析结果，独立持久化避免被 aggregator 覆盖丢失。"""
+    overall_summary: Optional[str] = None
+    sentiment: dict = field(default_factory=dict)              # {positive, neutral, negative} 比例
+    top_topics: list = field(default_factory=list)
+    pain_points: list = field(default_factory=list)
+    opportunities: list = field(default_factory=list)
+    competitor_mentions: list = field(default_factory=list)
+    representative_quotes: list = field(default_factory=list)
+    alert_level: str = "low"                           # low / medium / high
+    generated_at: Optional[str] = None
+    date_range_days: Optional[int] = None
+    sample_size: Optional[int] = None                  # 送给 AI 的帖子条数
+
+
+@dataclass
+class CommunityInfo:
+    raw: CommunityRaw = field(default_factory=CommunityRaw)
+    ai_analysis: Optional[CommunityAI] = None
+
+
+@dataclass
 class CommercialInfo:
     monetization_tags: list = field(default_factory=list)
     iap_items: list = field(default_factory=list)
@@ -77,6 +111,7 @@ class CompetitorSnapshot:
     version: VersionInfo = field(default_factory=VersionInfo)
     comments: CommentInfo = field(default_factory=CommentInfo)
     commercial: CommercialInfo = field(default_factory=CommercialInfo)
+    community: CommunityInfo = field(default_factory=CommunityInfo)
 
 
 # ---------------------------------------------------------------------------

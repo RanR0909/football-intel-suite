@@ -8,3 +8,4 @@ data/*.json
 !data/competitors.json
 !data/regions.json
 !data/.gitkeep
+data/raw/

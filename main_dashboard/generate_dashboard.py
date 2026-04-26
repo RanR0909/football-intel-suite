@@ -183,6 +183,24 @@ def _adapt_commercial(D):
     }
 
 
+def _adapt_community(D):
+    """从 dashboard_data.competitors[*].community 派生 {<name>: {raw, ai_analysis}}。
+
+    模板中 COMMUNITY_DATA 直接消费此结构。空数据竞品也保留 raw 占位（前端 tab 才能显示）。
+    """
+    out = {}
+    for name, snap in D["competitors"].items():
+        c = snap.get("community") or {}
+        raw = c.get("raw") or {}
+        if (raw.get("mention_count") or 0) <= 0 and not c.get("ai_analysis"):
+            continue   # 完全无数据 / 无分析的竞品不进 tab
+        out[name] = {
+            "raw": raw,
+            "ai_analysis": c.get("ai_analysis"),
+        }
+    return out
+
+
 def _adapt_competitor_details(D):
     out = {}
     for name, snap in D["competitors"].items():
@@ -232,6 +250,7 @@ competitor_details = _adapt_competitor_details(_dashboard_data)
 weekly_review_data = _dashboard_data.get("weekly", {}).get("comment") or {}
 commercial_data = _adapt_commercial(_dashboard_data)
 commercial_weekly_data = _dashboard_data.get("weekly", {}).get("commercial") or {}
+community_data = _adapt_community(_dashboard_data)
 
 # ---------------------------------------------------------------------------
 # 辅助函数
@@ -1399,6 +1418,12 @@ def build_commercial_weekly_json():
     return json.dumps(commercial_weekly_data, ensure_ascii=False)
 
 
+def build_community_data_json():
+    if not community_data:
+        return "{}"
+    return json.dumps(community_data, ensure_ascii=False)
+
+
 # ===========================================================================
 # 生成 HTML
 # ===========================================================================
@@ -1417,6 +1442,7 @@ def generate():
         "<!-- WEEKLY_REVIEW_DATA_PLACEHOLDER -->": build_weekly_review_json(),
         "<!-- COMMERCIAL_DATA_PLACEHOLDER -->": build_commercial_json(),
         "<!-- COMMERCIAL_WEEKLY_DATA_PLACEHOLDER -->": build_commercial_weekly_json(),
+        "<!-- COMMUNITY_DATA_PLACEHOLDER -->": build_community_data_json(),
 
         "<!-- COMPETITOR_LIST_PLACEHOLDER -->": build_competitor_list(),
 
@@ -1481,6 +1507,7 @@ if __name__ == "__main__":
         weekly_review_data = _dashboard_data.get("weekly", {}).get("comment") or {}
         commercial_data = _adapt_commercial(_dashboard_data)
         commercial_weekly_data = _dashboard_data.get("weekly", {}).get("commercial") or {}
+        community_data = _adapt_community(_dashboard_data)
         metrics = compute_metrics()
 
     output = generate()

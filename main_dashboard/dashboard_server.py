@@ -109,6 +109,103 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/ai/community-insights":
+            self._handle_community_ai_post()
+        else:
+            self._send_json({"status": "error", "message": "未知路径"}, 404)
+
+    def _handle_community_ai_post(self):
+        """启动一次社媒舆情 AI 分析（异步，立即返回 task_id）。"""
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+        except Exception:
+            self._send_json({"status": "error", "message": "请求体不是合法 JSON"}, 400)
+            return
+
+        competitor = (body.get("competitor") or "").strip()
+        if not competitor:
+            self._send_json({"status": "error", "message": "缺少 competitor 字段"}, 400)
+            return
+        # date_range 接受 "7d" / "14d" / "30d" 或纯数字
+        raw_range = str(body.get("date_range") or "7d").lower().rstrip("d")
+        try:
+            days = max(1, min(int(raw_range), 60))
+        except Exception:
+            days = 7
+
+        api_key = body.get("api_key") or CLAUDE_API_KEY
+        if not api_key:
+            self._send_json({"status": "error", "message": "缺少 CLAUDE_API_KEY（环境变量或请求体均未提供）"}, 400)
+            return
+
+        task_key = f"community_ai:{competitor}"
+        with _tasks_lock:
+            existing = _running_tasks.get(task_key)
+            if existing and existing.get("running"):
+                self._send_json({"status": "error", "message": f"'{competitor}' 正在分析中，请等待"})
+                return
+
+        thread = threading.Thread(
+            target=self._run_community_ai,
+            args=(task_key, competitor, days, api_key),
+            daemon=True,
+        )
+        thread.start()
+        self._send_json({
+            "status": "started",
+            "task_id": task_key,
+            "competitor": competitor,
+            "date_range_days": days,
+        })
+
+    def _run_community_ai(self, task_key, competitor, days, api_key):
+        """后台线程：调 ai_analyzer.analyze → 重跑 aggregator → 状态写回 _running_tasks。"""
+        from datetime import datetime as _dt
+        with _tasks_lock:
+            _running_tasks[task_key] = {
+                "running": True,
+                "label": f"AI 舆情分析 · {competitor}",
+                "started_at": _dt.now().isoformat(),
+            }
+        try:
+            from community_insights.ai_analyzer import analyze
+            result = analyze(competitor, days=days, api_key=api_key)
+
+            # 重跑聚合层让 dashboard_data.json 同步含上 community.ai_analysis
+            try:
+                from data_pipeline.aggregator import build_dashboard_data, OUTPUT_PATH as _AGG_OUT
+                from data_pipeline.schema import to_dict
+                payload = to_dict(build_dashboard_data())
+                _AGG_OUT.parent.mkdir(parents=True, exist_ok=True)
+                with open(_AGG_OUT, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+            except Exception as agg_err:
+                # 聚合失败不致命：AI 结果已写入，下次 generate_dashboard 会自动合入
+                print(f"[community-ai] aggregator 重跑失败（AI 结果已持久化）: {agg_err}", file=sys.stderr)
+
+            with _tasks_lock:
+                _running_tasks[task_key] = {
+                    "running": False,
+                    "success": True,
+                    "label": f"AI 舆情分析 · {competitor}",
+                    "result": result,
+                    "finished_at": _dt.now().isoformat(),
+                }
+        except Exception as e:
+            with _tasks_lock:
+                _running_tasks[task_key] = {
+                    "running": False,
+                    "success": False,
+                    "label": f"AI 舆情分析 · {competitor}",
+                    "error": str(e),
+                    "finished_at": _dt.now().isoformat(),
+                }
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -346,6 +443,8 @@ def main():
 ║       GET  /api/data/*    → JSON 数据            ║
 ║       GET  /api/data/dashboard_data → 统一聚合   ║
 ║       GET  /api/aggregate → 手动重跑聚合层       ║
+║       POST /api/ai/community-insights            ║
+║            body: {{competitor, date_range?}}       ║
 ╚══════════════════════════════════════════════════╝
     """)
     try:

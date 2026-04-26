@@ -234,6 +234,78 @@ def _build_fixtures(data_dir: Path):
         "dates_covered": [today.strftime("%Y-%m-%d")],
     })
 
+    # ---- data/raw/reddit_posts.json：构造时间窗内 + 窗口外 + 评论 ----
+    raw_dir = data_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    now_ts = today.timestamp()
+    in_window_1 = now_ts - 86400 * 1            # 1 天前
+    in_window_2 = now_ts - 86400 * 5            # 5 天前
+    out_of_window = now_ts - 86400 * 30         # 30 天前 → 应被过滤
+    _write(raw_dir / "reddit_posts.json", [
+        {
+            "timestamp": today.isoformat(),
+            "source": "reddit",
+            "competitor": "SofaScore",
+            "data": {
+                "competitor": "SofaScore",
+                "posts": [
+                    {
+                        "post_id": "p1", "subreddit": "soccer", "title": "SofaScore widget broken",
+                        "selftext": "stats not updating", "url": "https://reddit.com/r/soccer/comments/p1",
+                        "score": 120, "num_comments": 45, "created_utc": in_window_1, "upvote_ratio": 0.9,
+                        "comments": [
+                            {"body": "Same here", "score": 12, "created_utc": in_window_1},
+                            {"body": "FlashScore is better now", "score": 8, "created_utc": in_window_1},
+                        ],
+                    },
+                    {
+                        "post_id": "p2", "subreddit": "footballmanagergames", "title": "SofaScore vs Fotmob",
+                        "selftext": "", "url": "https://reddit.com/r/fmgames/comments/p2",
+                        "score": 45, "num_comments": 10, "created_utc": in_window_2, "upvote_ratio": 0.8,
+                        "comments": [],
+                    },
+                    {
+                        "post_id": "p3_old", "subreddit": "soccer", "title": "old post",
+                        "score": 999, "num_comments": 999, "created_utc": out_of_window,
+                        "comments": [],
+                    },
+                ],
+            },
+        },
+        {
+            "timestamp": today.isoformat(),
+            "source": "reddit",
+            "competitor": "FlashScore",
+            "data": {
+                "competitor": "FlashScore",
+                "posts": [
+                    {
+                        "post_id": "p4", "subreddit": "soccer", "title": "FlashScore is fast",
+                        "score": 30, "num_comments": 5, "created_utc": in_window_1,
+                        "comments": [],
+                    },
+                ],
+            },
+        },
+    ])
+
+    # ---- data/community_ai_analysis.json：仅 SofaScore 已生成 AI ----
+    _write(data_dir / "community_ai_analysis.json", {
+        "SofaScore": {
+            "overall_summary": "SofaScore 用户主要抱怨 widgets 和数据更新延迟。",
+            "sentiment": {"positive": 0.2, "neutral": 0.3, "negative": 0.5},
+            "top_topics": ["widget", "stats update"],
+            "pain_points": ["widget broken", "stats not updating"],
+            "opportunities": ["faster realtime stats"],
+            "competitor_mentions": ["FlashScore", "Fotmob"],
+            "representative_quotes": ["stats not updating", "FlashScore is better now"],
+            "alert_level": "medium",
+            "generated_at": today.isoformat(),
+            "date_range_days": 7,
+            "sample_size": 2,
+        },
+    })
+
 
 # ---------------------------------------------------------------------------
 # 断言
@@ -251,16 +323,19 @@ def run_tests():
         tmp_dir = Path(tmp)
         _build_fixtures(tmp_dir)
 
-        # monkey-patch DATA_DIR & OUTPUT_PATH
+        # monkey-patch DATA_DIR / RAW_DIR / OUTPUT_PATH
         original_data_dir = aggregator.DATA_DIR
+        original_raw_dir = aggregator.RAW_DIR
         original_output = aggregator.OUTPUT_PATH
         aggregator.DATA_DIR = tmp_dir
+        aggregator.RAW_DIR = tmp_dir / "raw"
         aggregator.OUTPUT_PATH = tmp_dir / "dashboard_data.json"
         try:
             data = aggregator.build_dashboard_data()
             payload = aggregator.to_dict(data)
         finally:
             aggregator.DATA_DIR = original_data_dir
+            aggregator.RAW_DIR = original_raw_dir
             aggregator.OUTPUT_PATH = original_output
 
         comps = payload["competitors"]
@@ -337,7 +412,39 @@ def run_tests():
         _check("metrics.max_rank_delta 是 FlashScore 的 +8", m["max_rank_delta"] == 8 and m["max_rank_comp"] == "FlashScore")
         _check("metrics.total_negative 全部累加", m["total_negative"] == 18 + 6 + 0)
 
-        print("\n=== 10. 数据新鲜度 / 配置透传 ===")
+        print("\n=== 10. Community Reddit 原始切片 ===")
+        community_sofa = sofa["community"]["raw"]
+        community_flash = flash["community"]["raw"]
+        community_one = one["community"]["raw"]
+        _check("SofaScore mention_count = 2 (窗口内 2 条，30 天前 1 条被过滤)", community_sofa["mention_count"] == 2)
+        _check("SofaScore total_engagement = (120+45) + (45+10) = 220",
+               community_sofa["total_engagement"] == 220, f"got {community_sofa['total_engagement']}")
+        _check("subreddit_distribution 含 soccer 和 footballmanagergames",
+               set(community_sofa["subreddit_distribution"].keys()) == {"soccer", "footballmanagergames"})
+        _check("hot_posts 按 score 倒序",
+               community_sofa["hot_posts"][0]["title"] == "SofaScore widget broken")
+        _check("recent_comments 仅含窗口内评论",
+               len(community_sofa["recent_comments"]) == 2)
+        _check("recent_comments 含 FlashScore 对比信号",
+               any("FlashScore" in c["body"] for c in community_sofa["recent_comments"]))
+        _check("daily_trend 非空",
+               len(community_sofa["daily_trend"]) >= 1)
+        _check("FlashScore mention_count = 1", community_flash["mention_count"] == 1)
+        _check("OneFootball mention_count = 0 (未配数据)", community_one["mention_count"] == 0)
+        _check("date_range_days 默认 7", community_sofa["date_range_days"] == 7)
+
+        print("\n=== 11. Community AI 分析合入 ===")
+        ai_sofa = sofa["community"]["ai_analysis"]
+        ai_flash = flash["community"]["ai_analysis"]
+        _check("SofaScore 有 AI 分析", ai_sofa is not None)
+        _check("ai.overall_summary 透传", "widgets" in (ai_sofa.get("overall_summary") or ""))
+        _check("ai.sentiment 透传", abs(ai_sofa["sentiment"]["negative"] - 0.5) < 0.001)
+        _check("ai.top_topics 透传", "widget" in ai_sofa["top_topics"])
+        _check("ai.alert_level = medium", ai_sofa["alert_level"] == "medium")
+        _check("ai.competitor_mentions 透传", "FlashScore" in ai_sofa["competitor_mentions"])
+        _check("FlashScore 没 AI 分析（独立合入逻辑）", ai_flash is None)
+
+        print("\n=== 12. 数据新鲜度 / 配置透传 ===")
         _check("data_freshness.strategy 非空", payload["meta"]["data_freshness"]["strategy"] is not None)
         _check("regions 透传", "us" in payload["regions"])
         _check("competitor_registry 透传", "SofaScore" in payload["competitor_registry"])

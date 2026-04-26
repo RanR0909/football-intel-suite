@@ -326,6 +326,9 @@ body::before {
     <div class="nav-item" onclick="showPage('commercial')">
       <div class="nav-dot"></div> 商业分析
     </div>
+    <div class="nav-item" onclick="showPage('community')">
+      <div class="nav-dot"></div> 社媒舆情
+    </div>
   </div>
   <div class="nav-section">
     <div class="nav-label">竞品</div>
@@ -708,6 +711,65 @@ body::before {
   </div>
 </div>
 
+<!-- PAGE: COMMUNITY INSIGHTS (Reddit 等社媒舆情) -->
+<div id="page-community" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="page-title">社媒舆情 · Reddit</div>
+      <div class="page-sub" id="cmty-subtitle">原始数据展示 · AI 分析手动触发</div>
+    </div>
+    <button class="btn" onclick="showPage('overview')">← 返回总览</button>
+  </div>
+
+  <!-- 竞品切换 tabs -->
+  <div id="cmty-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+
+  <!-- 概览指标条 -->
+  <div class="metrics-row" id="cmty-metrics-row"></div>
+
+  <!-- 双列：左原始数据，右 AI 分析 -->
+  <div class="three-col">
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <!-- 热门帖子 -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">🔥 热门帖子</div>
+          <div class="card-action" id="cmty-window-label" style="color:var(--muted);font-size:11px">近 7 天</div>
+        </div>
+        <div id="cmty-hot-posts"></div>
+      </div>
+      <!-- 最近评论 -->
+      <div class="card">
+        <div class="card-head"><div class="card-title">💬 最近评论</div></div>
+        <div id="cmty-recent-comments"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <!-- AI 分析区 -->
+      <div class="card" id="cmty-ai-card">
+        <div class="card-head">
+          <div class="card-title">🤖 AI 舆情分析</div>
+          <div class="card-action" id="cmty-ai-meta" style="color:var(--muted);font-size:11px"></div>
+        </div>
+        <div id="cmty-ai-body" style="padding:16px 20px"></div>
+      </div>
+
+      <!-- subreddit 分布 -->
+      <div class="card">
+        <div class="card-head"><div class="card-title">📊 Subreddit 分布</div></div>
+        <div id="cmty-subreddits" style="padding:12px 20px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 时间趋势 -->
+  <div class="card full-card" style="margin-top:20px">
+    <div class="card-head"><div class="card-title">📈 时间趋势 · 帖子 / 评论数</div></div>
+    <div id="cmty-trend" style="padding:16px 20px"></div>
+  </div>
+</div>
+
 </main>
 
 <div class="modal-overlay" id="modal-feature" onclick="closeModal('feature')">
@@ -809,21 +871,23 @@ var WEEKLY_REVIEW_DATA = <!-- WEEKLY_REVIEW_DATA_PLACEHOLDER -->;
 var COMMERCIAL_DATA = <!-- COMMERCIAL_DATA_PLACEHOLDER -->;
 var COMMERCIAL_WEEKLY_DATA = <!-- COMMERCIAL_WEEKLY_DATA_PLACEHOLDER -->;
 var MULTI_SOURCE_DATA = <!-- MULTI_SOURCE_DATA_PLACEHOLDER -->;
+var COMMUNITY_DATA = <!-- COMMUNITY_DATA_PLACEHOLDER -->;
 
 // ====== 页面切换 ======
 function showPage(name) {
-  var allPages = ['overview','alerts','product','ranking','reviews','competitor-detail','weekly-review','commercial'];
+  var allPages = ['overview','alerts','product','ranking','reviews','competitor-detail','weekly-review','commercial','community'];
   allPages.forEach(function(p) {
     var el = document.getElementById('page-'+p);
     if (el) el.style.display = p===name?'block':'none';
   });
   document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
   if (name === 'competitor-detail') return;
-  var map = {overview:0,alerts:1,product:2,ranking:3,reviews:4,'weekly-review':5,commercial:6};
+  var map = {overview:0,alerts:1,product:2,ranking:3,reviews:4,'weekly-review':5,commercial:6,community:7};
   var items = document.querySelectorAll('.nav-item');
   if(map[name]!==undefined) items[map[name]]?.classList.add('active');
   if (name === 'weekly-review') renderWeeklyReview();
   if (name === 'commercial') { renderCommercialPage(); renderCommercialWeekly(); }
+  if (name === 'community') renderCommunityPage();
 }
 
 
@@ -1914,6 +1978,265 @@ function markdownToHtml(md) {
   // 清理多余的嵌套
   html = html.replace(/<p[^>]*><\/p>/g, '');
   return html;
+}
+
+// ============================================================
+// 社媒舆情（Community Insights / Reddit）
+// 数据来源：window.COMMUNITY_DATA = { <competitor>: {raw, ai_analysis} }
+// 渲染策略：竞品 tab 切换 → 同步刷新左侧原始数据 + 右侧 AI 分析
+// AI 分析手动触发：点按钮 → POST /api/ai/community-insights → 轮询 /api/status
+// ============================================================
+
+var _selectedCommunityComp = null;
+var _communityPolling = {};   // 防止重复轮询
+
+function getCommunityCompetitors() {
+  return Object.keys(COMMUNITY_DATA || {}).sort();
+}
+
+function renderCommunityPage() {
+  var comps = getCommunityCompetitors();
+  if (!comps.length) {
+    document.getElementById('cmty-tabs').innerHTML = '';
+    document.getElementById('cmty-metrics-row').innerHTML = '';
+    document.getElementById('cmty-hot-posts').innerHTML = '<div style="padding:20px;color:var(--muted);font-size:13px">暂无社媒数据，请先运行 Reddit 抓取脚本</div>';
+    document.getElementById('cmty-recent-comments').innerHTML = '';
+    document.getElementById('cmty-subreddits').innerHTML = '';
+    document.getElementById('cmty-ai-body').innerHTML = '<div style="color:var(--muted);font-size:13px">暂无 AI 分析</div>';
+    document.getElementById('cmty-trend').innerHTML = '';
+    return;
+  }
+  if (!_selectedCommunityComp || comps.indexOf(_selectedCommunityComp) === -1) {
+    _selectedCommunityComp = comps[0];
+  }
+
+  // tabs
+  var tabsHtml = comps.map(function(name) {
+    var active = name === _selectedCommunityComp;
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[name]) || 'var(--accent)';
+    var bg = active ? 'rgba(123,110,246,0.15)' : 'var(--surface2)';
+    var border = active ? color : 'var(--border)';
+    return '<button onclick="selectCommunityComp(\'' + name + '\')" style="padding:8px 16px;border-radius:8px;border:1px solid ' + border + ';background:' + bg + ';color:var(--text);font-size:12px;cursor:pointer;font-family:var(--mono)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:6px;vertical-align:middle"></span>' + name + '</button>';
+  }).join('');
+  document.getElementById('cmty-tabs').innerHTML = tabsHtml;
+
+  var data = COMMUNITY_DATA[_selectedCommunityComp] || {};
+  renderCommunityRaw(data.raw || {});
+  renderCommunityAI(_selectedCommunityComp, data.ai_analysis || null);
+}
+
+function selectCommunityComp(name) {
+  _selectedCommunityComp = name;
+  renderCommunityPage();
+}
+
+function renderCommunityRaw(raw) {
+  var window_label = '近 ' + (raw.date_range_days || 7) + ' 天';
+  document.getElementById('cmty-window-label').textContent = window_label;
+
+  // 顶部指标
+  var subCount = Object.keys(raw.subreddit_distribution || {}).length;
+  var avgEng = raw.mention_count ? Math.round((raw.total_engagement || 0) / raw.mention_count) : 0;
+  document.getElementById('cmty-metrics-row').innerHTML =
+    '<div class="metric-card purple"><div class="metric-label">提及数</div><div class="metric-value">' + (raw.mention_count || 0) + '</div><div class="metric-sub">' + window_label + '</div></div>' +
+    '<div class="metric-card teal"><div class="metric-label">总互动</div><div class="metric-value">' + (raw.total_engagement || 0) + '</div><div class="metric-sub">点赞 + 评论</div></div>' +
+    '<div class="metric-card warn"><div class="metric-label">活跃 subreddit</div><div class="metric-value">' + subCount + '</div><div class="metric-sub">单帖均互动 ' + avgEng + '</div></div>';
+
+  // 热门帖子
+  var hot = raw.hot_posts || [];
+  if (!hot.length) {
+    document.getElementById('cmty-hot-posts').innerHTML = '<div style="padding:20px;color:var(--muted);font-size:13px">无热门帖子</div>';
+  } else {
+    document.getElementById('cmty-hot-posts').innerHTML = hot.map(function(p) {
+      var date = (p.created_at || '').slice(0, 10);
+      var titleHtml = p.url
+        ? '<a href="' + escapeHtml(p.url) + '" target="_blank" style="color:var(--text);text-decoration:none">' + escapeHtml(p.title || '') + '</a>'
+        : escapeHtml(p.title || '');
+      return '<div class="feed-item"><div class="feed-meta"><span class="feed-source" style="color:var(--accent)">r/' + escapeHtml(p.subreddit || '?') + '</span><span class="feed-type ft-feature">' + (p.score || 0) + '↑ · ' + (p.num_comments || 0) + '💬</span></div><div class="feed-title">' + titleHtml + '</div><div class="feed-time">' + date + '</div></div>';
+    }).join('');
+  }
+
+  // 最近评论
+  var recent = raw.recent_comments || [];
+  if (!recent.length) {
+    document.getElementById('cmty-recent-comments').innerHTML = '<div style="padding:20px;color:var(--muted);font-size:13px">无近期评论</div>';
+  } else {
+    document.getElementById('cmty-recent-comments').innerHTML = recent.slice(0, 10).map(function(c) {
+      var body = (c.body || '').slice(0, 200);
+      var date = c.created_utc ? new Date(c.created_utc * 1000).toISOString().slice(0, 10) : '';
+      return '<div class="feed-item"><div class="feed-meta"><span class="feed-source">r/' + escapeHtml(c.subreddit || '?') + '</span><span class="feed-type ft-bug">' + (c.score || 0) + '↑</span></div><div class="feed-desc" style="font-size:12px">' + escapeHtml(body) + '</div><div class="feed-time">on: ' + escapeHtml((c.post_title || '').slice(0, 60)) + ' · ' + date + '</div></div>';
+    }).join('');
+  }
+
+  // subreddit 分布
+  var subs = raw.subreddit_distribution || {};
+  var subEntries = Object.keys(subs).map(function(k) { return [k, subs[k]]; }).sort(function(a, b) { return b[1] - a[1]; });
+  var maxCount = subEntries.length ? subEntries[0][1] : 1;
+  if (!subEntries.length) {
+    document.getElementById('cmty-subreddits').innerHTML = '<div style="color:var(--muted);font-size:13px">无 subreddit 数据</div>';
+  } else {
+    document.getElementById('cmty-subreddits').innerHTML = subEntries.slice(0, 10).map(function(kv) {
+      var pct = Math.round(kv[1] / maxCount * 100);
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="min-width:120px;font-size:11px;font-family:var(--mono);color:var(--text)">r/' + escapeHtml(kv[0]) + '</span><div style="flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden"><div style="width:' + pct + '%;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))"></div></div><span style="min-width:30px;text-align:right;font-size:11px;font-family:var(--mono);color:var(--muted)">' + kv[1] + '</span></div>';
+    }).join('');
+  }
+
+  // 时间趋势
+  document.getElementById('cmty-trend').innerHTML = renderCommunityTrendSvg(raw.daily_trend || []);
+}
+
+function renderCommunityTrendSvg(trend) {
+  if (!trend || !trend.length) return '<div style="color:var(--muted);font-size:13px">暂无趋势数据</div>';
+  var W = 720, H = 160, padL = 40, padR = 16, padT = 16, padB = 30;
+  var maxV = 1;
+  trend.forEach(function(d) { maxV = Math.max(maxV, d.posts || 0, d.comments || 0); });
+  var step = trend.length > 1 ? (W - padL - padR) / (trend.length - 1) : 0;
+  var scaleY = function(v) { return H - padB - ((H - padT - padB) * v / maxV); };
+
+  function pathFor(key) {
+    return trend.map(function(d, i) { return (i === 0 ? 'M' : 'L') + (padL + i * step) + ',' + scaleY(d[key] || 0); }).join(' ');
+  }
+  var dotsPosts = trend.map(function(d, i) { return '<circle cx="' + (padL + i * step) + '" cy="' + scaleY(d.posts || 0) + '" r="3" fill="var(--accent)"/>'; }).join('');
+  var dotsComments = trend.map(function(d, i) { return '<circle cx="' + (padL + i * step) + '" cy="' + scaleY(d.comments || 0) + '" r="3" fill="var(--accent2)"/>'; }).join('');
+  var labels = trend.map(function(d, i) {
+    if (i % Math.max(1, Math.floor(trend.length / 6)) !== 0 && i !== trend.length - 1) return '';
+    return '<text x="' + (padL + i * step) + '" y="' + (H - padB + 14) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="middle">' + d.date.slice(5) + '</text>';
+  }).join('');
+
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">' +
+    '<path d="' + pathFor('posts') + '" stroke="var(--accent)" stroke-width="2" fill="none"/>' + dotsPosts +
+    '<path d="' + pathFor('comments') + '" stroke="var(--accent2)" stroke-width="2" fill="none" stroke-dasharray="4 3"/>' + dotsComments +
+    '<text x="' + (W - padR) + '" y="' + padT + '" font-size="10" font-family="DM Mono" fill="var(--accent)" text-anchor="end">— 帖子</text>' +
+    '<text x="' + (W - padR) + '" y="' + (padT + 14) + '" font-size="10" font-family="DM Mono" fill="var(--accent2)" text-anchor="end">-- 评论</text>' +
+    labels +
+  '</svg>';
+}
+
+function renderCommunityAI(competitor, ai) {
+  var meta = document.getElementById('cmty-ai-meta');
+  var body = document.getElementById('cmty-ai-body');
+  if (!ai) {
+    meta.textContent = '尚未生成';
+    body.innerHTML =
+      '<div style="color:var(--muted);font-size:13px;line-height:1.7;margin-bottom:14px">点击下方按钮，对当前竞品的 Reddit 讨论进行 AI 舆情分析。分析包含：整体摘要、情绪分布、热门话题、用户痛点、产品机会、被对比的竞品、代表性原话、预警等级。</div>' +
+      '<button class="btn btn-primary" id="cmty-ai-btn-' + competitor + '" onclick="triggerCommunityAI(\'' + competitor + '\')">启动 AI 分析</button>' +
+      '<div id="cmty-ai-status-' + competitor + '" style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--mono)"></div>';
+    return;
+  }
+
+  var alertColors = { low: 'var(--accent2)', medium: 'var(--warn)', high: 'var(--danger)' };
+  var alertLabel = { low: '低风险', medium: '中风险', high: '高风险' };
+  var lvl = ai.alert_level || 'low';
+  var alertColor = alertColors[lvl] || 'var(--muted)';
+
+  // sentiment 条
+  var s = ai.sentiment || {};
+  var pos = Math.round((s.positive || 0) * 100), neu = Math.round((s.neutral || 0) * 100), neg = Math.round((s.negative || 0) * 100);
+  var sentimentBar =
+    '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0">' +
+      '<div style="flex:' + pos + ';background:var(--accent2)" title="正面 ' + pos + '%"></div>' +
+      '<div style="flex:' + neu + ';background:var(--muted)" title="中性 ' + neu + '%"></div>' +
+      '<div style="flex:' + neg + ';background:var(--danger)" title="负面 ' + neg + '%"></div>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:10px;font-family:var(--mono);color:var(--muted)"><span>正面 ' + pos + '%</span><span>中性 ' + neu + '%</span><span>负面 ' + neg + '%</span></div>';
+
+  function chips(arr, color) {
+    if (!arr || !arr.length) return '<span style="color:var(--muted);font-size:11px">无</span>';
+    return arr.map(function(x) { return '<span style="display:inline-block;padding:3px 9px;border-radius:6px;background:rgba(123,110,246,0.1);border:1px solid ' + color + ';color:var(--text);font-size:11px;margin:2px 4px 2px 0">' + escapeHtml(x) + '</span>'; }).join('');
+  }
+  function bullets(arr) {
+    if (!arr || !arr.length) return '<div style="color:var(--muted);font-size:11px">无</div>';
+    return '<ul style="margin:0;padding-left:18px">' + arr.map(function(x) { return '<li style="font-size:12px;color:var(--text);margin:3px 0;line-height:1.6">' + escapeHtml(x) + '</li>'; }).join('') + '</ul>';
+  }
+  function quotes(arr) {
+    if (!arr || !arr.length) return '<div style="color:var(--muted);font-size:11px">无</div>';
+    return arr.map(function(q) { return '<div style="border-left:2px solid var(--accent);padding:6px 12px;margin:6px 0;font-size:12px;color:var(--muted);font-style:italic;line-height:1.6">"' + escapeHtml(q) + '"</div>'; }).join('');
+  }
+
+  var generated = (ai.generated_at || '').replace('T', ' ').slice(0, 16);
+  meta.textContent = '生成于 ' + generated + ' · 样本 ' + (ai.sample_size || 0);
+
+  body.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
+      '<span style="padding:3px 10px;border-radius:6px;background:' + alertColor + ';color:#fff;font-size:11px;font-weight:600">预警 · ' + (alertLabel[lvl] || lvl) + '</span>' +
+      '<button class="btn" style="font-size:11px;padding:4px 10px" id="cmty-ai-btn-' + competitor + '" onclick="triggerCommunityAI(\'' + competitor + '\')">重新分析</button>' +
+    '</div>' +
+    '<div style="font-size:13px;line-height:1.8;color:var(--text);background:rgba(123,110,246,0.06);border:1px solid rgba(123,110,246,0.18);border-radius:8px;padding:12px 14px;margin-bottom:14px;white-space:pre-wrap">' + escapeHtml(ai.overall_summary || '') + '</div>' +
+    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">情绪分布</div>' + sentimentBar +
+    '<div style="margin-top:14px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">🔥 热门话题</div><div>' + chips(ai.top_topics, 'rgba(123,110,246,0.4)') + '</div>' +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">⚠️ 用户痛点</div>' + bullets(ai.pain_points) +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">💡 产品机会</div>' + bullets(ai.opportunities) +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">⚔️ 被提及竞品</div><div>' + chips(ai.competitor_mentions, 'rgba(245,166,35,0.4)') + '</div>' +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">💬 代表原话</div>' + quotes(ai.representative_quotes) +
+    '<div id="cmty-ai-status-' + competitor + '" style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--mono)"></div>';
+}
+
+function triggerCommunityAI(competitor) {
+  var btn = document.getElementById('cmty-ai-btn-' + competitor);
+  var status = document.getElementById('cmty-ai-status-' + competitor);
+  if (btn) { btn.disabled = true; btn.textContent = '分析中...'; }
+  if (status) status.textContent = '已提交任务，等待 AI 返回（通常 30-60 秒）...';
+
+  var apiKey = (document.getElementById('claude-api-key') || {}).value || '';
+
+  fetch('/api/ai/community-insights', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ competitor: competitor, date_range: '7d', api_key: apiKey })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(j) {
+    if (j.status !== 'started') throw new Error(j.message || '启动失败');
+    return pollCommunityAI(competitor, status);
+  })
+  .then(function() {
+    return fetch('/api/data/dashboard_data').then(function(r) { return r.json(); });
+  })
+  .then(function(d) {
+    // 从 dashboard_data 派生最新 COMMUNITY_DATA
+    var newCommunity = {};
+    Object.keys((d && d.competitors) || {}).forEach(function(name) {
+      var c = d.competitors[name].community || {};
+      newCommunity[name] = { raw: c.raw || {}, ai_analysis: c.ai_analysis || null };
+    });
+    COMMUNITY_DATA = newCommunity;
+    renderCommunityPage();
+  })
+  .catch(function(err) {
+    if (status) status.textContent = '失败：' + err.message + '（可点击按钮重试）';
+    if (btn) { btn.disabled = false; btn.textContent = '重试 AI 分析'; }
+  });
+}
+
+function pollCommunityAI(competitor, statusEl) {
+  var key = 'community_ai:' + competitor;
+  var maxAttempts = 90;       // 90 * 2s = 180s
+  var attempt = 0;
+  if (_communityPolling[key]) return _communityPolling[key];
+
+  var promise = new Promise(function(resolve, reject) {
+    function tick() {
+      attempt++;
+      fetch('/api/status').then(function(r) { return r.json(); }).then(function(s) {
+        var t = (s.tasks || {})[key];
+        if (statusEl && t && t.running) {
+          statusEl.textContent = '分析中...（已等待 ' + (attempt * 2) + ' 秒）';
+        }
+        if (t && t.running === false) {
+          if (t.success) resolve(t.result);
+          else reject(new Error(t.error || '任务失败'));
+        } else if (attempt >= maxAttempts) {
+          reject(new Error('超时（' + (maxAttempts * 2) + '秒），后台可能仍在运行'));
+        } else {
+          setTimeout(tick, 2000);
+        }
+      }).catch(reject);
+    }
+    tick();
+  }).finally(function() { delete _communityPolling[key]; });
+
+  _communityPolling[key] = promise;
+  return promise;
 }
 </script>
 

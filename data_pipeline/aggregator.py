@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # 允许独立脚本运行
@@ -28,6 +28,9 @@ from data_pipeline.schema import (
     Alert,
     CommentInfo,
     CommercialInfo,
+    CommunityAI,
+    CommunityInfo,
+    CommunityRaw,
     CompetitorSnapshot,
     DashboardData,
     DataFreshness,
@@ -49,7 +52,12 @@ from data_pipeline.schema import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
+RAW_DIR = DATA_DIR / "raw"
 OUTPUT_PATH = DATA_DIR / "dashboard_data.json"
+
+DEFAULT_COMMUNITY_DAYS = 7
+COMMUNITY_HOT_POST_LIMIT = 10
+COMMUNITY_RECENT_COMMENT_LIMIT = 20
 
 COMP_COLORS = {
     "SofaScore": "#7b6ef6",
@@ -98,6 +106,30 @@ def _load_competitor_details() -> dict:
         except Exception:
             continue
     return out
+
+
+def _load_reddit_raw() -> list:
+    """读 data/raw/reddit_posts.json — RedditCrawler 的产物。
+
+    期望格式：list of {timestamp, source, competitor, data: {posts: [...]}}。
+    """
+    fp = RAW_DIR / "reddit_posts.json"
+    if not fp.exists():
+        return []
+    try:
+        with open(fp, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _load_community_ai() -> dict:
+    """读 data/community_ai_analysis.json — AI 分析独立持久化文件。
+
+    格式：{<competitor_name>: {overall_summary, sentiment, ...}}
+    """
+    return _load_json("community_ai_analysis.json") or {}
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +299,96 @@ def _fill_comments(
             snap.comments.deep_analysis = fa["summary"]
         if fa.get("feature_keywords"):
             snap.comments.feature_keywords = dict(fa["feature_keywords"])
+
+
+def _fill_community(
+    snapshots: dict[str, CompetitorSnapshot],
+    reddit_raw: list,
+    ai_results: dict,
+    days: int = DEFAULT_COMMUNITY_DAYS,
+):
+    """合并 Reddit 原始数据 + AI 分析结果到每个竞品的 community 字段。
+
+    时间窗按 created_utc 过滤（默认 7 天）。所有计数 / 趋势 / 热门帖均基于窗口内数据。
+    AI 分析独立透传，数据缺失时保持 None。
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
+
+    posts_by_comp: dict[str, list] = {}
+    for rec in reddit_raw:
+        comp = rec.get("competitor")
+        if not comp:
+            continue
+        for p in (rec.get("data", {}) or {}).get("posts") or []:
+            posts_by_comp.setdefault(comp, []).append(p)
+
+    for name, snap in snapshots.items():
+        all_posts = posts_by_comp.get(name, [])
+        posts = [p for p in all_posts if (p.get("created_utc") or 0) >= cutoff]
+
+        sub_dist: Counter = Counter()
+        daily: dict[str, list] = {}
+        all_comments: list = []
+        engagement = 0
+
+        for p in posts:
+            sub_dist[p.get("subreddit") or "unknown"] += 1
+            engagement += int(p.get("score") or 0) + int(p.get("num_comments") or 0)
+
+            d = datetime.fromtimestamp(p.get("created_utc") or 0, tz=timezone.utc).strftime("%Y-%m-%d")
+            entry = daily.setdefault(d, [0, 0])
+            entry[0] += 1
+
+            for c in p.get("comments") or []:
+                ts = c.get("created_utc") or 0
+                if ts < cutoff:
+                    continue
+                all_comments.append({
+                    "post_title": p.get("title", ""),
+                    "subreddit": p.get("subreddit"),
+                    "body": c.get("body", ""),
+                    "score": c.get("score", 0),
+                    "created_utc": ts,
+                })
+                cd = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+                centry = daily.setdefault(cd, [0, 0])
+                centry[1] += 1
+
+        hot = sorted(posts, key=lambda x: x.get("score", 0), reverse=True)[:COMMUNITY_HOT_POST_LIMIT]
+        recent = sorted(all_comments, key=lambda x: x.get("created_utc", 0), reverse=True)[:COMMUNITY_RECENT_COMMENT_LIMIT]
+
+        snap.community.raw = CommunityRaw(
+            mention_count=len(posts),
+            total_engagement=engagement,
+            hot_posts=[{
+                "title": p.get("title", ""),
+                "subreddit": p.get("subreddit"),
+                "score": p.get("score", 0),
+                "num_comments": p.get("num_comments", 0),
+                "url": p.get("url"),
+                "created_at": datetime.fromtimestamp(p.get("created_utc") or 0, tz=timezone.utc).isoformat(),
+            } for p in hot],
+            recent_comments=recent,
+            subreddit_distribution=dict(sub_dist),
+            daily_trend=[{"date": d, "posts": v[0], "comments": v[1]} for d, v in sorted(daily.items())],
+            date_range_days=days,
+        )
+
+        if name in ai_results:
+            ai = ai_results[name] or {}
+            snap.community.ai_analysis = CommunityAI(
+                overall_summary=ai.get("overall_summary"),
+                sentiment=dict(ai.get("sentiment") or {}),
+                top_topics=list(ai.get("top_topics") or []),
+                pain_points=list(ai.get("pain_points") or []),
+                opportunities=list(ai.get("opportunities") or []),
+                competitor_mentions=list(ai.get("competitor_mentions") or []),
+                representative_quotes=list(ai.get("representative_quotes") or []),
+                alert_level=ai.get("alert_level", "low") or "low",
+                generated_at=ai.get("generated_at"),
+                date_range_days=ai.get("date_range_days"),
+                sample_size=ai.get("sample_size"),
+            )
 
 
 def _fill_commercial(snapshots: dict[str, CompetitorSnapshot], commercial: dict):
@@ -564,11 +686,15 @@ def build_dashboard_data() -> DashboardData:
     commercial_weekly = _load_json("commercial_weekly.json")
     details = _load_competitor_details()
 
+    reddit_raw = _load_reddit_raw()
+    community_ai = _load_community_ai()
+
     snapshots = _init_competitors(registry)
     _fill_rank(snapshots, market, history)
     _fill_version(snapshots, strategy)
     _fill_comments(snapshots, comments, weekly, details, regions_cfg)
     _fill_commercial(snapshots, commercial)
+    _fill_community(snapshots, reddit_raw, community_ai)
 
     alerts = _build_alerts(snapshots)
     feed = _build_feed(snapshots)
