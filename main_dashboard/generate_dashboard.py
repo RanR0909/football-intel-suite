@@ -191,19 +191,19 @@ def _adapt_commercial(D):
 
 
 def _adapt_community(D):
-    """从 dashboard_data.competitors[*].community 派生 {<name>: {raw, ai_analysis}}。
+    """从 dashboard_data.competitors[*].community 派生 {<name>: {raw, ai_analysis, has_data}}。
 
-    模板中 COMMUNITY_DATA 直接消费此结构。空数据竞品也保留 raw 占位（前端 tab 才能显示）。
+    PRD v2：全部注册竞品都进 tab，无数据竞品由前端显示空态卡（避免"只显示 SofaScore"困惑）。
     """
     out = {}
     for name, snap in D["competitors"].items():
         c = snap.get("community") or {}
         raw = c.get("raw") or {}
-        if (raw.get("mention_count") or 0) <= 0 and not c.get("ai_analysis"):
-            continue   # 完全无数据 / 无分析的竞品不进 tab
+        has_data = (raw.get("mention_count") or 0) > 0 or bool(c.get("ai_analysis"))
         out[name] = {
             "raw": raw,
             "ai_analysis": c.get("ai_analysis"),
+            "has_data": has_data,
         }
     return out
 

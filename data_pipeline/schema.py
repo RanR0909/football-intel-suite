@@ -57,14 +57,20 @@ class CommentInfo:
 
 @dataclass
 class CommunityRaw:
-    """Reddit 等社媒的原始数据切片，不含 AI 分析。"""
+    """Reddit / X 等社媒的原始数据切片（多平台融合），不含 AI 分析。"""
     mention_count: int = 0
-    total_engagement: int = 0                          # sum(score + num_comments)
+    total_engagement: int = 0                          # sum(score + num_comments + shares)
     hot_posts: list = field(default_factory=list)     # top N by score
     recent_comments: list = field(default_factory=list)
     subreddit_distribution: dict = field(default_factory=dict)
     daily_trend: list = field(default_factory=list)   # [{date, posts, comments}]
-    date_range_days: int = 7                          # 当前窗口（用于前端展示）
+    date_range_days: int = 7
+    # PRD v2 新增字段
+    platform_breakdown: dict = field(default_factory=dict)        # {reddit: {mentions, engagement}, twitter: {...}}
+    sentiment_daily: list = field(default_factory=list)            # [{date, positive, neutral, negative}]
+    pain_points: list = field(default_factory=list)                # [{topic, count, severity, sample_quote}]
+    opportunity_signals: list = field(default_factory=list)        # [{theme, count, sample_quote}]
+    top_authors: list = field(default_factory=list)                # [{author, post_count, total_score}]
 
 
 @dataclass
@@ -80,7 +86,11 @@ class CommunityAI:
     alert_level: str = "low"                           # low / medium / high
     generated_at: Optional[str] = None
     date_range_days: Optional[int] = None
-    sample_size: Optional[int] = None                  # 送给 AI 的帖子条数
+    sample_size: Optional[int] = None
+    # PRD v2 新增
+    pain_points_with_severity: list = field(default_factory=list)   # [{topic, severity 1-5, frequency, sample}]
+    opportunity_matrix: list = field(default_factory=list)          # [{theme, impact 1-5, effort 1-5, sample}]
+    cross_competitor_signals: list = field(default_factory=list)    # 跨竞品对比的高频信号
 
 
 @dataclass

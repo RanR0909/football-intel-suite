@@ -114,11 +114,21 @@ def _load_competitor_details() -> dict:
 
 
 def _load_reddit_raw() -> list:
-    """读 data/raw/reddit_posts.json — RedditCrawler 的产物。
-
-    期望格式：list of {timestamp, source, competitor, data: {posts: [...]}}。
-    """
+    """读 data/raw/reddit_posts.json — RedditCrawler 的产物。"""
     fp = RAW_DIR / "reddit_posts.json"
+    if not fp.exists():
+        return []
+    try:
+        with open(fp, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _load_twitter_raw() -> list:
+    """读 data/raw/twitter_posts.json — TwitterCrawler 的产物（Phase F）。"""
+    fp = RAW_DIR / "twitter_posts.json"
     if not fp.exists():
         return []
     try:
@@ -495,70 +505,209 @@ def _build_product_updates(
     return ProductUpdatesView(metrics=metrics, items=items)
 
 
+PAIN_POINT_KEYWORDS = [
+    "crash", "broken", "bug", "slow", "lag", "freeze", "fail", "issue",
+    "problem", "doesn't work", "not working", "annoying", "terrible",
+    "崩溃", "卡顿", "闪退", "卡死", "用不了", "bug",
+]
+OPPORTUNITY_KEYWORDS = [
+    "wish", "want", "should add", "would be nice", "missing", "need",
+    "feature request", "please add", "if only",
+    "希望", "想要", "缺少", "期待", "建议增加",
+]
+
+
+def _post_sentiment_from_score(score: int, ratio: float | None = None) -> str:
+    """无 AI 标签时的兜底情绪派生：
+    - upvote_ratio < 0.5 或 score < 0 → negative
+    - score < 5 且 ratio < 0.7 → neutral
+    - 否则 positive
+    评论 / X 互动也走类似逻辑。
+    """
+    if ratio is not None and ratio < 0.5:
+        return "negative"
+    if score < 0:
+        return "negative"
+    if (ratio is not None and ratio < 0.7) or score < 5:
+        return "neutral"
+    return "positive"
+
+
+def _extract_pain_or_opportunity(text: str) -> tuple[bool, bool]:
+    """文本是否含痛点 / 机会信号。"""
+    if not text:
+        return False, False
+    low = text.lower()
+    is_pain = any(kw in low for kw in PAIN_POINT_KEYWORDS)
+    is_opp = any(kw in low for kw in OPPORTUNITY_KEYWORDS)
+    return is_pain, is_opp
+
+
 def _fill_community(
     snapshots: dict[str, CompetitorSnapshot],
     reddit_raw: list,
+    twitter_raw: list,
     ai_results: dict,
     days: int = DEFAULT_COMMUNITY_DAYS,
 ):
-    """合并 Reddit 原始数据 + AI 分析结果到每个竞品的 community 字段。
+    """合并 Reddit + X 多源原始数据 + AI 分析结果到每个竞品的 community 字段。
 
-    时间窗按 created_utc 过滤（默认 7 天）。所有计数 / 趋势 / 热门帖均基于窗口内数据。
-    AI 分析独立透传，数据缺失时保持 None。
+    PRD v2 派生字段：
+    - platform_breakdown：按平台拆 mentions / engagement
+    - sentiment_daily：按天三色（positive / neutral / negative）堆叠
+    - pain_points / opportunity_signals：基于关键词从原文派生（AI 缺失时兜底）
+    - top_authors：按贡献度排序的作者
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
 
+    # 多源融合：用 _platform 标记每条 post 来源
     posts_by_comp: dict[str, list] = {}
-    for rec in reddit_raw:
-        comp = rec.get("competitor")
-        if not comp:
-            continue
-        for p in (rec.get("data", {}) or {}).get("posts") or []:
-            posts_by_comp.setdefault(comp, []).append(p)
+    for src, label in [(reddit_raw, "reddit"), (twitter_raw, "twitter")]:
+        for rec in src:
+            comp = rec.get("competitor")
+            if not comp:
+                continue
+            for p in (rec.get("data", {}) or {}).get("posts") or []:
+                p = dict(p)            # 浅拷贝避免污染原始 dict
+                p["_platform"] = label
+                posts_by_comp.setdefault(comp, []).append(p)
 
     for name, snap in snapshots.items():
         all_posts = posts_by_comp.get(name, [])
         posts = [p for p in all_posts if (p.get("created_utc") or 0) >= cutoff]
 
         sub_dist: Counter = Counter()
-        daily: dict[str, list] = {}
+        daily: dict[str, list] = {}                    # date → [posts, comments]
+        sentiment_daily: dict[str, dict] = {}          # date → {positive, neutral, negative}
+        platform_breakdown: dict[str, dict] = {}       # platform → {mentions, engagement}
+        pain_count: Counter = Counter()
+        opportunity_count: Counter = Counter()
+        pain_samples: dict[str, list] = {}
+        opp_samples: dict[str, list] = {}
+        author_count: Counter = Counter()
+        author_score: Counter = Counter()
         all_comments: list = []
         engagement = 0
 
         for p in posts:
-            sub_dist[p.get("subreddit") or "unknown"] += 1
-            engagement += int(p.get("score") or 0) + int(p.get("num_comments") or 0)
+            platform = p.get("_platform") or "reddit"
+            score = int(p.get("score") or 0)
+            num_comments = int(p.get("num_comments") or p.get("comments_count") or 0)
+            ratio = p.get("upvote_ratio")
+            text = (p.get("title") or "") + " " + (p.get("selftext") or p.get("text") or "")
+            sub = p.get("subreddit") or p.get("sub_channel") or "unknown"
+
+            sub_dist[sub] += 1
+            post_engagement = score + num_comments + int(p.get("shares_count") or 0)
+            engagement += post_engagement
+
+            # platform_breakdown
+            pb = platform_breakdown.setdefault(platform, {"mentions": 0, "engagement": 0})
+            pb["mentions"] += 1
+            pb["engagement"] += post_engagement
+
+            # 情绪派生：优先从 sentiment 字段；否则按 score+ratio 兜底
+            sentiment = p.get("sentiment") or _post_sentiment_from_score(score, ratio)
 
             d = datetime.fromtimestamp(p.get("created_utc") or 0, tz=timezone.utc).strftime("%Y-%m-%d")
             entry = daily.setdefault(d, [0, 0])
             entry[0] += 1
+            sd = sentiment_daily.setdefault(d, {"positive": 0, "neutral": 0, "negative": 0})
+            sd[sentiment] = sd.get(sentiment, 0) + 1
+
+            # 痛点 / 机会派生
+            is_pain, is_opp = _extract_pain_or_opportunity(text)
+            if is_pain:
+                # 简化为一个 topic 类目（按关键词近似）
+                low = text.lower()
+                topic = next((kw for kw in PAIN_POINT_KEYWORDS if kw in low), "其他问题")
+                pain_count[topic] += 1
+                pain_samples.setdefault(topic, []).append(text.strip()[:200])
+            if is_opp:
+                low = text.lower()
+                topic = next((kw for kw in OPPORTUNITY_KEYWORDS if kw in low), "其他需求")
+                opportunity_count[topic] += 1
+                opp_samples.setdefault(topic, []).append(text.strip()[:200])
+
+            author = p.get("author")
+            if author:
+                author_count[author] += 1
+                author_score[author] += score
 
             for c in p.get("comments") or []:
                 ts = c.get("created_utc") or 0
                 if ts < cutoff:
                     continue
+                comment_score = int(c.get("score") or 0)
+                comment_text = c.get("body", "") or ""
+                comment_sentiment = c.get("sentiment") or _post_sentiment_from_score(comment_score)
+
                 all_comments.append({
                     "post_title": p.get("title", ""),
-                    "subreddit": p.get("subreddit"),
-                    "body": c.get("body", ""),
-                    "score": c.get("score", 0),
+                    "subreddit": sub,
+                    "platform": platform,
+                    "body": comment_text,
+                    "score": comment_score,
                     "created_utc": ts,
+                    "sentiment": comment_sentiment,
                 })
                 cd = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
                 centry = daily.setdefault(cd, [0, 0])
                 centry[1] += 1
+                csd = sentiment_daily.setdefault(cd, {"positive": 0, "neutral": 0, "negative": 0})
+                csd[comment_sentiment] = csd.get(comment_sentiment, 0) + 1
+
+                is_pain_c, is_opp_c = _extract_pain_or_opportunity(comment_text)
+                if is_pain_c:
+                    low = comment_text.lower()
+                    topic = next((kw for kw in PAIN_POINT_KEYWORDS if kw in low), "其他问题")
+                    pain_count[topic] += 1
+                    pain_samples.setdefault(topic, []).append(comment_text.strip()[:200])
+                if is_opp_c:
+                    low = comment_text.lower()
+                    topic = next((kw for kw in OPPORTUNITY_KEYWORDS if kw in low), "其他需求")
+                    opportunity_count[topic] += 1
+                    opp_samples.setdefault(topic, []).append(comment_text.strip()[:200])
 
         hot = sorted(posts, key=lambda x: x.get("score", 0), reverse=True)[:COMMUNITY_HOT_POST_LIMIT]
         recent = sorted(all_comments, key=lambda x: x.get("created_utc", 0), reverse=True)[:COMMUNITY_RECENT_COMMENT_LIMIT]
+
+        # 派生 pain_points: 按 count + severity 估算
+        pain_list = []
+        for topic, cnt in pain_count.most_common(8):
+            severity = min(5, 1 + cnt // 2)              # 简单映射：count 越多严重度越高（cap 5）
+            pain_list.append({
+                "topic": topic,
+                "count": cnt,
+                "severity": severity,
+                "sample_quote": (pain_samples.get(topic) or [""])[0][:160],
+            })
+
+        opportunity_list = []
+        for topic, cnt in opportunity_count.most_common(8):
+            opportunity_list.append({
+                "theme": topic,
+                "count": cnt,
+                "sample_quote": (opp_samples.get(topic) or [""])[0][:160],
+            })
+
+        top_authors = []
+        for author, cnt in author_count.most_common(5):
+            top_authors.append({
+                "author": author,
+                "post_count": cnt,
+                "total_score": author_score.get(author, 0),
+            })
 
         snap.community.raw = CommunityRaw(
             mention_count=len(posts),
             total_engagement=engagement,
             hot_posts=[{
-                "title": p.get("title", ""),
-                "subreddit": p.get("subreddit"),
+                "title": p.get("title", "") or (p.get("text", "") or "")[:80],
+                "subreddit": p.get("subreddit") or p.get("sub_channel"),
+                "platform": p.get("_platform") or "reddit",
                 "score": p.get("score", 0),
-                "num_comments": p.get("num_comments", 0),
+                "num_comments": p.get("num_comments", 0) or p.get("comments_count", 0),
                 "url": p.get("url"),
                 "created_at": datetime.fromtimestamp(p.get("created_utc") or 0, tz=timezone.utc).isoformat(),
             } for p in hot],
@@ -566,6 +715,11 @@ def _fill_community(
             subreddit_distribution=dict(sub_dist),
             daily_trend=[{"date": d, "posts": v[0], "comments": v[1]} for d, v in sorted(daily.items())],
             date_range_days=days,
+            platform_breakdown=platform_breakdown,
+            sentiment_daily=[{"date": d, **sentiment_daily[d]} for d in sorted(sentiment_daily.keys())],
+            pain_points=pain_list,
+            opportunity_signals=opportunity_list,
+            top_authors=top_authors,
         )
 
         if name in ai_results:
@@ -582,6 +736,9 @@ def _fill_community(
                 generated_at=ai.get("generated_at"),
                 date_range_days=ai.get("date_range_days"),
                 sample_size=ai.get("sample_size"),
+                pain_points_with_severity=list(ai.get("pain_points_with_severity") or []),
+                opportunity_matrix=list(ai.get("opportunity_matrix") or []),
+                cross_competitor_signals=list(ai.get("cross_competitor_signals") or []),
             )
 
 
@@ -912,6 +1069,7 @@ def build_dashboard_data() -> DashboardData:
     details = _load_competitor_details()
 
     reddit_raw = _load_reddit_raw()
+    twitter_raw = _load_twitter_raw()
     community_ai = _load_community_ai()
     fb_raw = _load_fb_adlib_raw()
     ads_ai = _load_ads_ai()
@@ -922,7 +1080,7 @@ def build_dashboard_data() -> DashboardData:
     _fill_comments(snapshots, comments, weekly, details, regions_cfg)
     _fill_commercial(snapshots, commercial)
     _fill_ads(snapshots, fb_raw, ads_ai)
-    _fill_community(snapshots, reddit_raw, community_ai)
+    _fill_community(snapshots, reddit_raw, twitter_raw, community_ai)
     product_updates = _build_product_updates(snapshots)
     reviews_analysis = _build_review_analysis(snapshots, regions_cfg)
 
