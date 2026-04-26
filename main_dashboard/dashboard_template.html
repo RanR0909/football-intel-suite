@@ -1125,14 +1125,15 @@ body::before {
     <div id="cmty-all-posts" style="max-height:520px;overflow-y:auto"></div>
   </div>
 
-  <!-- 区 5：AI 分析卡（默认折叠） -->
+  <!-- 区 5：AI 分析卡（按钮常驻 header；body 折叠） -->
   <div class="card full-card" id="cmty-ai-card" style="margin-top:16px">
-    <div class="card-head" id="cmty-ai-head" style="cursor:pointer">
+    <div class="card-head" id="cmty-ai-head">
       <div class="card-title">AI 舆情分析</div>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span id="cmty-ai-alert-badge"></span>
-        <span class="card-action" id="cmty-ai-meta" style="color:var(--muted);font-size:11px"></span>
-        <span id="cmty-ai-toggle" style="color:var(--muted);font-size:11px;font-family:var(--mono)">展开 ▼</span>
+        <span id="cmty-ai-meta" style="color:var(--muted);font-size:11px;font-family:var(--mono)"></span>
+        <button class="btn btn-primary" id="cmty-ai-action-btn" style="font-size:11px;padding:4px 12px" onclick="triggerCommunityAIFromHeader()">启动 AI 分析</button>
+        <span id="cmty-ai-toggle" onclick="toggleCmtyAI()" style="cursor:pointer;color:var(--muted);font-size:11px;font-family:var(--mono);user-select:none">展开 ▼</span>
       </div>
     </div>
     <div id="cmty-ai-body" style="display:none;padding:16px 20px"></div>
@@ -6169,11 +6170,22 @@ function renderCmtyAggregateAI(withData) {
   var body = document.getElementById('cmty-ai-body');
   var meta = document.getElementById('cmty-ai-meta');
   var alertBadge = document.getElementById('cmty-ai-alert-badge');
-
-  head.onclick = function(e) {
-    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
-    toggleCmtyAI();
-  };
+  var headerBtn = document.getElementById('cmty-ai-action-btn');
+  // 汇总模式 header 按钮换成"批量分析未生成竞品"
+  if (headerBtn) {
+    var pending = withData.filter(function(n){ return !((COMMUNITY_DATA[n]||{}).ai_analysis); });
+    if (pending.length) {
+      headerBtn.style.display = '';
+      headerBtn.disabled = false;
+      headerBtn.textContent = '批量分析（' + pending.length + ' 个未生成）';
+      headerBtn.dataset.competitor = '__all_pending__';
+    } else {
+      headerBtn.style.display = '';
+      headerBtn.disabled = false;
+      headerBtn.textContent = '全部重新分析';
+      headerBtn.dataset.competitor = '__all_force__';
+    }
+  }
 
   var signals = [];
   var totalSamples = 0;
@@ -6207,15 +6219,22 @@ function renderCmtyAggregateAI(withData) {
     return;
   }
 
-  // 竞品 AI 摘要对比表
+  // 竞品 AI 摘要对比表（每行带 生成/重新生成 按钮）
   var lvlColors = { low: 'var(--accent2)', medium: 'var(--warn)', high: 'var(--danger)' };
   var lvlLabels = { low: '低', medium: '中', high: '高' };
   var rows = withData.map(function(name){
     var entry = COMMUNITY_DATA[name];
     var ai = entry.ai_analysis;
+    var btnLabel = ai ? '重新生成' : '启动 AI →';
+    var btnCls = ai ? 'btn' : 'btn btn-primary';
+    var actionCell =
+      '<button class="' + btnCls + '" id="cmty-row-ai-btn-' + escapeHtml(name) + '" ' +
+      'style="font-size:10px;padding:3px 9px;font-family:var(--mono)" ' +
+      'onclick="triggerCommunityAI(\'' + name + '\')">' + btnLabel + '</button>';
     if (!ai) {
-      return '<tr><td style="padding:6px 8px;font-family:var(--mono);font-size:11px;color:var(--text)">' + escapeHtml(name) + '</td>' +
-             '<td colspan="4" style="padding:6px 8px;color:var(--muted);font-size:11px">— 未生成 —</td></tr>';
+      return '<tr><td style="padding:7px 8px;font-family:var(--mono);font-size:11px;color:var(--text)">' + escapeHtml(name) + '</td>' +
+             '<td colspan="4" style="padding:7px 8px;color:var(--muted);font-size:11px">— 未生成 —</td>' +
+             '<td style="padding:7px 8px;text-align:right">' + actionCell + '</td></tr>';
     }
     var s = ai.sentiment || {};
     var pos = Math.round((s.positive || 0) * 100);
@@ -6228,11 +6247,12 @@ function renderCmtyAggregateAI(withData) {
       '<td style="padding:7px 8px;font-size:11px;color:var(--danger);font-family:var(--mono)">' + neg + '%</td>' +
       '<td style="padding:7px 8px;font-size:11px;color:' + (lvlColors[lvl] || 'var(--muted)') + ';font-family:var(--mono)">' + (lvlLabels[lvl] || '—') + '</td>' +
       '<td style="padding:7px 8px;font-size:11px;color:var(--muted)">' + escapeHtml(summary) + (summary.length === 80 ? '...' : '') + '</td>' +
+      '<td style="padding:7px 8px;text-align:right">' + actionCell + '</td>' +
     '</tr>';
   }).join('');
 
   body.innerHTML =
-    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">竞品 AI 摘要对比</div>' +
+    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">竞品 AI 摘要对比 · 每行可单独触发</div>' +
     '<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:16px">' +
       '<table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--surface2)">' +
         '<thead><tr style="background:rgba(123,110,246,0.10)">' +
@@ -6241,6 +6261,7 @@ function renderCmtyAggregateAI(withData) {
           '<th style="padding:7px 8px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">负面</th>' +
           '<th style="padding:7px 8px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">风险</th>' +
           '<th style="padding:7px 8px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">摘要</th>' +
+          '<th style="padding:7px 8px;text-align:right;font-size:10px;font-family:var(--mono);color:var(--muted);font-weight:500">操作</th>' +
         '</tr></thead>' +
         '<tbody>' + rows + '</tbody>' +
       '</table>' +
@@ -6710,20 +6731,22 @@ function renderCmtyAI(competitor, ai) {
   var body = document.getElementById('cmty-ai-body');
   var meta = document.getElementById('cmty-ai-meta');
   var alertBadge = document.getElementById('cmty-ai-alert-badge');
+  var headerBtn = document.getElementById('cmty-ai-action-btn');
   if (!card) return;
 
-  // 折叠 toggle 绑定一次（幂等）
-  head.onclick = function(e) {
-    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
-    toggleCmtyAI();
-  };
+  // header 常驻按钮：根据有无 AI 切换文案，绑定到当前竞品
+  if (headerBtn) {
+    headerBtn.style.display = '';
+    headerBtn.disabled = false;
+    headerBtn.textContent = ai ? '重新分析' : '启动 AI 分析';
+    headerBtn.dataset.competitor = competitor;
+  }
 
   if (!ai) {
     meta.textContent = '尚未生成';
     alertBadge.innerHTML = '';
     body.innerHTML =
-      '<div style="color:var(--muted);font-size:13px;line-height:1.7;margin-bottom:14px">点击下方按钮，对当前竞品的社媒讨论进行 AI 舆情分析。AI 分析包含：整体摘要、情绪分布、热门话题、用户痛点（含严重度）、产品机会（影响力 × 难度）、被对比的竞品、代表原话、预警等级。</div>' +
-      '<button class="btn btn-primary" id="cmty-ai-btn-' + competitor + '" onclick="triggerCommunityAI(\'' + competitor + '\')">启动 AI 分析</button>' +
+      '<div style="color:var(--muted);font-size:13px;line-height:1.7;margin-bottom:14px">展开后点击 header 中的"启动 AI 分析"按钮，对当前竞品的社媒讨论进行 AI 舆情分析。包含：整体摘要、情绪分布、热门话题、用户痛点（含严重度）、产品机会（影响力 × 难度）、被对比的竞品、代表原话、预警等级。</div>' +
       '<div id="cmty-ai-status-' + competitor + '" style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--mono)"></div>';
     return;
   }
@@ -6762,9 +6785,6 @@ function renderCmtyAI(competitor, ai) {
   meta.textContent = '生成于 ' + generated + ' · 样本 ' + (ai.sample_size || 0);
 
   body.innerHTML =
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
-      '<button class="btn" style="font-size:11px;padding:4px 10px" id="cmty-ai-btn-' + competitor + '" onclick="triggerCommunityAI(\'' + competitor + '\')">重新分析</button>' +
-    '</div>' +
     '<div style="font-size:13px;line-height:1.8;color:var(--text);background:rgba(123,110,246,0.06);border:1px solid rgba(123,110,246,0.18);border-radius:8px;padding:12px 14px;margin-bottom:14px;white-space:pre-wrap">' + escapeHtml(ai.overall_summary || '') + '</div>' +
     '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">情绪分布</div>' + sentimentBar +
     '<div style="margin-top:14px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">热门话题</div><div>' + chips(ai.top_topics, 'rgba(123,110,246,0.4)') + '</div>' +
@@ -6784,10 +6804,46 @@ function toggleCmtyAI() {
   if (toggle) toggle.textContent = visible ? '展开 ▼' : '折叠 ▲';
 }
 
-function triggerCommunityAI(competitor) {
+function triggerCommunityAIFromHeader() {
+  var btn = document.getElementById('cmty-ai-action-btn');
+  if (!btn) return;
+  var target = btn.dataset.competitor || _selectedCommunityComp;
+  if (!target) { alert('请先选择竞品 tab'); return; }
+
+  if (target === '__all_pending__' || target === '__all_force__') {
+    var force = target === '__all_force__';
+    var comps = getCommunityCompetitors().filter(function(n){
+      return (COMMUNITY_DATA[n]||{}).has_data && (force || !((COMMUNITY_DATA[n]||{}).ai_analysis));
+    });
+    if (!comps.length) { alert('没有需要分析的竞品'); return; }
+    if (!confirm('即将串行分析 ' + comps.length + ' 个竞品（每个约 30-60 秒）。确定继续？')) return;
+    btn.disabled = true;
+    var i = 0;
+    function runNext() {
+      if (i >= comps.length) {
+        btn.disabled = false;
+        if (typeof _showSyncToast === 'function') _showSyncToast('批量 AI 分析完成 · ' + comps.length + ' 个竞品', 'success');
+        return;
+      }
+      btn.textContent = '分析中 (' + (i+1) + '/' + comps.length + ')：' + comps[i];
+      triggerCommunityAI(comps[i], function(){ i++; runNext(); });
+    }
+    runNext();
+    return;
+  }
+
+  // 单竞品（header 按钮 dataset 指向当前 _selectedCommunityComp）
+  triggerCommunityAI(target);
+}
+
+function triggerCommunityAI(competitor, onDone) {
+  var rowBtn = document.getElementById('cmty-row-ai-btn-' + competitor);
+  var headerBtn = document.getElementById('cmty-ai-action-btn');
   var btn = document.getElementById('cmty-ai-btn-' + competitor);
   var status = document.getElementById('cmty-ai-status-' + competitor);
   if (btn) { btn.disabled = true; btn.textContent = '分析中...'; }
+  if (rowBtn) { rowBtn.disabled = true; rowBtn.textContent = '分析中...'; }
+  if (headerBtn && headerBtn.dataset.competitor === competitor) { headerBtn.disabled = true; headerBtn.textContent = '分析中（' + competitor + '）...'; }
   if (status) status.textContent = '已提交任务，等待 AI 返回（通常 30-60 秒）...';
 
   var apiKey = (document.getElementById('claude-api-key') || {}).value || '';
@@ -6806,18 +6862,24 @@ function triggerCommunityAI(competitor) {
     return fetch('/api/data/dashboard_data').then(function(r) { return r.json(); });
   })
   .then(function(d) {
-    // 从 dashboard_data 派生最新 COMMUNITY_DATA
+    // 从 dashboard_data 派生最新 COMMUNITY_DATA（含 has_data 标记）
     var newCommunity = {};
     Object.keys((d && d.competitors) || {}).forEach(function(name) {
       var c = d.competitors[name].community || {};
-      newCommunity[name] = { raw: c.raw || {}, ai_analysis: c.ai_analysis || null };
+      var raw = c.raw || {};
+      var has = (raw.mention_count || 0) > 0 || !!c.ai_analysis;
+      newCommunity[name] = { raw: raw, ai_analysis: c.ai_analysis || null, has_data: has };
     });
     COMMUNITY_DATA = newCommunity;
     renderCommunityPage();
+    if (typeof onDone === 'function') onDone(true);
   })
   .catch(function(err) {
     if (status) status.textContent = '失败：' + err.message + '（可点击按钮重试）';
     if (btn) { btn.disabled = false; btn.textContent = '重试 AI 分析'; }
+    if (rowBtn) { rowBtn.disabled = false; rowBtn.textContent = '重试'; }
+    if (headerBtn) { headerBtn.disabled = false; headerBtn.textContent = '重试 AI 分析'; }
+    if (typeof onDone === 'function') onDone(false);
   });
 }
 
