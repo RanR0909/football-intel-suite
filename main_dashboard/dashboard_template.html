@@ -146,6 +146,9 @@ body::before {
 .metric-label { font-size: 11px; color: var(--muted); font-family: var(--mono); letter-spacing: 0.06em; margin-bottom: 12px; }
 .metric-value { font-family: var(--display); font-size: 32px; font-weight: 700; letter-spacing: -0.03em; }
 .metric-change { display: flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 12px; font-family: var(--mono); }
+.source-badge { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; background: rgba(255,255,255,0.04); color: var(--muted); font-size: 11px; text-decoration: none; font-family: var(--mono); transition: .15s; }
+.source-badge::after { content: "↗"; }
+.source-badge:hover { background: rgba(123,110,246,0.2); color: var(--text); }
 .up { color: var(--danger); }
 .down { color: var(--success); }
 .neutral { color: var(--muted); }
@@ -456,14 +459,34 @@ body::before {
     <div><div class="page-title">排名变化</div><div class="page-sub">App Store · 体育分类 Top 100</div></div>
     <button class="btn" onclick="showPage('overview')">← 返回总览</button>
   </div>
+
+  <!-- 周变化 > 20 的高威胁竞品 banner -->
+  <div id="rank-fast-movers"></div>
+
   <div class="card full-card">
-    <div class="card-head"><div class="card-title">App Store 排名 · 当前快照</div></div>
-    <div class="rank-row" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border)">
-      <span></span><span>产品</span><span>当前</span><span>变化</span><span>下载量</span><span>评分增长</span><span>热度</span><span>趋势</span>
+    <div class="card-head">
+      <div class="card-title">App Store 排名 · 当前快照</div>
+      <div id="rank-filter-bar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>
     </div>
-    <!-- RANK_TABLE_PLACEHOLDER -->
+
+    <!-- 列头 -->
+    <div class="rank-row" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border)">
+      <span></span><span>产品</span><span>当前</span><span>日变化</span><span>周变化</span><span>下载量</span><span>评分</span><span>趋势</span>
+    </div>
+
+    <!-- 行（JS 渲染） -->
+    <div id="rank-table-rows"></div>
   </div>
-  <!-- BASELINE_COMPARISON_PLACEHOLDER -->
+
+  <!-- 相对 All Football 表现（卡组） -->
+  <div class="card full-card" id="rank-baseline-card">
+    <div class="card-head">
+      <div class="card-title" id="rank-baseline-title">vs All Football · 相对表现</div>
+      <div class="card-action" style="color:var(--muted);font-size:11px">🟢 领先 · 🔴 落后 · ⚪ 持平 (±10%)</div>
+    </div>
+    <div id="rank-baseline-cards"></div>
+  </div>
+
   <!-- MULTI_SOURCE_RANK_PLACEHOLDER -->
 </div>
 
@@ -490,22 +513,25 @@ body::before {
 
   <!-- 排名卡片 -->
   <div class="metrics-row" id="detail-metrics">
-    <div class="metric-card purple">
+    <div class="metric-card purple" style="position:relative">
+      <a id="detail-source-rank" class="source-badge" target="_blank" rel="noopener" style="display:none"></a>
       <div class="metric-label">App Store 排名</div>
       <div class="metric-value" id="detail-rank">—</div>
       <div class="metric-change neutral" id="detail-rank-delta">暂无数据</div>
     </div>
-    <div class="metric-card teal">
+    <div class="metric-card teal" style="position:relative">
+      <a id="detail-source-version" class="source-badge" target="_blank" rel="noopener" style="display:none"></a>
       <div class="metric-label">当前版本</div>
       <div class="metric-value" id="detail-version">—</div>
       <div class="metric-change neutral" id="detail-version-status">—</div>
     </div>
-    <div class="metric-card warn">
+    <div class="metric-card warn" style="position:relative">
+      <a id="detail-source-reviews" class="source-badge" target="_blank" rel="noopener" style="display:none"></a>
       <div class="metric-label">近3天评论</div>
       <div class="metric-value" id="detail-negative">—</div>
       <div class="metric-change neutral" id="detail-negative-detail">—</div>
     </div>
-    <div class="metric-card danger">
+    <div class="metric-card danger" style="position:relative">
       <div class="metric-label">深度分析状态</div>
       <div class="metric-value" id="detail-analysis-status">—</div>
       <div class="metric-change neutral" id="detail-analysis-action">—</div>
@@ -564,6 +590,42 @@ body::before {
     <div id="detail-keywords" style="padding:16px 20px">
       <div style="color:var(--muted);font-size:13px">暂无关键词数据</div>
     </div>
+  </div>
+
+  <!-- 排名详情（链回 page-ranking） -->
+  <div class="card full-card" id="detail-rank-card" style="display:none">
+    <div class="card-head">
+      <div class="card-title">📊 排名详情</div>
+      <div class="card-action" onclick="showPage('ranking')">查看排名总表 →</div>
+    </div>
+    <div id="detail-rank-section" style="padding:16px 20px"></div>
+  </div>
+
+  <!-- Meta 广告投放摘要（链回 page-commercial） -->
+  <div class="card full-card" id="detail-ads-card" style="display:none">
+    <div class="card-head">
+      <div class="card-title">📺 Meta 广告投放</div>
+      <div class="card-action" onclick="showPage('commercial')">查看商业分析 →</div>
+    </div>
+    <div id="detail-ads-section" style="padding:16px 20px"></div>
+  </div>
+
+  <!-- 社媒舆情摘要（链回 page-community） -->
+  <div class="card full-card" id="detail-community-card" style="display:none">
+    <div class="card-head">
+      <div class="card-title">💬 社媒舆情</div>
+      <div class="card-action" onclick="showPage('community')">查看社媒分析 →</div>
+    </div>
+    <div id="detail-community-section" style="padding:16px 20px"></div>
+  </div>
+
+  <!-- 原始数据来源 -->
+  <div class="card full-card">
+    <div class="card-head">
+      <div class="card-title">🔗 原始数据来源</div>
+      <div class="card-action" style="color:var(--muted);font-size:11px">点击外链查看抓取源</div>
+    </div>
+    <div id="detail-data-sources" style="padding:12px 20px"></div>
   </div>
 </div>
 
@@ -923,6 +985,7 @@ var COMMERCIAL_DATA = <!-- COMMERCIAL_DATA_PLACEHOLDER -->;
 var COMMERCIAL_WEEKLY_DATA = <!-- COMMERCIAL_WEEKLY_DATA_PLACEHOLDER -->;
 var MULTI_SOURCE_DATA = <!-- MULTI_SOURCE_DATA_PLACEHOLDER -->;
 var COMMUNITY_DATA = <!-- COMMUNITY_DATA_PLACEHOLDER -->;
+var RANK_DATA = <!-- RANK_DATA_PLACEHOLDER -->;
 
 // ====== 页面切换 ======
 function showPage(name) {
@@ -939,6 +1002,7 @@ function showPage(name) {
   if (name === 'weekly-review') renderWeeklyReview();
   if (name === 'commercial') { renderCommercialPage(); renderCommercialWeekly(); }
   if (name === 'community') renderCommunityPage();
+  if (name === 'ranking') renderRankPage();
 }
 
 
@@ -1134,6 +1198,36 @@ function showCompetitorDetail(name) {
   showPage('competitor-detail');
 }
 
+// 数据来源链接生成器（详情页 metric 卡 + 底部数据源区共用）
+function buildSourceLinks(name) {
+  var reg = ((RANK_DATA || {}).registry || {})[name] || {};
+  var iosId = reg.ios || reg.app_id;
+  var gpId = reg.gp;
+  var encName = encodeURIComponent(name);
+  return {
+    appstore:            iosId ? 'https://apps.apple.com/us/app/id' + iosId : null,
+    appstore_reviews:    iosId ? 'https://apps.apple.com/us/app/id' + iosId + '?see-all=reviews' : null,
+    appstore_chart:      'https://apps.apple.com/us/charts/iphone/sports-apps/6004',
+    googleplay:          gpId ? 'https://play.google.com/store/apps/details?id=' + gpId : null,
+    googleplay_reviews:  gpId ? 'https://play.google.com/store/apps/details?id=' + gpId + '&showAllReviews=true' : null,
+    reddit:              'https://www.reddit.com/search/?q=' + encName + '%20app',
+    meta_adlib:          'https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&q=' + encName,
+    sensortower:         iosId ? 'https://app.sensortower.com/overview/' + iosId : null,
+  };
+}
+
+function attachSourceBadge(elementId, href, label) {
+  var a = document.getElementById(elementId);
+  if (!a) return;
+  if (href) {
+    a.href = href;
+    a.title = '数据来源：' + label;
+    a.style.display = 'inline-flex';
+  } else {
+    a.style.display = 'none';
+  }
+}
+
 function renderCompetitorDetail(name) {
   var data = COMPETITOR_DETAIL_DATA[name] || {};
   document.getElementById('detail-title').textContent = name + ' · 竞品详情';
@@ -1223,6 +1317,18 @@ function renderCompetitorDetail(name) {
   // 关键词
   renderDetailKeywords(data);
   renderDetailBatchStatus();
+
+  // === 新增：metric 卡 source badges ===
+  var links = buildSourceLinks(name);
+  attachSourceBadge('detail-source-rank',    links.appstore_chart, 'App Store · Sports 榜单');
+  attachSourceBadge('detail-source-version', links.appstore,       'App Store · 应用页');
+  attachSourceBadge('detail-source-reviews', links.appstore_reviews, 'App Store · 全部评论');
+
+  // === 新增：4 个底部 sections（rank / ads / community / 数据源）===
+  renderDetailRankSection(name);
+  renderDetailAdsSection(name);
+  renderDetailCommunitySection(name);
+  renderDetailDataSources(name);
 }
 
 function renderDetailRegions(data) {
@@ -1347,6 +1453,182 @@ function renderDetailKeywords(data) {
   html += '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);padding-top:8px;border-top:1px solid var(--border)">字号越大 = 提及越多 · 共 ' + keys.length + ' 个关键词</div>';
 
   el.innerHTML = html;
+}
+
+// ====== 详情页：排名 / 广告 / 社媒 / 数据源 4 个聚合 section（Phase D） ======
+
+function renderDetailRankSection(name) {
+  var card = document.getElementById('detail-rank-card');
+  var section = document.getElementById('detail-rank-section');
+  var rd = ((RANK_DATA || {}).competitors || {})[name];
+  if (!rd || (rd.current == null && rd.delta_dod == null && Object.keys(rd.history || {}).length === 0)) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+
+  var dodColor = rd.delta_dod == null ? 'var(--muted)' : (rd.delta_dod > 0 ? 'var(--danger)' : rd.delta_dod < 0 ? 'var(--accent2)' : 'var(--muted)');
+  var wowColor = rd.delta_wow == null ? 'var(--muted)' : (rd.delta_wow > 0 ? 'var(--danger)' : rd.delta_wow < 0 ? 'var(--accent2)' : 'var(--muted)');
+  var dodArrow = rd.delta_dod == null ? '—' : (rd.delta_dod > 0 ? '↑ +' : rd.delta_dod < 0 ? '↓ ' : '→ ');
+  var wowArrow = rd.delta_wow == null ? '—' : (rd.delta_wow > 0 ? '↑ +' : rd.delta_wow < 0 ? '↓ ' : '→ ');
+  var fastTag = rd.delta_wow != null && Math.abs(rd.delta_wow) > 20
+    ? '<span style="margin-left:8px;padding:2px 8px;border-radius:4px;background:rgba(255,92,92,0.15);color:var(--danger);font-size:10px;font-family:var(--mono)">⚡ 周变化 > 20</span>'
+    : '';
+
+  // 构造 14 天历史趋势 SVG
+  var hist = rd.history || {};
+  var dates = Object.keys(hist).sort().slice(-14);
+  var trendSvg = '<div style="color:var(--muted);font-size:11px">无历史轨迹</div>';
+  if (dates.length >= 2) {
+    var values = dates.map(function(d) { return hist[d]; });
+    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+    var W = 600, H = 80, padL = 30, padR = 12, padT = 12, padB = 22;
+    var stepX = dates.length > 1 ? (W - padL - padR) / (dates.length - 1) : 0;
+    var range = (max - min) || 1;
+    var path = values.map(function(v, i) {
+      var y = padT + ((v - min) / range) * (H - padT - padB);   // rank 越大越在下方
+      return (i === 0 ? 'M' : 'L') + (padL + i * stepX).toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    var dots = values.map(function(v, i) {
+      var y = padT + ((v - min) / range) * (H - padT - padB);
+      return '<circle cx="' + (padL + i * stepX).toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.5" fill="var(--accent)"/>';
+    }).join('');
+    var labels = dates.map(function(d, i) {
+      if (i % Math.max(1, Math.floor(dates.length / 5)) !== 0 && i !== dates.length - 1) return '';
+      return '<text x="' + (padL + i * stepX).toFixed(1) + '" y="' + (H - padB + 12) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="middle">' + d.slice(5) + '</text>';
+    }).join('');
+    trendSvg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">' +
+      '<text x="' + padL + '" y="' + (padT + 4) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="end" dx="-4">#' + min + '</text>' +
+      '<text x="' + padL + '" y="' + (H - padB) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="end" dx="-4">#' + max + '</text>' +
+      '<path d="' + path + '" stroke="var(--accent)" stroke-width="2" fill="none"/>' + dots + labels +
+    '</svg>';
+  }
+
+  section.innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">' +
+      '<div style="border-left:3px solid var(--accent);padding:6px 10px">' +
+        '<div style="font-size:10px;font-family:var(--mono);color:var(--muted)">当前排名</div>' +
+        '<div style="font-size:20px;font-weight:600">' + (rd.current != null ? '#' + rd.current : '—') + '</div>' +
+      '</div>' +
+      '<div style="border-left:3px solid ' + dodColor + ';padding:6px 10px">' +
+        '<div style="font-size:10px;font-family:var(--mono);color:var(--muted)">日变化</div>' +
+        '<div style="font-size:20px;font-weight:600;color:' + dodColor + '">' + dodArrow + (rd.delta_dod != null ? rd.delta_dod : '—') + '</div>' +
+      '</div>' +
+      '<div style="border-left:3px solid ' + wowColor + ';padding:6px 10px">' +
+        '<div style="font-size:10px;font-family:var(--mono);color:var(--muted)">周变化' + fastTag + '</div>' +
+        '<div style="font-size:20px;font-weight:600;color:' + wowColor + '">' + wowArrow + (rd.delta_wow != null ? rd.delta_wow : '—') + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">📈 历史排名（最近 ' + dates.length + ' 天）— 越往上排名越好</div>' +
+    trendSvg;
+}
+
+function renderDetailAdsSection(name) {
+  var card = document.getElementById('detail-ads-card');
+  var section = document.getElementById('detail-ads-section');
+  var ads = (((COMMERCIAL_DATA || {}).competitors || {})[name] || {}).ads || {};
+  if (!ads.active_count) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+
+  var trendBadge = '';
+  var pct = Math.round((ads.trend_pct || 0) * 100);
+  if (ads.trend === 'increasing')      trendBadge = '<span style="color:var(--danger);font-family:var(--mono);font-size:11px">↑ +' + pct + '% 加码</span>';
+  else if (ads.trend === 'decreasing') trendBadge = '<span style="color:var(--accent2);font-family:var(--mono);font-size:11px">↓ ' + pct + '% 收缩</span>';
+  else                                  trendBadge = '<span style="color:var(--muted);font-family:var(--mono);font-size:11px">↔ 稳态</span>';
+
+  var topThemes = (ads.top_themes || []).slice(0, 5).map(function(t) {
+    return '<span style="display:inline-block;padding:3px 9px;border-radius:5px;background:rgba(123,110,246,0.12);border:1px solid rgba(123,110,246,0.3);color:var(--text);font-size:11px;margin:2px 4px 2px 0;font-family:var(--mono)">' + escapeHtml(t.theme) + ' (' + t.count + ')</span>';
+  }).join('');
+
+  var topCreatives = (ads.top_creatives || []).slice(0, 3).map(function(c) {
+    var img = c.media_url ? '<img src="' + escapeHtml(c.media_url) + '" loading="lazy" style="width:100%;height:90px;object-fit:cover;border-radius:5px;margin-bottom:6px;background:var(--surface2)">' : '';
+    return '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;background:var(--surface2)">' + img +
+      '<div style="font-size:11px;color:var(--text);line-height:1.4;margin-bottom:4px">' + escapeHtml((c.body_text || '').slice(0, 120)) + '</div>' +
+      '<div style="font-size:9px;font-family:var(--mono);color:var(--muted)">' + escapeHtml(c.country || '?') + ' · 已投 ' + (c.days_running || 0) + ' 天</div>' +
+    '</div>';
+  }).join('');
+
+  var aiBadge = '';
+  if (ads.ai_analysis && ads.ai_analysis.alert_level) {
+    var lvl = ads.ai_analysis.alert_level;
+    var aiColors = { low: 'var(--accent2)', medium: 'var(--warn)', high: 'var(--danger)' };
+    aiBadge = '<span style="margin-left:8px;padding:2px 8px;border-radius:4px;background:' + (aiColors[lvl] || 'var(--muted)') + ';color:#fff;font-size:10px">AI ' + lvl + '</span>';
+  }
+
+  section.innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px">' +
+      '<div style="border-left:3px solid var(--accent);padding:6px 10px"><div style="font-size:10px;font-family:var(--mono);color:var(--muted)">在投广告</div><div style="font-size:20px;font-weight:600">' + ads.active_count + aiBadge + '</div></div>' +
+      '<div style="border-left:3px solid var(--accent2);padding:6px 10px"><div style="font-size:10px;font-family:var(--mono);color:var(--muted)">近 3 天新增</div><div style="font-size:20px;font-weight:600">+' + (ads.new_ads || 0) + '</div><div>' + trendBadge + '</div></div>' +
+      '<div style="border-left:3px solid var(--warn);padding:6px 10px"><div style="font-size:10px;font-family:var(--mono);color:var(--muted)">投放国家</div><div style="font-size:20px;font-weight:600">' + Object.keys(ads.by_country || {}).length + '</div></div>' +
+    '</div>' +
+    (topThemes ? '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">主推卖点</div><div style="margin-bottom:14px">' + topThemes + '</div>' : '') +
+    (topCreatives ? '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">代表性素材（已投天数最长 Top 3）</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">' + topCreatives + '</div>' : '');
+}
+
+function renderDetailCommunitySection(name) {
+  var card = document.getElementById('detail-community-card');
+  var section = document.getElementById('detail-community-section');
+  var c = (COMMUNITY_DATA || {})[name];
+  var raw = (c && c.raw) || {};
+  if (!raw.mention_count) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+
+  var aiBadge = '';
+  if (c.ai_analysis && c.ai_analysis.alert_level) {
+    var lvl = c.ai_analysis.alert_level;
+    var colors = { low: 'var(--accent2)', medium: 'var(--warn)', high: 'var(--danger)' };
+    aiBadge = '<span style="margin-left:8px;padding:2px 8px;border-radius:4px;background:' + (colors[lvl] || 'var(--muted)') + ';color:#fff;font-size:10px">AI ' + lvl + '</span>';
+  }
+
+  var topPosts = (raw.hot_posts || []).slice(0, 3).map(function(p) {
+    var date = (p.created_at || '').slice(0, 10);
+    var titleHtml = p.url
+      ? '<a href="' + escapeHtml(p.url) + '" target="_blank" style="color:var(--text);text-decoration:none">' + escapeHtml(p.title || '') + '</a>'
+      : escapeHtml(p.title || '');
+    return '<div style="border-left:2px solid var(--accent);padding:6px 12px;margin-bottom:6px">' +
+      '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">r/' + escapeHtml(p.subreddit || '?') + ' · ' + (p.score || 0) + '↑ · ' + (p.num_comments || 0) + '💬 · ' + date + '</div>' +
+      '<div style="font-size:12px;line-height:1.5">' + titleHtml + '</div>' +
+    '</div>';
+  }).join('');
+
+  section.innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px">' +
+      '<div style="border-left:3px solid var(--accent);padding:6px 10px"><div style="font-size:10px;font-family:var(--mono);color:var(--muted)">提及数</div><div style="font-size:20px;font-weight:600">' + raw.mention_count + aiBadge + '</div></div>' +
+      '<div style="border-left:3px solid var(--accent2);padding:6px 10px"><div style="font-size:10px;font-family:var(--mono);color:var(--muted)">总互动</div><div style="font-size:20px;font-weight:600">' + (raw.total_engagement || 0) + '</div></div>' +
+      '<div style="border-left:3px solid var(--warn);padding:6px 10px"><div style="font-size:10px;font-family:var(--mono);color:var(--muted)">subreddit 数</div><div style="font-size:20px;font-weight:600">' + Object.keys(raw.subreddit_distribution || {}).length + '</div></div>' +
+    '</div>' +
+    (topPosts ? '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">热门讨论（按 score）</div>' + topPosts : '');
+}
+
+function renderDetailDataSources(name) {
+  var links = buildSourceLinks(name);
+  var rows = [
+    { url: links.appstore,           label: 'App Store · 应用页',         desc: '排名 / 评分 / 当前版本' },
+    { url: links.appstore_reviews,   label: 'App Store · 全部用户评论',   desc: '直接看真实用户反馈' },
+    { url: links.googleplay,         label: 'Google Play · 应用页',       desc: '安装量 / 评分（Android）' },
+    { url: links.googleplay_reviews, label: 'Google Play · 用户评论',     desc: 'Android 用户反馈' },
+    { url: links.reddit,             label: 'Reddit · 社区舆情搜索',      desc: '查看 Reddit 上对该竞品的讨论' },
+    { url: links.meta_adlib,         label: 'Meta Ad Library · 广告投放', desc: '验证广告素材原始数据' },
+    { url: links.sensortower,        label: 'Sensor Tower（订阅）',       desc: '多源数据 · 下载 / 收入估算' },
+  ];
+  var html = rows.filter(function(r) { return r.url; }).map(function(r) {
+    return '<a href="' + r.url + '" target="_blank" rel="noopener" ' +
+      'style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-radius:6px;text-decoration:none;color:var(--text);background:var(--surface2);margin-bottom:6px;font-size:12px;border:1px solid var(--border);transition:.15s" ' +
+      'onmouseover="this.style.borderColor=\'var(--accent)\';this.style.background=\'rgba(123,110,246,0.06)\'" ' +
+      'onmouseout="this.style.borderColor=\'var(--border)\';this.style.background=\'var(--surface2)\'">' +
+      '<div><div style="font-weight:500">' + escapeHtml(r.label) + '</div>' +
+        '<div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px">' + escapeHtml(r.desc) + '</div>' +
+      '</div>' +
+      '<span style="color:var(--muted);font-family:var(--mono);font-size:14px">↗</span>' +
+    '</a>';
+  }).join('');
+  document.getElementById('detail-data-sources').innerHTML = html || '<div style="color:var(--muted);font-size:13px">无可用数据源链接（缺少 ios_id / gp）</div>';
 }
 
 // ====== 后端 API 基础 URL ======
@@ -2031,6 +2313,238 @@ function markdownToHtml(md) {
   // 清理多余的嵌套
   html = html.replace(/<p[^>]*><\/p>/g, '');
   return html;
+}
+
+// ============================================================
+// 排名变化（ranking）：可点击行 + 筛选 + 周变化 banner + All Football 卡组
+// 数据来源：window.RANK_DATA = {leaderboard, baseline, registry, competitors}
+// ============================================================
+
+var _rankFilter = 'top100';   // top100 | up | down | fast
+var _rankLimit = 100;
+
+function renderRankPage() {
+  renderRankFilters();
+  renderFastMoversBanner();
+  renderRankRows();
+  renderBaselineCards();
+}
+
+function renderRankFilters() {
+  var filters = [
+    { key: 'top100', label: 'Top 100',         desc: '当前排名（默认）' },
+    { key: 'up',     label: '↑ 增幅',           desc: '按日变化升序（最大涨幅在前）' },
+    { key: 'down',   label: '↓ 减幅',           desc: '按日变化降序（最大跌幅在前）' },
+    { key: 'fast',   label: '⚡ 周变化 > 20',    desc: '本周排名波动剧烈' },
+  ];
+  document.getElementById('rank-filter-bar').innerHTML = filters.map(function(f) {
+    var active = _rankFilter === f.key;
+    var border = active ? 'var(--accent)' : 'var(--border)';
+    var bg = active ? 'rgba(123,110,246,0.15)' : 'var(--surface2)';
+    return '<button onclick="setRankFilter(\'' + f.key + '\')" title="' + f.desc + '" ' +
+           'style="padding:5px 12px;border-radius:6px;border:1px solid ' + border +
+           ';background:' + bg + ';color:var(--text);font-size:11px;cursor:pointer;font-family:var(--mono)">' + f.label + '</button>';
+  }).join('');
+}
+
+function setRankFilter(key) {
+  _rankFilter = key;
+  renderRankRows();
+  renderRankFilters();
+}
+
+function renderFastMoversBanner() {
+  var fast = [];
+  Object.keys((RANK_DATA || {}).competitors || {}).forEach(function(name) {
+    var dw = RANK_DATA.competitors[name].delta_wow;
+    if (dw != null && Math.abs(dw) > 20) fast.push({ name: name, delta: dw });
+  });
+  var el = document.getElementById('rank-fast-movers');
+  if (!fast.length) { el.innerHTML = ''; return; }
+  fast.sort(function(a, b) { return Math.abs(b.delta) - Math.abs(a.delta); });
+  var chips = fast.map(function(f) {
+    var rising = f.delta > 0;
+    var color = rising ? 'var(--danger)' : 'var(--accent2)';
+    var arrow = rising ? '↑' : '↓';
+    var sign = rising ? '+' : '';
+    return '<span onclick="showCompetitorDetail(\'' + f.name + '\')" ' +
+      'style="display:inline-block;padding:5px 12px;border-radius:6px;border:1px solid ' + color +
+      ';background:rgba(255,92,92,0.06);color:var(--text);font-size:12px;font-family:var(--mono);cursor:pointer;margin:4px 6px 4px 0">' +
+      arrow + ' <strong>' + escapeHtml(f.name) + '</strong> ' + sign + f.delta + ' 位</span>';
+  }).join('');
+  el.innerHTML =
+    '<div style="background:rgba(255,92,92,0.06);border:1px solid rgba(255,92,92,0.2);border-radius:8px;padding:12px 16px;margin-bottom:16px">' +
+      '<div style="font-size:11px;font-family:var(--mono);color:var(--danger);margin-bottom:8px">⚡ 本周排名波动剧烈（>20 位）— 建议立即查看</div>' +
+      '<div>' + chips + '</div>' +
+    '</div>';
+}
+
+function getSortedCompetitors(filterKey) {
+  var R = RANK_DATA || {};
+  var compsObj = R.competitors || {};
+
+  if (filterKey === 'up' || filterKey === 'down') {
+    var entries = Object.keys(compsObj)
+      .filter(function(n) { return compsObj[n].delta_dod != null; })
+      .map(function(n) { return Object.assign({ name: n }, compsObj[n]); });
+    entries.sort(function(a, b) {
+      return filterKey === 'up' ? (b.delta_dod - a.delta_dod) : (a.delta_dod - b.delta_dod);
+    });
+    return entries;
+  }
+
+  if (filterKey === 'fast') {
+    return Object.keys(compsObj)
+      .filter(function(n) { return compsObj[n].delta_wow != null && Math.abs(compsObj[n].delta_wow) > 20; })
+      .map(function(n) { return Object.assign({ name: n }, compsObj[n]); })
+      .sort(function(a, b) { return Math.abs(b.delta_wow) - Math.abs(a.delta_wow); });
+  }
+
+  // top100：以 leaderboard 为序，缺字段用 competitors[name] 补
+  var lb = (R.leaderboard || []).slice(0, _rankLimit);
+  return lb.map(function(item) {
+    var snap = compsObj[item.name] || {};
+    return {
+      name: item.name,
+      current: item.rank,
+      delta_dod: snap.delta_dod != null ? snap.delta_dod : item.delta,
+      delta_wow: snap.delta_wow,
+      is_known: !!item.is_known,
+      app_id: item.app_id || snap.app_id,
+      artist: item.artist,
+    };
+  });
+}
+
+function renderRankRows() {
+  var rows = getSortedCompetitors(_rankFilter);
+  var rowsEl = document.getElementById('rank-table-rows');
+  if (!rows.length) {
+    rowsEl.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">当前筛选下无数据。请运行排名抓取后再试。</div>';
+    return;
+  }
+  rowsEl.innerHTML = rows.map(function(row) {
+    var clickable = !!(row.name && (RANK_DATA.competitors || {})[row.name]);
+    var dod = formatRankDelta(row.delta_dod);
+    var wow = formatRankDelta(row.delta_wow);
+    var trend = renderRankTrendInline(row.name);
+    var badge = '';
+    if (row.is_known === false) {
+      badge = '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(245,166,35,0.15);color:var(--warn);margin-left:4px;font-family:var(--mono)">未注册</span>';
+    }
+    var nameStyle = clickable ? 'color:var(--text)' : 'color:var(--muted)';
+    var rowAttrs = clickable
+      ? 'onclick="showCompetitorDetail(\'' + row.name + '\')" style="cursor:pointer"'
+      : 'style="cursor:default"';
+    return '<div class="rank-row" ' + rowAttrs + '>' +
+      '<span style="font-family:var(--mono);color:var(--muted)">#' + (row.current != null ? row.current : '?') + '</span>' +
+      '<span style="' + nameStyle + '">' + escapeHtml(row.name || '?') + badge + '</span>' +
+      '<span style="font-family:var(--mono)">' + (row.current != null ? row.current : '—') + '</span>' +
+      '<span>' + dod + '</span>' +
+      '<span>' + wow + '</span>' +
+      '<span style="color:var(--muted);font-family:var(--mono)">—</span>' +
+      '<span style="color:var(--muted);font-family:var(--mono)">—</span>' +
+      '<span>' + trend + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+function formatRankDelta(d) {
+  if (d == null) return '<span style="color:var(--muted);font-family:var(--mono)">—</span>';
+  if (d === 0)   return '<span style="color:var(--muted);font-family:var(--mono)">→ 0</span>';
+  // 竞品排名上升（数字变小）= 正 delta = 对我方威胁，标红
+  var color = d > 0 ? 'var(--danger)' : 'var(--accent2)';
+  var arrow = d > 0 ? '↑' : '↓';
+  var sign = d > 0 ? '+' : '';
+  return '<span style="color:' + color + ';font-family:var(--mono)">' + arrow + ' ' + sign + d + '</span>';
+}
+
+function renderRankTrendInline(name) {
+  var hist = ((RANK_DATA.competitors || {})[name] || {}).history || {};
+  var dates = Object.keys(hist).sort();
+  if (dates.length < 2) return '<span style="color:var(--muted);font-family:var(--mono);font-size:10px">—</span>';
+  var sample = dates.slice(-14);   // 最近 14 天
+  var values = sample.map(function(d) { return hist[d]; });
+  var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+  var W = 60, H = 16;
+  var stepX = sample.length > 1 ? W / (sample.length - 1) : 0;
+  var range = (max - min) || 1;
+  // rank 越小越好（曲线越往上视觉），所以把 rank 倒过来：scaleY 让小排名 = 高位置
+  var path = values.map(function(v, i) {
+    var y = H - 2 - ((max - v) / range) * (H - 4);
+    return (i === 0 ? 'M' : 'L') + (i * stepX).toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:60px;height:16px;vertical-align:middle">' +
+    '<path d="' + path + '" stroke="var(--accent)" stroke-width="1.5" fill="none"/></svg>';
+}
+
+// ---- All Football 相对表现卡组 ----
+function renderBaselineCards() {
+  var baseline = (RANK_DATA || {}).baseline || {};
+  var cmpData = baseline.comparison || {};
+  var label = baseline.label || 'All Football';
+  document.getElementById('rank-baseline-title').textContent = 'vs ' + label + ' · 相对表现';
+
+  var card = document.getElementById('rank-baseline-card');
+  var names = Object.keys(cmpData);
+  if (!names.length) {
+    document.getElementById('rank-baseline-cards').innerHTML =
+      '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">暂无 baseline 对比数据</div>';
+    return;
+  }
+
+  var metrics = ['rank', 'downloads', 'rating_growth', 'review_count', 'sentiment_score'];
+  var rows = names.map(function(comp) {
+    var info = cmpData[comp] || {};
+    var cells = metrics.map(function(m) {
+      var v = (info.metrics || {})[m];
+      var ratio = ((info.comparison || {}).ratio || {})[m];
+      return renderBaselineCell(m, v, ratio);
+    }).join('');
+    var color = (RANK_DATA.competitors[comp] || {}).color || 'var(--accent)';
+    return '<div onclick="showCompetitorDetail(\'' + comp + '\')" ' +
+      'style="display:grid;grid-template-columns:160px repeat(5,1fr);gap:10px;align-items:stretch;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);cursor:pointer;margin-bottom:8px;transition:.15s" ' +
+      'onmouseover="this.style.borderColor=\'' + color + '\'" onmouseout="this.style.borderColor=\'var(--border)\'">' +
+      '<div style="display:flex;flex-direction:column;justify-content:center">' +
+        '<div style="font-weight:600;font-size:14px;color:var(--text)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:8px;vertical-align:middle"></span>' + escapeHtml(comp) + '</div>' +
+      '</div>' +
+      cells +
+    '</div>';
+  }).join('');
+
+  document.getElementById('rank-baseline-cards').innerHTML = '<div style="padding:8px 16px 16px">' + rows + '</div>';
+}
+
+function renderBaselineCell(metric, value, ratio) {
+  var labels = {
+    rank: '排名', downloads: '下载量', rating_growth: '评分增长',
+    review_count: '热度', sentiment_score: '情感分'
+  };
+  // rank 越低越好，其他越高越好
+  var inverted = metric === 'rank';
+  var color, arrow, statusText;
+
+  if (ratio == null || isNaN(ratio)) {
+    color = 'var(--muted)'; arrow = '—'; statusText = '无数据';
+  } else if (Math.abs(ratio - 1) < 0.1) {
+    color = 'var(--muted)'; arrow = '→'; statusText = '持平';
+  } else {
+    var leading = inverted ? ratio < 1 : ratio > 1;
+    color = leading ? 'var(--accent2)' : 'var(--danger)';
+    arrow = leading ? '↑' : '↓';
+    statusText = leading ? '领先' : '落后';
+  }
+
+  var ratioPct = (ratio == null || isNaN(ratio))
+    ? '—'
+    : (ratio >= 1 ? '+' + Math.round((ratio - 1) * 100) : Math.round((ratio - 1) * 100)) + '%';
+  var displayValue = (value == null || value === '') ? '—' : value;
+
+  return '<div style="border-left:3px solid ' + color + ';padding:4px 10px">' +
+    '<div style="font-size:9px;font-family:var(--mono);color:var(--muted);margin-bottom:2px">' + labels[metric] + '</div>' +
+    '<div style="font-size:14px;font-weight:600;color:' + color + ';line-height:1.2">' + arrow + ' ' + displayValue + '</div>' +
+    '<div style="font-size:9px;color:var(--muted);font-family:var(--mono)">' + statusText + ' · ' + ratioPct + '</div>' +
+  '</div>';
 }
 
 // ============================================================

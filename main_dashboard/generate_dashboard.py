@@ -208,6 +208,38 @@ def _adapt_community(D):
     return out
 
 
+def _adapt_rank_view(D):
+    """给前端 page-ranking 用的扁平结构，避免 JS 到处找字段。
+
+    包含：
+    - leaderboard：透传 market_rank.leaderboard
+    - baseline：透传 baseline.{app, label, comparison}
+    - registry：透传 competitors.json，给"数据来源链接"工具用
+    - competitors：每竞品的 rank 视图（current/delta_dod/delta_wow/history/app_id 等）
+    """
+    out = {
+        "leaderboard": list(D.get("leaderboard") or []),
+        "baseline": dict(D.get("baseline") or {}),
+        "registry": dict(D.get("competitor_registry") or {}),
+        "competitors": {},
+    }
+    for name, snap in (D.get("competitors") or {}).items():
+        r = snap.get("rank") or {}
+        out["competitors"][name] = {
+            "current": r.get("current"),
+            "delta_dod": r.get("delta_dod"),
+            "delta_wow": r.get("delta_wow"),
+            "history": dict(r.get("history") or {}),
+            "fast_mover": bool(r.get("fast_mover")),
+            "is_new_contender": bool(r.get("is_new_contender")),
+            "app_id": r.get("app_id") or snap.get("ios_id"),
+            "ios_id": snap.get("ios_id"),
+            "android_id": snap.get("android_id"),
+            "color": snap.get("color"),
+        }
+    return out
+
+
 def _adapt_competitor_details(D):
     out = {}
     for name, snap in D["competitors"].items():
@@ -258,6 +290,7 @@ weekly_review_data = _dashboard_data.get("weekly", {}).get("comment") or {}
 commercial_data = _adapt_commercial(_dashboard_data)
 commercial_weekly_data = _dashboard_data.get("weekly", {}).get("commercial") or {}
 community_data = _adapt_community(_dashboard_data)
+rank_data = _adapt_rank_view(_dashboard_data)
 
 # ---------------------------------------------------------------------------
 # 辅助函数
@@ -1431,6 +1464,12 @@ def build_community_data_json():
     return json.dumps(community_data, ensure_ascii=False)
 
 
+def build_rank_data_json():
+    if not rank_data:
+        return "{}"
+    return json.dumps(rank_data, ensure_ascii=False)
+
+
 # ===========================================================================
 # 生成 HTML
 # ===========================================================================
@@ -1450,6 +1489,7 @@ def generate():
         "<!-- COMMERCIAL_DATA_PLACEHOLDER -->": build_commercial_json(),
         "<!-- COMMERCIAL_WEEKLY_DATA_PLACEHOLDER -->": build_commercial_weekly_json(),
         "<!-- COMMUNITY_DATA_PLACEHOLDER -->": build_community_data_json(),
+        "<!-- RANK_DATA_PLACEHOLDER -->": build_rank_data_json(),
 
         "<!-- COMPETITOR_LIST_PLACEHOLDER -->": build_competitor_list(),
 
@@ -1515,6 +1555,7 @@ if __name__ == "__main__":
         commercial_data = _adapt_commercial(_dashboard_data)
         commercial_weekly_data = _dashboard_data.get("weekly", {}).get("commercial") or {}
         community_data = _adapt_community(_dashboard_data)
+        rank_data = _adapt_rank_view(_dashboard_data)
         metrics = compute_metrics()
 
     output = generate()
