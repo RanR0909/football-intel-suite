@@ -156,15 +156,21 @@ def _adapt_ranking_history(D):
 
 
 def _adapt_commercial(D):
-    if not D["meta"]["data_freshness"].get("commercial"):
+    has_commercial = bool(D["meta"]["data_freshness"].get("commercial"))
+    has_ads = any(
+        (snap.get("commercial", {}).get("ads") or {}).get("active_count", 0) > 0
+        for snap in (D.get("competitors") or {}).values()
+    )
+    if not has_commercial and not has_ads:
         return {}
     competitors = {}
     for name, snap in D["competitors"].items():
         c = snap["commercial"]
-        # 至少一个商业相关字段非空时才写入，否则保持空——和原 commercial_strategy.json 行为一致
+        ads_active = (c.get("ads") or {}).get("active_count") or 0
+        # 至少一个商业相关字段非空（或有 Meta 广告投放）时才写入
         if any([c.get("monetization_tags"), c.get("iap_items"), c.get("price_alerts"),
                 c.get("iap_changes"), c.get("betting_signals"), c.get("ai_intent"),
-                c.get("rpd_index") is not None]):
+                c.get("rpd_index") is not None]) or ads_active > 0:
             competitors[name] = {
                 "monetization_tags": list(c.get("monetization_tags") or []),
                 "iap_items": list(c.get("iap_items") or []),
@@ -176,6 +182,7 @@ def _adapt_commercial(D):
                 "description_keywords": list(c.get("description_keywords") or []),
                 "seller_url": c.get("seller_url"),
                 "ai_intent": c.get("ai_intent"),
+                "ads": dict(c.get("ads") or {}),
             }
     return {
         "generated_at": D["meta"]["data_freshness"].get("commercial"),

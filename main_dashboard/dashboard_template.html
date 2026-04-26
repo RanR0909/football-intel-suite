@@ -697,6 +697,57 @@ body::before {
   <!-- 商业预警区域 -->
   <div id="cm-alerts-list" style="margin-bottom:16px"></div>
 
+  <!-- Meta Ad Library 广告投放策略（Phase 1：规模 + 节奏 + 趋势） -->
+  <div class="card full-card" id="cm-ads-card" style="margin-bottom:20px;display:none">
+    <div class="card-head">
+      <div class="card-title">📺 Meta 广告投放策略</div>
+      <div class="card-action" id="cm-ads-meta" style="color:var(--muted);font-size:11px"></div>
+    </div>
+    <div id="cm-ads-tabs" style="display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 12px"></div>
+    <div id="cm-ads-kpi" class="metrics-row" style="padding:0 20px"></div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;padding:16px 20px">
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">📈 投放数量趋势 · 按天</div>
+        <div id="cm-ads-trend"></div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">🌍 国家分布</div>
+        <div id="cm-ads-countries"></div>
+      </div>
+    </div>
+
+    <!-- Phase 2: themes / segments / patterns -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;padding:0 20px 12px">
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">🔥 主推卖点</div>
+        <div id="cm-ads-themes"></div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">👥 用户画像</div>
+        <div id="cm-ads-segments"></div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px">🎨 创意模式 · 多样度 <span id="cm-ads-diversity" style="color:var(--text)"></span></div>
+        <div id="cm-ads-patterns"></div>
+      </div>
+    </div>
+
+    <!-- Phase 2: top creatives -->
+    <div style="padding:0 20px 16px">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:8px">🖼️ 热门广告 · 按持续投放天数</div>
+      <div id="cm-ads-creatives" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"></div>
+    </div>
+
+    <!-- Phase 3: AI 战略解读 -->
+    <div style="border-top:1px solid var(--border);padding:16px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;color:var(--accent)">🤖 AI 投放策略解读</div>
+        <div id="cm-ads-ai-meta" style="color:var(--muted);font-size:11px"></div>
+      </div>
+      <div id="cm-ads-ai-body"></div>
+    </div>
+  </div>
+
   <!-- 竞品商业卡片列表 -->
   <div id="cm-competitor-list"></div>
 
@@ -1622,6 +1673,8 @@ function renderCommercialPage() {
   var comps = data.competitors || {};
   var names = Object.keys(comps);
 
+  renderAdsSection(comps);
+
   document.getElementById('cm-total').textContent = names.length || '—';
 
   var totalAlerts = 0, bettingCount = 0, maxRpd = 0;
@@ -1978,6 +2031,286 @@ function markdownToHtml(md) {
   // 清理多余的嵌套
   html = html.replace(/<p[^>]*><\/p>/g, '');
   return html;
+}
+
+// ============================================================
+// Meta 广告投放策略（Phase 1：规模 / 节奏 / 趋势 / 国家分布）
+// 数据来源：COMMERCIAL_DATA.competitors[<name>].ads（commercial.ads 透传）
+// ============================================================
+
+var _selectedAdsComp = null;
+
+function renderAdsSection(comps) {
+  // 仅展示有广告投放数据的竞品
+  var withAds = Object.keys(comps || {}).filter(function(n) {
+    return comps[n] && comps[n].ads && (comps[n].ads.active_count || 0) > 0;
+  }).sort();
+
+  var card = document.getElementById('cm-ads-card');
+  if (!withAds.length) {
+    if (card) card.style.display = 'none';
+    return;
+  }
+  if (card) card.style.display = 'block';
+
+  if (!_selectedAdsComp || withAds.indexOf(_selectedAdsComp) === -1) {
+    _selectedAdsComp = withAds[0];
+  }
+
+  // tabs
+  var tabsHtml = withAds.map(function(name) {
+    var active = name === _selectedAdsComp;
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[name]) || 'var(--accent)';
+    var bg = active ? 'rgba(123,110,246,0.15)' : 'var(--surface2)';
+    var border = active ? color : 'var(--border)';
+    return '<button onclick="selectAdsComp(\'' + name + '\')" style="padding:6px 14px;border-radius:6px;border:1px solid ' + border + ';background:' + bg + ';color:var(--text);font-size:12px;cursor:pointer;font-family:var(--mono)"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + color + ';margin-right:6px;vertical-align:middle"></span>' + name + '</button>';
+  }).join('');
+  document.getElementById('cm-ads-tabs').innerHTML = tabsHtml;
+
+  var ads = (comps[_selectedAdsComp] || {}).ads || {};
+  renderAdsKpi(ads);
+  document.getElementById('cm-ads-trend').innerHTML = renderAdsTrendSvg(ads.daily_trend || []);
+  document.getElementById('cm-ads-countries').innerHTML = renderAdsCountries(ads.by_country || {});
+
+  // Phase 2
+  document.getElementById('cm-ads-themes').innerHTML = renderAdsThemes(ads.top_themes || []);
+  document.getElementById('cm-ads-segments').innerHTML = renderAdsSegments(ads.user_segments || []);
+  document.getElementById('cm-ads-patterns').innerHTML = renderAdsPatterns(ads.creative_patterns || []);
+  document.getElementById('cm-ads-diversity').textContent = '· ' + (ads.creative_diversity || 0);
+  document.getElementById('cm-ads-creatives').innerHTML = renderAdsCreatives(ads.top_creatives || []);
+
+  // Phase 3
+  renderAdsAI(_selectedAdsComp, ads.ai_analysis || null);
+
+  var meta = document.getElementById('cm-ads-meta');
+  if (meta) {
+    var when = (ads.last_updated || '').replace('T', ' ').slice(0, 16) || '—';
+    meta.textContent = '数据更新于 ' + when;
+  }
+}
+
+function renderAdsThemes(themes) {
+  if (!themes.length) return '<div style="color:var(--muted);font-size:11px">无主题命中</div>';
+  return themes.map(function(t) {
+    var sample = (t.samples || [])[0] || '';
+    var titleAttr = sample ? ' title="' + escapeHtml(sample).replace(/"/g, '&quot;') + '"' : '';
+    return '<span' + titleAttr + ' style="display:inline-block;padding:4px 10px;border-radius:6px;background:rgba(123,110,246,0.12);border:1px solid rgba(123,110,246,0.3);color:var(--text);font-size:11px;margin:2px 4px 2px 0;font-family:var(--mono)">' + escapeHtml(t.theme) + ' <span style="color:var(--muted)">(' + t.count + ')</span></span>';
+  }).join('');
+}
+
+function renderAdsSegments(segments) {
+  if (!segments.length) return '<div style="color:var(--muted);font-size:11px">无人群命中</div>';
+  var sigColor = { high: 'var(--danger)', medium: 'var(--warn)', low: 'var(--muted)' };
+  return segments.map(function(s) {
+    var color = sigColor[s.signal_strength] || 'var(--muted)';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;font-size:11px"><span style="color:var(--text);font-family:var(--mono)">' + escapeHtml(s.segment) + '</span><span style="color:' + color + ';font-size:10px">' + s.signal_strength + ' · ' + s.count + '</span></div>';
+  }).join('');
+}
+
+function renderAdsPatterns(patterns) {
+  if (!patterns.length) return '<div style="color:var(--muted);font-size:11px">无创意模式命中</div>';
+  return patterns.map(function(p) {
+    return '<span style="display:inline-block;padding:4px 10px;border-radius:6px;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.3);color:var(--text);font-size:11px;margin:2px 4px 2px 0;font-family:var(--mono)">' + escapeHtml(p.pattern) + ' <span style="color:var(--muted)">(' + p.count + ')</span></span>';
+  }).join('');
+}
+
+function renderAdsCreatives(creatives) {
+  if (!creatives.length) return '<div style="color:var(--muted);font-size:11px;padding:12px">暂无广告素材</div>';
+  return creatives.map(function(c) {
+    var img = c.media_url ? '<img src="' + escapeHtml(c.media_url) + '" loading="lazy" style="width:100%;height:120px;object-fit:cover;border-radius:6px;margin-bottom:8px;background:var(--surface2)">' : '';
+    var themeChips = (c.themes || []).map(function(t) {
+      return '<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:rgba(123,110,246,0.15);color:var(--accent);font-family:var(--mono);margin-right:3px">#' + escapeHtml(t) + '</span>';
+    }).join('');
+    var bodyText = (c.body_text || '').slice(0, 200);
+    return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--surface2)">' +
+      img +
+      '<div style="font-size:12px;color:var(--text);line-height:1.5;margin-bottom:6px;min-height:36px">' + escapeHtml(bodyText) + '</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;font-family:var(--mono);color:var(--muted)">' +
+      '<span>' + escapeHtml(c.country || '?') + ' · 已投 ' + (c.days_running || 0) + ' 天</span>' +
+      '<div>' + themeChips + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ---- Phase 3: AI 战略解读 ----
+var _adsPolling = {};
+
+function renderAdsAI(competitor, ai) {
+  var meta = document.getElementById('cm-ads-ai-meta');
+  var body = document.getElementById('cm-ads-ai-body');
+  if (!ai) {
+    if (meta) meta.textContent = '尚未生成';
+    body.innerHTML =
+      '<div style="color:var(--muted);font-size:13px;line-height:1.7;margin-bottom:10px">点击下方按钮，让 AI 综合解读「' + escapeHtml(competitor) + '」当前的广告投放策略，输出核心策略 / 用户定位 / 卖点 / 机会 / 风险 + 预警等级。</div>' +
+      '<button class="btn btn-primary" id="ads-ai-btn-' + competitor + '" onclick="triggerAdsAI(\'' + competitor + '\')">启动 AI 分析</button>' +
+      '<div id="ads-ai-status-' + competitor + '" style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--mono)"></div>';
+    return;
+  }
+
+  var alertColors = { low: 'var(--accent2)', medium: 'var(--warn)', high: 'var(--danger)' };
+  var alertLabel = { low: '低风险', medium: '中风险', high: '高风险' };
+  var lvl = ai.alert_level || 'low';
+  var conf = ai.confidence || 'medium';
+  var alertColor = alertColors[lvl] || 'var(--muted)';
+  var generated = (ai.generated_at || '').replace('T', ' ').slice(0, 16);
+  if (meta) meta.textContent = '生成于 ' + generated + ' · 样本 ' + (ai.sample_size || 0) + ' · 置信度 ' + conf;
+
+  function chips(arr, color) {
+    if (!arr || !arr.length) return '<span style="color:var(--muted);font-size:11px">无</span>';
+    return arr.map(function(x) {
+      return '<span style="display:inline-block;padding:3px 9px;border-radius:6px;background:rgba(123,110,246,0.1);border:1px solid ' + color + ';color:var(--text);font-size:11px;margin:2px 4px 2px 0">' + escapeHtml(x) + '</span>';
+    }).join('');
+  }
+  function bullets(arr) {
+    if (!arr || !arr.length) return '<div style="color:var(--muted);font-size:11px">无</div>';
+    return '<ul style="margin:0;padding-left:18px">' + arr.map(function(x) {
+      return '<li style="font-size:12px;color:var(--text);margin:3px 0;line-height:1.6">' + escapeHtml(x) + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  body.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
+      '<span style="padding:3px 10px;border-radius:6px;background:' + alertColor + ';color:#fff;font-size:11px;font-weight:600">预警 · ' + (alertLabel[lvl] || lvl) + '</span>' +
+      '<button class="btn" style="font-size:11px;padding:4px 10px" id="ads-ai-btn-' + competitor + '" onclick="triggerAdsAI(\'' + competitor + '\')">重新分析</button>' +
+    '</div>' +
+    '<div style="font-size:13px;line-height:1.8;color:var(--text);background:rgba(123,110,246,0.06);border:1px solid rgba(123,110,246,0.18);border-radius:8px;padding:12px 14px;margin-bottom:14px;white-space:pre-wrap">' + escapeHtml(ai.core_strategy || '') + '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
+      '<div>' +
+        '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">🎯 目标用户</div>' + chips(ai.target_persona, 'rgba(123,110,246,0.4)') +
+        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">💎 主推卖点</div>' + chips(ai.value_props, 'rgba(78,204,163,0.4)') +
+        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">🌍 重点市场</div>' + chips(ai.geo_focus, 'rgba(245,166,35,0.4)') +
+      '</div>' +
+      '<div>' +
+        '<div style="font-size:11px;font-family:var(--mono);color:var(--accent2);margin-bottom:4px">💡 我方机会</div>' + bullets(ai.opportunities) +
+        '<div style="margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--danger);margin-bottom:4px">⚠️ 风险 · 含响应时效</div>' + bullets(ai.risks) +
+      '</div>' +
+    '</div>' +
+    '<div id="ads-ai-status-' + competitor + '" style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--mono)"></div>';
+}
+
+function triggerAdsAI(competitor) {
+  var btn = document.getElementById('ads-ai-btn-' + competitor);
+  var status = document.getElementById('ads-ai-status-' + competitor);
+  if (btn) { btn.disabled = true; btn.textContent = '分析中...'; }
+  if (status) status.textContent = '已提交任务，等待 AI 返回（通常 30-60 秒）...';
+
+  var apiKey = (document.getElementById('claude-api-key') || {}).value || '';
+
+  fetch('/api/ai/ads-strategy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ competitor: competitor, date_range: '7d', api_key: apiKey })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(j) {
+    if (j.status !== 'started') throw new Error(j.message || '启动失败');
+    return pollAdsAI(competitor, status);
+  })
+  .then(function() {
+    return fetch('/api/data/dashboard_data').then(function(r) { return r.json(); });
+  })
+  .then(function(d) {
+    // 从最新 dashboard_data 派生 COMMERCIAL_DATA.competitors[*].ads
+    var comps = (d && d.competitors) || {};
+    if (!COMMERCIAL_DATA.competitors) COMMERCIAL_DATA.competitors = {};
+    Object.keys(comps).forEach(function(name) {
+      var c = (comps[name] || {}).commercial || {};
+      var existing = COMMERCIAL_DATA.competitors[name] || {};
+      existing.ads = c.ads || {};
+      COMMERCIAL_DATA.competitors[name] = existing;
+    });
+    renderCommercialPage();
+  })
+  .catch(function(err) {
+    if (status) status.textContent = '失败：' + err.message + '（可点击按钮重试）';
+    if (btn) { btn.disabled = false; btn.textContent = '重试 AI 分析'; }
+  });
+}
+
+function pollAdsAI(competitor, statusEl) {
+  var key = 'ads_ai:' + competitor;
+  var maxAttempts = 90;
+  var attempt = 0;
+  if (_adsPolling[key]) return _adsPolling[key];
+
+  var promise = new Promise(function(resolve, reject) {
+    function tick() {
+      attempt++;
+      fetch('/api/status').then(function(r) { return r.json(); }).then(function(s) {
+        var t = (s.tasks || {})[key];
+        if (statusEl && t && t.running) {
+          statusEl.textContent = '分析中...（已等待 ' + (attempt * 2) + ' 秒）';
+        }
+        if (t && t.running === false) {
+          if (t.success) resolve(t.result);
+          else reject(new Error(t.error || '任务失败'));
+        } else if (attempt >= maxAttempts) {
+          reject(new Error('超时（' + (maxAttempts * 2) + '秒），后台可能仍在运行'));
+        } else {
+          setTimeout(tick, 2000);
+        }
+      }).catch(reject);
+    }
+    tick();
+  }).finally(function() { delete _adsPolling[key]; });
+
+  _adsPolling[key] = promise;
+  return promise;
+}
+
+function selectAdsComp(name) {
+  _selectedAdsComp = name;
+  renderCommercialPage();
+}
+
+function renderAdsKpi(ads) {
+  var trendBadge = '';
+  var pct = Math.round((ads.trend_pct || 0) * 100);
+  var trend = ads.trend || 'stable';
+  if (trend === 'increasing')      trendBadge = '<span style="color:var(--danger)">↑ +' + pct + '% 加码</span>';
+  else if (trend === 'decreasing') trendBadge = '<span style="color:var(--accent2)">↓ ' + pct + '% 收缩</span>';
+  else                              trendBadge = '<span style="color:var(--muted)">↔ 稳态</span>';
+
+  document.getElementById('cm-ads-kpi').innerHTML =
+    '<div class="metric-card purple"><div class="metric-label">在投广告数</div><div class="metric-value">' + (ads.active_count || 0) + '</div><div class="metric-change up">' + trendBadge + '</div><div class="metric-sub">当前活跃</div></div>' +
+    '<div class="metric-card teal"><div class="metric-label">近 3 天新增</div><div class="metric-value">+' + (ads.new_ads || 0) + '</div><div class="metric-sub">投放节奏</div></div>' +
+    '<div class="metric-card warn"><div class="metric-label">投放国家数</div><div class="metric-value">' + Object.keys(ads.by_country || {}).length + '</div><div class="metric-sub">市场广度</div></div>';
+}
+
+function renderAdsTrendSvg(trend) {
+  if (!trend || !trend.length) return '<div style="color:var(--muted);font-size:13px;padding:20px">暂无趋势数据</div>';
+  var W = 600, H = 140, padL = 36, padR = 12, padT = 12, padB = 26;
+  var maxV = 1;
+  trend.forEach(function(d) { maxV = Math.max(maxV, d.new || 0); });
+  var step = trend.length > 1 ? (W - padL - padR) / (trend.length - 1) : 0;
+  var scaleY = function(v) { return H - padB - ((H - padT - padB) * v / maxV); };
+
+  var path = trend.map(function(d, i) { return (i === 0 ? 'M' : 'L') + (padL + i * step) + ',' + scaleY(d.new || 0); }).join(' ');
+  var dots = trend.map(function(d, i) { return '<circle cx="' + (padL + i * step) + '" cy="' + scaleY(d.new || 0) + '" r="3" fill="var(--accent)"/>'; }).join('');
+  var labels = trend.map(function(d, i) {
+    if (i % Math.max(1, Math.floor(trend.length / 6)) !== 0 && i !== trend.length - 1) return '';
+    return '<text x="' + (padL + i * step) + '" y="' + (H - padB + 14) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="middle">' + (d.date || '').slice(5) + '</text>';
+  }).join('');
+
+  // y 轴 0/max
+  var yAxis = '<text x="' + padL + '" y="' + padT + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="end" dx="-4">' + maxV + '</text>' +
+              '<text x="' + padL + '" y="' + (H - padB) + '" font-size="9" font-family="DM Mono" fill="var(--muted)" text-anchor="end" dx="-4">0</text>';
+
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">' +
+    '<line x1="' + padL + '" y1="' + (H - padB) + '" x2="' + (W - padR) + '" y2="' + (H - padB) + '" stroke="var(--border)"/>' +
+    '<path d="' + path + '" stroke="var(--accent)" stroke-width="2" fill="none"/>' + dots + labels + yAxis +
+  '</svg>';
+}
+
+function renderAdsCountries(byCountry) {
+  var entries = Object.keys(byCountry).map(function(k) { return [k, byCountry[k]]; }).sort(function(a, b) { return b[1] - a[1]; });
+  if (!entries.length) return '<div style="color:var(--muted);font-size:13px">暂无国家分布</div>';
+  var maxCount = entries[0][1] || 1;
+  return entries.slice(0, 8).map(function(kv) {
+    var pct = Math.round(kv[1] / maxCount * 100);
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="min-width:36px;font-size:11px;font-family:var(--mono);color:var(--text)">' + escapeHtml(kv[0]) + '</span><div style="flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden"><div style="width:' + pct + '%;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))"></div></div><span style="min-width:28px;text-align:right;font-size:11px;font-family:var(--mono);color:var(--muted)">' + kv[1] + '</span></div>';
+  }).join('');
 }
 
 // ============================================================

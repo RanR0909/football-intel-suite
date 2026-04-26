@@ -87,6 +87,44 @@ class CommunityInfo:
 
 
 @dataclass
+class AdCreative:
+    """单条代表性广告（Phase 2）。供 UI 卡片网格直接展示。"""
+    ad_id: str = ""
+    body_text: str = ""                                     # 文案（截断 500 字）
+    media_url: Optional[str] = None
+    country: Optional[str] = None
+    days_running: int = 0                                   # 持续投放天数（已验证素材的代理）
+    start_date: Optional[str] = None
+    themes: list = field(default_factory=list)              # 命中的主题标签
+
+
+@dataclass
+class AdsInfo:
+    """Meta Ad Library 投放分析。
+
+    - Phase 1：active_count / new_ads / trend / by_country / daily_trend（仅统计）
+    - Phase 2：top_themes / user_segments / creative_patterns / top_creatives / creative_diversity（关键词字典）
+    - Phase 3：ai_analysis（独立持久化于 data/ads_ai_analysis.json）
+    """
+    # Phase 1
+    active_count: int = 0
+    new_ads: int = 0
+    trend: str = "stable"
+    trend_pct: float = 0.0
+    by_country: dict = field(default_factory=dict)
+    daily_trend: list = field(default_factory=list)
+    last_updated: Optional[str] = None
+    # Phase 2
+    top_themes: list = field(default_factory=list)          # [{theme, count, samples}]
+    user_segments: list = field(default_factory=list)       # [{segment, count, signal_strength}]
+    creative_patterns: list = field(default_factory=list)   # [{pattern, count}]
+    creative_diversity: float = 0.0                         # 唯一文案数 / 总文案数
+    top_creatives: list = field(default_factory=list)       # [AdCreative]
+    # Phase 3
+    ai_analysis: Optional[dict] = None
+
+
+@dataclass
 class CommercialInfo:
     monetization_tags: list = field(default_factory=list)
     iap_items: list = field(default_factory=list)
@@ -98,6 +136,7 @@ class CommercialInfo:
     description_keywords: list = field(default_factory=list)
     seller_url: Optional[str] = None
     ai_intent: Optional[str] = None
+    ads: AdsInfo = field(default_factory=AdsInfo)
 
 
 @dataclass

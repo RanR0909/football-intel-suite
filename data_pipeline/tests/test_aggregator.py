@@ -289,6 +289,68 @@ def _build_fixtures(data_dir: Path):
         },
     ])
 
+    # ---- data/async_fb_adlib.json：构造 SofaScore 多区域、新旧广告混合 ----
+    fb_now_iso = today.isoformat()
+    in_window_new = (today - timedelta(days=1)).strftime("%Y-%m-%d")    # 1 天前 → new_ads
+    in_window_recent = (today - timedelta(days=4)).strftime("%Y-%m-%d") # 4 天前 → recent_bucket
+    prior_window = (today - timedelta(days=10)).strftime("%Y-%m-%d")    # 10 天前 → prior_bucket
+    out_of_window = (today - timedelta(days=30)).strftime("%Y-%m-%d")   # 30 天前 → 仅计入 active_count，不计入 trend
+    _write(data_dir / "async_fb_adlib.json", [
+        # SofaScore × US：4 条广告，3 类时间窗
+        {
+            "timestamp": fb_now_iso, "source": "fb_adlib",
+            "competitor": "SofaScore", "region": "us",
+            "data": {
+                "ad_count": 4,
+                "ads": [
+                    {"ad_id": "a1", "text": "Live scores live now", "start_date": in_window_new, "country": "US"},
+                    {"ad_id": "a2", "text": "VIP unlock advanced stats", "start_date": in_window_recent, "country": "US"},
+                    {"ad_id": "a3", "text": "Real-time updates", "start_date": in_window_recent, "country": "US"},
+                    {"ad_id": "a4_old", "text": "old ad", "start_date": out_of_window, "country": "US"},
+                ],
+            },
+        },
+        # SofaScore × GB：1 条
+        {
+            "timestamp": fb_now_iso, "source": "fb_adlib",
+            "competitor": "SofaScore", "region": "gb",
+            "data": {
+                "ad_count": 2,
+                "ads": [
+                    {"ad_id": "a5", "text": "EPL live coverage", "start_date": prior_window, "country": "GB"},
+                    {"ad_id": "a1", "text": "duplicate id should dedup", "start_date": in_window_new, "country": "GB"},
+                ],
+            },
+        },
+        # FlashScore × BR：仅 1 条（trend prior=0, recent=1 → increasing）
+        {
+            "timestamp": fb_now_iso, "source": "fb_adlib",
+            "competitor": "FlashScore", "region": "br",
+            "data": {
+                "ad_count": 1,
+                "ads": [
+                    {"ad_id": "f1", "text": "Apostas e palpites", "start_date": in_window_new, "country": "BR"},
+                ],
+            },
+        },
+    ])
+
+    # ---- data/ads_ai_analysis.json：仅 SofaScore 已生成 AI（Phase 3） ----
+    _write(data_dir / "ads_ai_analysis.json", {
+        "SofaScore": {
+            "core_strategy": "SofaScore 当前正在通过 VIP 订阅 + 实时比分双卖点扩张 US 市场。",
+            "target_persona": ["欧美硬核球迷", "数据驱动用户"],
+            "value_props": ["实时比分", "VIP 数据深度", "无广告体验"],
+            "geo_focus": ["US", "GB"],
+            "opportunities": ["对标 VIP 转化漏斗", "补足赛事数据深度"],
+            "risks": ["竞品 VIP 转化能力或将在 30 天内达到拐点，建议同步推 VIP 试用素材"],
+            "alert_level": "medium",
+            "confidence": "high",
+            "generated_at": today.isoformat(),
+            "sample_size": 5,
+        },
+    })
+
     # ---- data/community_ai_analysis.json：仅 SofaScore 已生成 AI ----
     _write(data_dir / "community_ai_analysis.json", {
         "SofaScore": {
@@ -444,7 +506,75 @@ def run_tests():
         _check("ai.competitor_mentions 透传", "FlashScore" in ai_sofa["competitor_mentions"])
         _check("FlashScore 没 AI 分析（独立合入逻辑）", ai_flash is None)
 
-        print("\n=== 12. 数据新鲜度 / 配置透传 ===")
+        print("\n=== 12. Commercial Ads（Phase 1：投放规模/趋势） ===")
+        ads_sofa = sofa["commercial"]["ads"]
+        ads_flash = flash["commercial"]["ads"]
+        ads_one = one["commercial"]["ads"]
+        # SofaScore: 5 条广告（a1 跨 US+GB 去重 → a1, a2, a3, a4_old, a5 = 5），但 fixture 提供的实际去重应该是 5
+        _check("SofaScore active_count = 5（跨 region 按 ad_id 去重）", ads_sofa["active_count"] == 5,
+               f"got {ads_sofa['active_count']}")
+        _check("SofaScore new_ads = 1（仅 a1 在 3 天内）", ads_sofa["new_ads"] == 1)
+        _check("SofaScore by_country US:4 GB:1（a1 跨 region 已按首次出现归 US）",
+               ads_sofa["by_country"].get("US") == 4 and ads_sofa["by_country"].get("GB") == 1,
+               f"got {ads_sofa['by_country']}")
+        _check("SofaScore daily_trend 含 4 个日期", len(ads_sofa["daily_trend"]) == 4)
+        _check("SofaScore trend 指向 increasing（recent 3 vs prior 1）",
+               ads_sofa["trend"] == "increasing", f"got {ads_sofa['trend']}")
+        _check("SofaScore last_updated 透传",
+               ads_sofa.get("last_updated") is not None)
+        _check("FlashScore active_count = 1", ads_flash["active_count"] == 1)
+        _check("FlashScore trend = increasing（prior=0, recent>=1）", ads_flash["trend"] == "increasing")
+        _check("FlashScore by_country BR:1", ads_flash["by_country"].get("BR") == 1)
+        _check("OneFootball active_count = 0（无 fb_adlib 数据）", ads_one["active_count"] == 0)
+        _check("OneFootball ads 字段是默认值", ads_one["trend"] == "stable")
+
+        print("\n=== 13. Commercial Ads（Phase 2：themes/segments/patterns/creatives） ===")
+        # 文案命中（基于 ads_keywords.py）：
+        #   a1 "Live scores live now"           → 实时比分
+        #   a2 "VIP unlock advanced stats"      → VIP / 订阅 + 赛事数据（"stats"）+ 硬核球迷
+        #   a3 "Real-time updates"              → 实时比分
+        #   a4_old "old ad"                     → 无命中
+        #   a5 "EPL live coverage"              → 实时比分 + 本地球迷（"epl"）
+        themes = {t["theme"]: t["count"] for t in ads_sofa["top_themes"]}
+        segments = {s["segment"]: s for s in ads_sofa["user_segments"]}
+        _check("top_themes 含'实时比分' 命中 3 次", themes.get("实时比分") == 3, f"got {themes}")
+        _check("top_themes 含'VIP / 订阅' 命中 1 次", themes.get("VIP / 订阅") == 1)
+        _check("top_themes 按 count 倒序", ads_sofa["top_themes"][0]["theme"] == "实时比分")
+        _check("theme.samples 不为空", len(ads_sofa["top_themes"][0]["samples"]) > 0)
+
+        _check("user_segments 含'硬核球迷'", "硬核球迷" in segments)
+        _check("user_segments 含'本地球迷'", "本地球迷" in segments)
+        _check("signal_strength 默认 low（count=1）", segments["硬核球迷"]["signal_strength"] == "low")
+
+        # creative_diversity：5 条独立文案 / 5 条总文案 = 1.0
+        _check("creative_diversity = 1.0（5 条全唯一）", ads_sofa["creative_diversity"] == 1.0)
+
+        creatives = ads_sofa["top_creatives"]
+        _check("top_creatives 含 5 条（不含被去重的 a1 重复项）", len(creatives) == 5)
+        _check("top_creatives 按 days_running 倒序", creatives[0]["days_running"] >= creatives[-1]["days_running"])
+        _check("top_creatives 第一条是最老的 a4_old", creatives[0]["ad_id"] == "a4_old")
+        _check("top_creatives 含 themes 标签", isinstance(creatives[0].get("themes"), list))
+
+        # FlashScore（BR · "Apostas e palpites"）→ 博彩导流 + 博彩用户
+        flash_themes = {t["theme"] for t in ads_flash["top_themes"]}
+        flash_segments = {s["segment"] for s in ads_flash["user_segments"]}
+        _check("FlashScore 命中'博彩导流' theme", "博彩导流" in flash_themes, f"got {flash_themes}")
+        _check("FlashScore 命中'博彩用户' segment", "博彩用户" in flash_segments)
+
+        # OneFootball 无数据 → Phase 2 字段全部默认空
+        _check("OneFootball top_themes 为空", ads_one["top_themes"] == [])
+        _check("OneFootball creative_diversity = 0", ads_one["creative_diversity"] == 0.0)
+
+        print("\n=== 14. Commercial Ads（Phase 3：AI 分析合入） ===")
+        ai_analysis_sofa = ads_sofa.get("ai_analysis")
+        ai_analysis_flash = ads_flash.get("ai_analysis")
+        _check("SofaScore ai_analysis 透传", ai_analysis_sofa is not None)
+        _check("ai.core_strategy 透传", "VIP" in (ai_analysis_sofa.get("core_strategy") or ""))
+        _check("ai.alert_level = medium", ai_analysis_sofa.get("alert_level") == "medium")
+        _check("ai.target_persona 透传", "欧美硬核球迷" in (ai_analysis_sofa.get("target_persona") or []))
+        _check("FlashScore 没 ai_analysis（独立合入）", ai_analysis_flash is None)
+
+        print("\n=== 15. 数据新鲜度 / 配置透传 ===")
         _check("data_freshness.strategy 非空", payload["meta"]["data_freshness"]["strategy"] is not None)
         _check("regions 透传", "us" in payload["regions"])
         _check("competitor_registry 透传", "SofaScore" in payload["competitor_registry"])

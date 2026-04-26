@@ -25,6 +25,7 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data_pipeline.schema import (
+    AdsInfo,
     Alert,
     CommentInfo,
     CommercialInfo,
@@ -130,6 +131,21 @@ def _load_community_ai() -> dict:
     格式：{<competitor_name>: {overall_summary, sentiment, ...}}
     """
     return _load_json("community_ai_analysis.json") or {}
+
+
+def _load_fb_adlib_raw() -> list:
+    """读 BaseCrawler 默认产物 data/async_fb_adlib.json。
+
+    每条 record: {timestamp, source, competitor, region, data: {ad_count, ads: [...]}}
+    同一竞品按国家分多条 record。
+    """
+    data = _load_json("async_fb_adlib.json")
+    return data if isinstance(data, list) else []
+
+
+def _load_ads_ai() -> dict:
+    """Phase 3 预留：data/ads_ai_analysis.json。"""
+    return _load_json("ads_ai_analysis.json") or {}
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +405,37 @@ def _fill_community(
                 date_range_days=ai.get("date_range_days"),
                 sample_size=ai.get("sample_size"),
             )
+
+
+def _fill_ads(
+    snapshots: dict[str, CompetitorSnapshot],
+    fb_raw: list,
+    ads_ai: dict,
+):
+    """把 fb_adlib 数据按竞品聚合 → AdsInfo → 挂到 snap.commercial.ads。
+
+    在 _fill_commercial 之后调用，仅覆写 commercial.ads，不影响其他商业字段。
+    """
+    from commercial_strategy.ads_processor import process_competitor_ads
+
+    by_comp: dict[str, list] = {}
+    for rec in fb_raw:
+        comp = rec.get("competitor")
+        if comp:
+            by_comp.setdefault(comp, []).append(rec)
+
+    for name, snap in snapshots.items():
+        records = by_comp.get(name, [])
+        info_dict = process_competitor_ads(records) if records else {}
+        if not info_dict:
+            continue
+        # Phase 3 预留：合入独立持久化的 AI 分析
+        ai = ads_ai.get(name)
+        if ai:
+            info_dict["ai_analysis"] = ai     # Phase 1 schema 不含此字段，扩展时再加
+        snap.commercial.ads = AdsInfo(
+            **{k: v for k, v in info_dict.items() if k in AdsInfo.__dataclass_fields__}
+        )
 
 
 def _fill_commercial(snapshots: dict[str, CompetitorSnapshot], commercial: dict):
@@ -688,12 +735,15 @@ def build_dashboard_data() -> DashboardData:
 
     reddit_raw = _load_reddit_raw()
     community_ai = _load_community_ai()
+    fb_raw = _load_fb_adlib_raw()
+    ads_ai = _load_ads_ai()
 
     snapshots = _init_competitors(registry)
     _fill_rank(snapshots, market, history)
     _fill_version(snapshots, strategy)
     _fill_comments(snapshots, comments, weekly, details, regions_cfg)
     _fill_commercial(snapshots, commercial)
+    _fill_ads(snapshots, fb_raw, ads_ai)
     _fill_community(snapshots, reddit_raw, community_ai)
 
     alerts = _build_alerts(snapshots)
