@@ -1,8 +1,9 @@
-"""入口 — 支持单次运行和调度循环两种模式
+"""入口 — 支持单次运行 / 调度循环 / 单源过滤。
 
 用法:
-  python -m async_crawler          # 单次全量抓取
-  python -m async_crawler --loop   # 按 config.SCHEDULE 定时循环
+  python -m async_crawler                          # 单次全量抓取
+  python -m async_crawler --loop                   # 按 config.SCHEDULE 定时循环
+  python -m async_crawler --sources reddit,twitter  # 仅抓指定源（半角逗号）
 """
 import asyncio
 import logging
@@ -22,22 +23,46 @@ logging.basicConfig(
 log = logging.getLogger("crawler.main")
 
 
-async def run_once():
-    from async_crawler.base import create_ssl_context
-    from async_crawler.db import Database
+def _all_sources():
+    """已注册数据源 (key, label, module)；新增源在此加。"""
     from async_crawler.sources import (
         appstore_rank, reviews, sensor_tower,
-        androidrank, reddit, iap_pricing, fb_adlib,
+        androidrank, reddit, twitter, iap_pricing, fb_adlib,
     )
-    SOURCES = [
-        ("App Store 排名", appstore_rank),
-        ("用户评论",       reviews),
-        ("Sensor Tower",  sensor_tower),
-        ("Androidrank",   androidrank),
-        ("Reddit 舆情",   reddit),
-        ("IAP 定价",      iap_pricing),
-        ("Ad Library",    fb_adlib),
+    return [
+        ("appstore_rank", "App Store 排名", appstore_rank),
+        ("reviews",       "用户评论",       reviews),
+        ("sensor_tower",  "Sensor Tower",   sensor_tower),
+        ("androidrank",   "Androidrank",    androidrank),
+        ("reddit",        "Reddit 舆情",    reddit),
+        ("twitter",       "X (Twitter)",    twitter),
+        ("iap_pricing",   "IAP 定价",       iap_pricing),
+        ("fb_adlib",      "Meta Ad Library", fb_adlib),
     ]
+
+
+def _parse_sources_arg(argv: list[str]) -> set[str] | None:
+    """解析 `--sources a,b,c`，返回 keyset；缺省返回 None 表示跑全部。"""
+    for i, a in enumerate(argv):
+        if a == "--sources" and i + 1 < len(argv):
+            return {s.strip() for s in argv[i + 1].split(",") if s.strip()}
+        if a.startswith("--sources="):
+            return {s.strip() for s in a.split("=", 1)[1].split(",") if s.strip()}
+    return None
+
+
+async def run_once(only: set[str] | None = None):
+    from async_crawler.base import create_ssl_context
+    from async_crawler.db import Database
+
+    sources = _all_sources()
+    if only is not None:
+        sources = [s for s in sources if s[0] in only]
+        if not sources:
+            log.warning(
+                f"--sources={only} 没匹配到任何源；可用：{[s[0] for s in _all_sources()]}"
+            )
+            return
 
     db = Database()
     await db.connect()
@@ -46,16 +71,16 @@ async def run_once():
     connector = aiohttp.TCPConnector(ssl=create_ssl_context(), limit=20)
     async with aiohttp.ClientSession(connector=connector) as session:
         results = await asyncio.gather(
-            *[m.crawl(session, db) for _, m in SOURCES],
+            *[m.crawl(session, db) for _, _, m in sources],
             return_exceptions=True,
         )
 
     log.info("=" * 50)
-    for (label, _), result in zip(SOURCES, results):
+    for (key, label, _), result in zip(sources, results):
         if isinstance(result, Exception):
-            log.error(f"  {label}: 失败 — {result}")
+            log.error(f"  {label} ({key}): 失败 — {result}")
         else:
-            log.info(f"  {label}: {len(result)} 条")
+            log.info(f"  {label} ({key}): {len(result)} 条")
     log.info(f"总耗时: {time.monotonic() - t0:.1f}s")
     await db.close()
 
@@ -65,7 +90,8 @@ def main():
         from async_crawler.scheduler import Scheduler
         asyncio.run(Scheduler().loop())
     else:
-        asyncio.run(run_once())
+        only = _parse_sources_arg(sys.argv[1:])
+        asyncio.run(run_once(only=only))
 
 
 if __name__ == "__main__":

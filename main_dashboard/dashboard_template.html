@@ -678,6 +678,20 @@ body::before {
     </div>
   </div>
 
+  <!-- 3 日评论 AI 摘要（per-competitor，独立按钮） -->
+  <div class="card full-card" id="detail-review-3d-card">
+    <div class="card-head">
+      <div class="card-title">3 日评论 AI 摘要</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="detail-review-3d-meta" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+        <span class="card-action" id="detail-review-3d-btn" onclick="runReview3d()" style="cursor:pointer">生成 →</span>
+      </div>
+    </div>
+    <div id="detail-review-3d-body" style="padding:16px 20px;font-size:13px;line-height:1.7;color:var(--muted)">
+      暂无 3 日评论摘要。点击"生成"按钮调用 Claude（haiku，~30s）生成结构化摘要：情绪 / 痛点 / 代表原话 / 高频话题。
+    </div>
+  </div>
+
   <!-- 平台对比 -->
   <div class="card full-card">
     <div class="card-head">
@@ -1461,6 +1475,8 @@ function showCompetitorDetail(name) {
   _currentDetailCompetitor = name;
   renderCompetitorDetail(name);
   showPage('competitor-detail');
+  // 异步加载 3 日评论 AI 缓存（如已生成则展示，否则保持空态提示）
+  loadReview3d(name, function(){ renderReview3d(name); });
 }
 
 // 数据来源链接生成器（详情页 metric 卡 + 底部数据源区共用）
@@ -1900,47 +1916,112 @@ function renderDetailDataSources(name) {
 var API_BASE = window.location.origin;
 
 // ====== 同步所有数据 ======
-function syncAllData() {
+// ====== 同步数据 v2（7 个抓取脚本并行 + 进度反馈 + toast） ======
+var SYNC_SCRIPTS = [
+  { key: 'strategy_monitor',  label: '产品动态' },
+  { key: 'market_rank',       label: '排名 / 收入' },
+  { key: 'daily_report',      label: '用户评论（含分类）' },
+  { key: 'commercial_strategy', label: '商业 / IAP' },
+  { key: 'fb_adlib',          label: 'Meta 广告' },
+  { key: 'reddit_crawl',      label: 'Reddit 社媒' },
+  { key: 'twitter_crawl',     label: 'X (Twitter) 社媒' },
+];
+
+function _showSyncToast(text, kind) {
+  var t = document.getElementById('sync-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'sync-toast';
+    t.style.cssText = 'position:fixed;right:20px;bottom:20px;padding:12px 18px;border-radius:8px;font-size:13px;font-family:var(--mono);z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.3);transition:opacity 0.3s;max-width:420px';
+    document.body.appendChild(t);
+  }
+  var bg = kind === 'error' ? 'rgba(255,92,92,0.95)' : (kind === 'warn' ? 'rgba(245,166,35,0.95)' : 'rgba(78,204,163,0.95)');
+  t.style.background = bg;
+  t.style.color = '#fff';
+  t.style.opacity = '1';
+  t.textContent = text;
+  setTimeout(function(){ if (t) t.style.opacity = '0'; }, 5500);
+}
+
+function _setSyncBtn(text, disabled) {
   var btn = document.querySelector('#page-overview .header-actions .btn');
-  if (btn) { btn.textContent = '⏳ 同步中...'; btn.disabled = true; }
+  if (!btn) return;
+  btn.textContent = text;
+  btn.disabled = !!disabled;
+}
 
-  // 依次运行各个脚本
-  var scripts = ['strategy_monitor', 'market_rank', 'daily_report'];
-  var idx = 0;
+function syncAllData() {
+  _setSyncBtn('⏳ 同步中 (0/' + (SYNC_SCRIPTS.length + 1) + ')', true);
 
-  function runNext() {
-    if (idx >= scripts.length) {
-      // 所有脚本运行完毕，生成看板
-      runScript('generate_dashboard', function(result) {
-        if (!result || !result.success) {
-          if (btn) { btn.textContent = '同步数据'; btn.disabled = false; }
-          alert('看板生成失败：' + ((result && result.message) || '未知错误'));
-          return;
-        }
-        if (btn) { btn.textContent = '已同步'; btn.disabled = false; }
-        setTimeout(function() { location.reload(); }, 1000);
-      });
-      return;
-    }
-    runScript(scripts[idx], function(result) {
-      if (!result || !result.success) {
-        if (btn) { btn.textContent = '同步数据'; btn.disabled = false; }
-        alert('同步失败：' + ((result && result.label) || scripts[idx]) + '\n' + ((result && result.message) || '未知错误'));
-        return;
-      }
-      if (scripts[idx] === 'daily_report') {
-        refreshReviewData(function() {
-          idx++;
-          runNext();
-        });
-        return;
-      }
-      idx++;
-      runNext();
-    });
+  var done = 0;
+  var failures = [];
+  var total = SYNC_SCRIPTS.length;
+
+  function bump(label, ok, msg) {
+    done++;
+    if (!ok) failures.push(label + (msg ? ' (' + msg.slice(0,80) + ')' : ''));
+    _setSyncBtn('⏳ 同步中 (' + done + '/' + (total + 1) + ')：' + label, true);
   }
 
-  runNext();
+  // 7 个抓取脚本并行
+  var promises = SYNC_SCRIPTS.map(function(s){
+    return new Promise(function(resolve){
+      runScript(s.key, function(result){
+        var ok = !!(result && result.success);
+        bump(s.label, ok, result && (result.output || result.message));
+        resolve(ok);
+      });
+    });
+  });
+
+  Promise.all(promises).then(function(){
+    // 抓取全部完成后串行跑 generate_dashboard（聚合 + 重算预警）
+    _setSyncBtn('⏳ 聚合数据 + 重算预警...', true);
+    runScript('generate_dashboard', function(result){
+      if (!result || !result.success) {
+        _setSyncBtn('同步数据', false);
+        _showSyncToast('看板生成失败：' + ((result && result.output) || '未知错误'), 'error');
+        return;
+      }
+      _setSyncBtn('已同步', false);
+      var msg = '同步完成 · ' + (total - failures.length) + ' / ' + total + ' 抓取成功';
+      if (failures.length) {
+        _showSyncToast(msg + ' · 失败：' + failures.slice(0,3).join('、'), 'warn');
+      } else {
+        _showSyncToast(msg, 'success');
+      }
+      // 增量刷新：拉新 dashboard_data 并 re-render（替代 location.reload）
+      _reloadDashboardData(function(){
+        try { renderOverviewPage(); } catch(e) { console.error(e); }
+        try { if (typeof refreshReviewData === 'function') refreshReviewData(function(){}); } catch(e) {}
+      });
+    });
+  });
+}
+
+function _reloadDashboardData(done) {
+  fetch(API_BASE + '/api/data/dashboard_data')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d || !d.competitors) return done && done();
+      // 重建各全局数据
+      try {
+        var newCommunity = {};
+        Object.keys(d.competitors).forEach(function(name){
+          var c = d.competitors[name].community || {};
+          var raw = c.raw || {};
+          var has = (raw.mention_count||0) > 0 || !!c.ai_analysis;
+          newCommunity[name] = { raw: raw, ai_analysis: c.ai_analysis || null, has_data: has };
+        });
+        COMMUNITY_DATA = newCommunity;
+      } catch(e) {}
+      try { ALERTS_DATA = d.alerts || []; } catch(e) {}
+      // PRODUCT_UPDATES / REVIEWS_ANALYSIS / RANK_DATA 也透传
+      try { if (d.product_updates) PRODUCT_UPDATES = d.product_updates; } catch(e) {}
+      try { if (d.reviews_analysis) REVIEWS_ANALYSIS = d.reviews_analysis; } catch(e) {}
+      done && done();
+    })
+    .catch(function(){ done && done(); });
 }
 
 // ====== 运行后端脚本 ======
@@ -2196,6 +2277,104 @@ function runAllCompetitorDetails() {
   }
 
   runNext(0);
+}
+
+// ====== 3 日评论 AI 摘要（per-competitor） ======
+var _review3dCache = {};
+
+function renderReview3d(name) {
+  var body = document.getElementById('detail-review-3d-body');
+  var meta = document.getElementById('detail-review-3d-meta');
+  var btn  = document.getElementById('detail-review-3d-btn');
+  if (!body || !meta || !btn) return;
+  var data = _review3dCache[name];
+  if (!data || !data.generated_at) {
+    meta.textContent = '尚未生成';
+    btn.textContent = '生成 →';
+    btn.style.pointerEvents = '';
+    body.innerHTML = '暂无 3 日评论摘要。点击"生成"按钮调用 Claude（haiku，~30s）生成结构化摘要：情绪 / 痛点 / 代表原话 / 高频话题。';
+    return;
+  }
+  var ts = (data.generated_at || '').replace('T', ' ').slice(0, 16);
+  meta.textContent = '生成于 ' + ts + ' · 样本 ' + (data.sample_count || 0) + ' 条 · 窗口 ' + (data.window_days || 3) + ' 天';
+  btn.textContent = '重新生成';
+
+  var s = data.sentiment || {};
+  var pos = Math.round((s.positive||0)*100), neu = Math.round((s.neutral||0)*100), neg = Math.round((s.negative||0)*100);
+  var sentBar =
+    '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px 0">' +
+      '<div style="flex:' + pos + ';background:rgba(78,204,163,.75)"></div>' +
+      '<div style="flex:' + neu + ';background:rgba(150,150,150,.55)"></div>' +
+      '<div style="flex:' + neg + ';background:rgba(255,92,92,.75)"></div>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:10px;font-family:var(--mono);color:var(--muted)">' +
+      '<span>正 ' + pos + '%</span><span>中 ' + neu + '%</span><span>负 ' + neg + '%</span>' +
+    '</div>';
+
+  var pains = (data.top_pains || []).map(function(p, i){
+    var sev = p.severity || 0;
+    var sevDots = ''; for (var k = 0; k < sev; k++) sevDots += '★';
+    return '<div style="padding:6px 10px;margin:4px 0;border-left:3px solid var(--danger);background:rgba(255,92,92,0.06);border-radius:0 4px 4px 0">' +
+      '<div style="font-size:12px;color:var(--text)"><span style="color:var(--muted);font-family:var(--mono);font-size:10px;margin-right:6px">#' + (i+1) + '</span>' + escapeHtml(p.topic || '') +
+      ' <span style="color:var(--danger);font-size:10px;margin-left:6px">' + sevDots + '</span>' +
+      ' <span style="color:var(--muted);font-size:10px;margin-left:6px">' + (p.count || 0) + ' 次</span></div>' +
+      (p.sample_quote ? '<div style="font-size:11px;color:var(--muted);font-style:italic;margin-top:3px;line-height:1.5">"' + escapeHtml(p.sample_quote) + '"</div>' : '') +
+    '</div>';
+  }).join('') || '<div style="color:var(--muted);font-size:11px">无痛点抽取</div>';
+
+  var quotes = (data.top_quotes || []).map(function(q){
+    return '<div style="border-left:2px solid var(--accent);padding:6px 12px;margin:6px 0;font-size:12px;color:var(--muted);font-style:italic;line-height:1.6">"' + escapeHtml(q) + '"</div>';
+  }).join('') || '<div style="color:var(--muted);font-size:11px">无代表原话</div>';
+
+  var tags = (data.tagged_topics || []).map(function(t){
+    return '<span style="display:inline-block;padding:2px 9px;border-radius:4px;background:var(--surface2);color:var(--text);font-size:11px;font-family:var(--mono);margin:2px 4px 2px 0">' + escapeHtml(t) + '</span>';
+  }).join('') || '<span style="color:var(--muted);font-size:11px">无标签</span>';
+
+  body.innerHTML =
+    '<div style="font-size:13px;line-height:1.8;color:var(--text);background:rgba(123,110,246,0.06);border:1px solid rgba(123,110,246,0.18);border-radius:8px;padding:12px 14px;margin-bottom:14px;white-space:pre-wrap">' + escapeHtml(data.summary || '') + '</div>' +
+    '<div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">情绪分布</div>' + sentBar +
+    '<div style="margin-top:14px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">用户痛点</div>' + pains +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">代表原话</div>' + quotes +
+    '<div style="margin-top:12px;font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:4px">高频话题</div><div>' + tags + '</div>';
+}
+
+function loadReview3d(name, cb) {
+  fetch(API_BASE + '/api/data/review_3d?name=' + encodeURIComponent(name) + '&ts=' + Date.now(), { cache: 'no-store' })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d && d.competitor) _review3dCache[name] = d;
+      if (cb) cb();
+    })
+    .catch(function(){ if (cb) cb(); });
+}
+
+function runReview3d() {
+  var name = _currentDetailCompetitor;
+  if (!name) { alert('未选中竞品'); return; }
+  var btn = document.getElementById('detail-review-3d-btn');
+  if (btn) { btn.textContent = '⏳ 生成中（~30s）'; btn.style.pointerEvents = 'none'; }
+  var url = API_BASE + '/api/run?script=review_3d&competitor=' + encodeURIComponent(name) + '&days=3&api_key=' + encodeURIComponent(_apiKey());
+  fetch(url)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (data.status !== 'started') {
+        if (btn) { btn.textContent = '生成 →'; btn.style.pointerEvents = ''; }
+        alert('启动失败: ' + (data.message || '未知错误'));
+        return;
+      }
+      pollTaskStatus('review_3d', function(result){
+        if (!result || !result.success) {
+          if (btn) { btn.textContent = '生成 →'; btn.style.pointerEvents = ''; }
+          alert('3 日评论 AI 失败: ' + ((result && result.output) || '未知错误'));
+          return;
+        }
+        loadReview3d(name, function(){ renderReview3d(name); });
+      });
+    })
+    .catch(function(err){
+      if (btn) { btn.textContent = '生成 →'; btn.style.pointerEvents = ''; }
+      alert('请求失败: ' + err.message);
+    });
 }
 
 function refreshAllCompetitorDetails(callback) {

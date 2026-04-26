@@ -77,6 +77,41 @@ SCRIPTS = {
         "cwd": str(_PROJECT_ROOT / "commercial_strategy"),
         "label": "商业策略周报",
     },
+    # async_crawler 子源（共享入口 -m async_crawler --sources <key>）
+    "fb_adlib": {
+        "path": "-m",
+        "module": "async_crawler",
+        "args": ["--sources", "fb_adlib"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "Meta 广告投放抓取",
+    },
+    "reddit_crawl": {
+        "path": "-m",
+        "module": "async_crawler",
+        "args": ["--sources", "reddit"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "Reddit 社媒抓取",
+    },
+    "twitter_crawl": {
+        "path": "-m",
+        "module": "async_crawler",
+        "args": ["--sources", "twitter"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "X (Twitter) 社媒抓取",
+    },
+    "iap_pricing_crawl": {
+        "path": "-m",
+        "module": "async_crawler",
+        "args": ["--sources", "iap_pricing"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "IAP 定价抓取",
+    },
+    # 单竞品 3 日评论 AI 摘要（per-competitor）
+    "review_3d": {
+        "path": str(_PROJECT_ROOT / "competitor_comment" / "review_3d_summary.py"),
+        "cwd": str(_PROJECT_ROOT / "competitor_comment"),
+        "label": "3 日评论 AI 摘要",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -379,6 +414,14 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
                         pass
             self._send_json(data)
 
+        elif path == "/api/data/review_3d":
+            name = params.get("name", [""])[0]
+            if not name:
+                self._send_json({"status": "error", "message": "missing name"}, 400)
+            else:
+                data = self._load_json_file(f"review_3d_{name}.json")
+                self._send_json(data or {})
+
         elif path == "/api/run":
             script_name = params.get("script", [""])[0]
             competitor = params.get("competitor", [""])[0]
@@ -441,12 +484,17 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
         """在后台线程中运行脚本"""
         config = SCRIPTS[script_name]
         script_path = config["path"]
-        cwd = config.get("cwd", os.path.dirname(script_path))
+        cwd = config.get("cwd", os.path.dirname(script_path) or str(_PROJECT_ROOT))
 
-        # 构建命令
-        cmd = [sys.executable, script_path]
+        # 构建命令：支持 path="-m" 跑模块
+        if script_path == "-m" and config.get("module"):
+            cmd = [sys.executable, "-m", config["module"]]
+        else:
+            cmd = [sys.executable, script_path]
         cmd.extend(config.get("args", []))
         if script_name == "competitor_detail" and competitor:
+            cmd.extend([competitor, "--days", days])
+        if script_name == "review_3d" and competitor:
             cmd.extend([competitor, "--days", days])
 
         # 设置环境变量
