@@ -32,11 +32,14 @@ class RankInfo:
 class VersionInfo:
     current: Optional[str] = None
     release_notes: Optional[str] = None
+    release_date: Optional[str] = None                  # ISO date：来自 iTunes currentVersionReleaseDate
     has_changed: bool = False
     version_changed: bool = False
     is_first_record: bool = False
     changes: list = field(default_factory=list)
     in_app_purchases: list = field(default_factory=list)
+    change_type: Optional[str] = None                   # feature / bugfix / pricing / localization
+    change_tags: list = field(default_factory=list)     # 全部命中类型（一条更新可同时 feature + localization）
     ai_analysis: Optional[str] = None
     error: Optional[str] = None
 
@@ -207,6 +210,31 @@ class Views:
 
 
 @dataclass
+class ProductUpdateItem:
+    """单条产品动态记录，前端 page-product 时间轴 / 分组视图直接消费。"""
+    competitor: str
+    version: Optional[str] = None
+    date: Optional[str] = None                          # ISO date；缺失时前端用 has_changed 兜底
+    type: str = "feature"                               # 主类型
+    tags: list = field(default_factory=list)            # 全部命中（feature/bugfix/pricing/localization）
+    summary: str = ""                                   # changes 拼接 / release_notes 截断
+    source_url: Optional[str] = None                    # App Store 应用页（含 changelog）
+    has_changed: bool = False
+    is_first_record: bool = False
+
+
+@dataclass
+class ProductUpdatesView:
+    """产品动态聚合视图：metrics + 扁平 items 列表（按 date 倒序）。"""
+    metrics: dict = field(default_factory=lambda: {
+        "week_total": 0, "week_feature": 0,
+        "week_bugfix": 0, "week_pricing": 0,
+        "week_localization": 0,
+    })
+    items: list = field(default_factory=list)
+
+
+@dataclass
 class WeeklyData:
     comment: dict = field(default_factory=dict)         # weekly_review.json 原样透传
     commercial: dict = field(default_factory=dict)      # commercial_weekly.json 原样透传
@@ -255,6 +283,7 @@ class DashboardData:
     multi_source: dict = field(default_factory=dict)    # market_rank.multi_source 透传（UI 多源数据卡片用）
     baseline: dict = field(default_factory=dict)        # {app, label, comparison} 来自 market_rank
     ai_brief: Optional[str] = None                      # market_rank.ai_brief（榜单 AI 摘要）
+    product_updates: ProductUpdatesView = field(default_factory=ProductUpdatesView)
 
 
 def to_dict(obj):

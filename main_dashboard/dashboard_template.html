@@ -147,6 +147,8 @@ body::before {
 .metric-value { font-family: var(--display); font-size: 32px; font-weight: 700; letter-spacing: -0.03em; }
 .metric-change { display: flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 12px; font-family: var(--mono); }
 .source-badge { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; background: rgba(255,255,255,0.04); color: var(--muted); font-size: 11px; text-decoration: none; font-family: var(--mono); transition: .15s; }
+.prod-select { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 12px; font-family: var(--mono); cursor: pointer; outline: none; }
+.prod-select:focus { border-color: var(--accent); }
 .source-badge::after { content: "↗"; }
 .source-badge:hover { background: rgba(123,110,246,0.2); color: var(--text); }
 .up { color: var(--danger); }
@@ -444,13 +446,31 @@ body::before {
   <div class="page-header">
     <div>
       <div class="page-title">产品动态</div>
-      <div class="page-sub">版本更新 · 功能变化 · 定价调整</div>
+      <div class="page-sub" id="prod-window-label">版本更新 · 功能变化 · 定价调整 · 本地化</div>
     </div>
     <button class="btn" onclick="showPage('overview')">← 返回总览</button>
   </div>
-  <div class="card full-card">
-    <!-- PRODUCT_PAGE_PLACEHOLDER -->
+
+  <!-- 4 KPI -->
+  <div class="metrics-row" id="prod-metrics"></div>
+
+  <!-- 筛选栏 -->
+  <div class="card full-card" style="padding:14px 20px;margin:16px 0">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11px;font-family:var(--mono);color:var(--muted)">筛选</span>
+      <select id="prod-filter-comp"   class="prod-select"></select>
+      <select id="prod-filter-type"   class="prod-select"></select>
+      <select id="prod-filter-window" class="prod-select"></select>
+      <select id="prod-sort"          class="prod-select"></select>
+      <span style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn" onclick="setProdView('timeline')" id="prod-view-timeline">📅 时间轴</button>
+        <button class="btn" onclick="setProdView('grouped')"  id="prod-view-grouped">👥 按竞品分组</button>
+      </span>
+    </div>
   </div>
+
+  <!-- 列表 -->
+  <div id="prod-list"></div>
 </div>
 
 <!-- PAGE: RANKING (一级 · 我的竞品快照) -->
@@ -1010,6 +1030,7 @@ var COMMERCIAL_WEEKLY_DATA = <!-- COMMERCIAL_WEEKLY_DATA_PLACEHOLDER -->;
 var MULTI_SOURCE_DATA = <!-- MULTI_SOURCE_DATA_PLACEHOLDER -->;
 var COMMUNITY_DATA = <!-- COMMUNITY_DATA_PLACEHOLDER -->;
 var RANK_DATA = <!-- RANK_DATA_PLACEHOLDER -->;
+var PRODUCT_UPDATES = <!-- PRODUCT_UPDATES_DATA_PLACEHOLDER -->;
 
 // ====== 页面切换 ======
 function showPage(name) {
@@ -1028,6 +1049,7 @@ function showPage(name) {
   if (name === 'community') renderCommunityPage();
   if (name === 'ranking') renderRankPage();
   if (name === 'ranking-full') renderRankFullPage();
+  if (name === 'product') renderProductPage();
 }
 
 
@@ -2338,6 +2360,178 @@ function markdownToHtml(md) {
   // 清理多余的嵌套
   html = html.replace(/<p[^>]*><\/p>/g, '');
   return html;
+}
+
+// ============================================================
+// 产品动态（page-product）：filter + 4 KPI + 时间轴 / 按竞品分组
+// 数据来源：window.PRODUCT_UPDATES = {metrics, items: [{competitor, version, date, type, tags, summary, source_url, has_changed, is_first_record}]}
+// ============================================================
+
+var PROD_TYPE_STYLE = {
+  feature:      { label: '✨ 功能',     color: 'var(--accent)',  bg: 'rgba(123,110,246,0.15)' },
+  pricing:      { label: '💰 定价',     color: 'var(--danger)',  bg: 'rgba(255,92,92,0.15)' },
+  localization: { label: '🌍 本地化',   color: 'var(--warn)',    bg: 'rgba(245,166,35,0.15)' },
+  bugfix:       { label: '🔧 修复',     color: 'var(--accent2)', bg: 'rgba(78,204,163,0.15)' },
+};
+var _prodFilter = { comp: 'all', type: 'all', windowDays: 7, sort: 'date_desc', view: 'timeline' };
+var _prodCollapsed = {};
+
+function renderProductPage() {
+  var pu = PRODUCT_UPDATES || { metrics: {}, items: [] };
+  renderProdMetrics(pu.metrics || {});
+  renderProdFilters(pu.items || []);
+  renderProdViewToggle();
+  renderProdList(pu.items || []);
+}
+
+function renderProdMetrics(m) {
+  document.getElementById('prod-metrics').innerHTML =
+    '<div class="metric-card purple"><div class="metric-label">本周更新总数</div><div class="metric-value">' + (m.week_total || 0) + '</div><div class="metric-sub">近 7 天</div></div>' +
+    '<div class="metric-card teal"  ><div class="metric-label">✨ 功能</div>     <div class="metric-value">' + (m.week_feature || 0) + '</div><div class="metric-sub">新功能 / redesign</div></div>' +
+    '<div class="metric-card warn"  ><div class="metric-label">🔧 修复</div>     <div class="metric-value">' + (m.week_bugfix || 0)  + '</div><div class="metric-sub">bug / 稳定性</div></div>' +
+    '<div class="metric-card danger"><div class="metric-label">💰 定价</div>     <div class="metric-value">' + (m.week_pricing || 0) + '</div><div class="metric-sub">订阅 / IAP</div></div>';
+}
+
+function renderProdFilters(items) {
+  // 竞品下拉
+  var comps = Array.from(new Set(items.map(function(i){ return i.competitor; }))).sort();
+  document.getElementById('prod-filter-comp').innerHTML =
+    '<option value="all">全部竞品</option>' +
+    comps.map(function(c) {
+      return '<option value="' + escapeHtml(c) + '"' + (_prodFilter.comp === c ? ' selected' : '') + '>' + escapeHtml(c) + '</option>';
+    }).join('');
+
+  // 类型下拉
+  var typeOpts = [['all','全部类型'],['feature','✨ 功能'],['bugfix','🔧 修复'],['pricing','💰 定价'],['localization','🌍 本地化']];
+  document.getElementById('prod-filter-type').innerHTML = typeOpts.map(function(o){
+    return '<option value="' + o[0] + '"' + (_prodFilter.type === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+  }).join('');
+
+  // 时间窗
+  var winOpts = [[3,'近 3 天'],[7,'近 7 天'],[14,'近 14 天'],[30,'近 30 天'],[0,'全部时间']];
+  document.getElementById('prod-filter-window').innerHTML = winOpts.map(function(o){
+    return '<option value="' + o[0] + '"' + (_prodFilter.windowDays === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+  }).join('');
+
+  // 排序
+  var sortOpts = [['date_desc','📅 最新在前'],['date_asc','📅 最早在前'],['importance','⚡ 重要性']];
+  document.getElementById('prod-sort').innerHTML = sortOpts.map(function(o){
+    return '<option value="' + o[0] + '"' + (_prodFilter.sort === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+  }).join('');
+
+  document.getElementById('prod-filter-comp'  ).onchange = function() { _prodFilter.comp       = this.value; renderProdList((PRODUCT_UPDATES || {}).items || []); };
+  document.getElementById('prod-filter-type'  ).onchange = function() { _prodFilter.type       = this.value; renderProdList((PRODUCT_UPDATES || {}).items || []); };
+  document.getElementById('prod-filter-window').onchange = function() { _prodFilter.windowDays = parseInt(this.value, 10); renderProdList((PRODUCT_UPDATES || {}).items || []); };
+  document.getElementById('prod-sort'         ).onchange = function() { _prodFilter.sort       = this.value; renderProdList((PRODUCT_UPDATES || {}).items || []); };
+}
+
+function renderProdViewToggle() {
+  document.getElementById('prod-view-timeline').classList.toggle('btn-primary', _prodFilter.view === 'timeline');
+  document.getElementById('prod-view-grouped' ).classList.toggle('btn-primary', _prodFilter.view === 'grouped');
+}
+
+function setProdView(v) {
+  _prodFilter.view = v;
+  renderProdViewToggle();
+  renderProdList((PRODUCT_UPDATES || {}).items || []);
+}
+
+function applyProdFilters(items) {
+  var f = _prodFilter;
+  var cutoff = f.windowDays > 0
+    ? new Date(Date.now() - f.windowDays * 86400000).toISOString().slice(0, 10)
+    : null;
+
+  var filtered = items.filter(function(it) {
+    if (f.comp !== 'all' && it.competitor !== f.comp) return false;
+    if (f.type !== 'all' && it.type !== f.type) return false;
+    if (cutoff) {
+      // date 缺失：用 has_changed / is_first_record 兜底当作"在窗口内"
+      if (it.date) { if (it.date < cutoff) return false; }
+      else if (!(it.has_changed || it.is_first_record)) return false;
+    }
+    return true;
+  });
+
+  if (f.sort === 'date_asc') {
+    filtered.sort(function(a, b) { return ((a.date || '') > (b.date || '')) ? 1 : ((a.date || '') < (b.date || '') ? -1 : 0); });
+  } else if (f.sort === 'importance') {
+    var pri = { pricing: 0, localization: 1, feature: 2, bugfix: 3 };
+    filtered.sort(function(a, b) { return (pri[a.type] || 9) - (pri[b.type] || 9); });
+  } else {
+    filtered.sort(function(a, b) { return ((a.date || '') < (b.date || '')) ? 1 : ((a.date || '') > (b.date || '') ? -1 : 0); });
+  }
+  return filtered;
+}
+
+function renderProdList(items) {
+  var filtered = applyProdFilters(items);
+  var listEl = document.getElementById('prod-list');
+  if (!filtered.length) {
+    listEl.innerHTML = '<div class="card full-card"><div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">当前筛选下无更新</div></div>';
+    return;
+  }
+  if (_prodFilter.view === 'grouped') renderProdGrouped(listEl, filtered);
+  else                                renderProdTimeline(listEl, filtered);
+}
+
+function renderProdTimeline(el, items) {
+  el.innerHTML = '<div class="card full-card">' + items.map(renderProdItemHtml).join('') + '</div>';
+}
+
+function renderProdGrouped(el, items) {
+  var byComp = {};
+  items.forEach(function(it) { (byComp[it.competitor] = byComp[it.competitor] || []).push(it); });
+  el.innerHTML = Object.keys(byComp).sort().map(function(comp) {
+    var collapsed = !!_prodCollapsed[comp];
+    var color = (typeof COMP_COLORS !== 'undefined' && COMP_COLORS[comp]) || 'var(--accent)';
+    var typeChips = Array.from(new Set(byComp[comp].map(function(it){ return it.type; }))).map(function(t) {
+      var s = PROD_TYPE_STYLE[t] || PROD_TYPE_STYLE.feature;
+      return '<span style="padding:1px 7px;border-radius:3px;background:' + s.bg + ';color:' + s.color + ';font-size:9px;font-family:var(--mono);margin-left:4px">' + s.label + '</span>';
+    }).join('');
+    var bodyHtml = collapsed ? '' : byComp[comp].map(renderProdItemHtml).join('');
+    return '<div class="card full-card" style="margin-bottom:12px">' +
+      '<div class="card-head" onclick="toggleProdGroup(\'' + comp + '\')" style="cursor:pointer">' +
+        '<div class="card-title"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:8px;vertical-align:middle"></span>' +
+          escapeHtml(comp) + ' <span style="color:var(--muted);font-size:11px">(' + byComp[comp].length + ' 条)</span>' + typeChips +
+        '</div>' +
+        '<div class="card-action">' + (collapsed ? '展开 ▼' : '折叠 ▲') + '</div>' +
+      '</div>' + bodyHtml +
+    '</div>';
+  }).join('');
+}
+
+function toggleProdGroup(comp) {
+  _prodCollapsed[comp] = !_prodCollapsed[comp];
+  renderProdList((PRODUCT_UPDATES || {}).items || []);
+}
+
+function renderProdItemHtml(it) {
+  var s = PROD_TYPE_STYLE[it.type] || PROD_TYPE_STYLE.feature;
+  // 高亮：feature / pricing 加 3px 左边框
+  var isHighlight = (it.type === 'feature' || it.type === 'pricing');
+  var border = isHighlight ? ('border-left:3px solid ' + s.color) : '';
+  var date = it.date || '日期未知';
+  var sourceLink = it.source_url
+    ? '<a href="' + escapeHtml(it.source_url) + '" target="_blank" rel="noopener" style="margin-left:10px;font-size:11px;color:var(--muted);text-decoration:none;font-family:var(--mono)" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--muted)\'">查看来源 ↗</a>'
+    : '';
+  var firstBadge = it.is_first_record
+    ? '<span style="margin-left:6px;padding:1px 6px;border-radius:3px;background:rgba(245,166,35,0.15);color:var(--warn);font-size:9px;font-family:var(--mono)">首次记录</span>'
+    : '';
+  var tagChips = (it.tags || []).filter(function(t){ return t !== it.type; }).map(function(t) {
+    var ts = PROD_TYPE_STYLE[t] || {};
+    return '<span style="padding:1px 6px;border-radius:3px;background:' + (ts.bg || 'var(--surface2)') + ';color:' + (ts.color || 'var(--muted)') + ';font-size:9px;font-family:var(--mono);margin-left:4px">' + (ts.label || t) + '</span>';
+  }).join('');
+
+  return '<div class="feed-item" style="' + border + '">' +
+    '<div class="feed-meta">' +
+      '<span class="feed-source" style="color:var(--text);font-weight:600">' + escapeHtml(it.competitor) + ' · v' + escapeHtml(it.version || '?') + '</span>' +
+      '<span style="padding:2px 8px;border-radius:4px;background:' + s.bg + ';color:' + s.color + ';font-size:10px;font-family:var(--mono)">' + s.label + '</span>' +
+      tagChips + firstBadge +
+    '</div>' +
+    '<div class="feed-title">' + escapeHtml(it.summary) + '</div>' +
+    '<div class="feed-time">' + escapeHtml(date) + sourceLink + '</div>' +
+  '</div>';
 }
 
 // ============================================================

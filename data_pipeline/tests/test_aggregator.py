@@ -37,6 +37,7 @@ def _write(path: Path, payload):
 
 def _build_fixtures(data_dir: Path):
     """造覆盖所有 4 类预警 + 4 类 timeline 事件的 fixture。"""
+    today = datetime.now()
 
     competitors = {
         "SofaScore":   {"gp": "com.sofascore.results", "ios": 1176147574, "app_id": "1176147574", "bundle_id": "x"},
@@ -73,10 +74,31 @@ def _build_fixtures(data_dir: Path):
             },
             "FlashScore": {
                 "version": "9.10",
-                "release_notes": "minor bug fixes",
-                "has_changed": False,
+                "release_notes": "minor bug fixes and crash fixes",
+                "release_date": today.strftime("%Y-%m-%d"),
+                "has_changed": True,
                 "is_first_record": False,
-                "version_changed": False,
+                "version_changed": True,
+                "iap_changed": False,
+                "changes": [],
+            },
+            "OneFootball": {
+                "version": "16.5",
+                "release_notes": "Premium subscription pricing updated, free trial 7 days",
+                "release_date": (today - timedelta(days=2)).strftime("%Y-%m-%d"),
+                "has_changed": True,
+                "is_first_record": False,
+                "version_changed": True,
+                "iap_changed": True,
+                "changes": [],
+            },
+            "365Scores": {
+                "version": "12.3",
+                "release_notes": "Now available in Portuguese and Spanish languages",
+                "release_date": (today - timedelta(days=5)).strftime("%Y-%m-%d"),
+                "has_changed": True,
+                "is_first_record": False,
+                "version_changed": True,
                 "iap_changed": False,
                 "changes": [],
             },
@@ -108,7 +130,6 @@ def _build_fixtures(data_dir: Path):
     })
 
     # ---- ranking_history.json：构造一周前 vs 今日的快照让 FlashScore delta_wow=15 ----
-    today = datetime.now()
     week_ago = today - timedelta(days=7)
     _write(data_dir / "ranking_history.json", {
         week_ago.strftime("%Y-%m-%d"): {
@@ -381,6 +402,7 @@ def _check(name: str, cond: bool, detail: str = ""):
 
 
 def run_tests():
+    today = datetime.now()
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         _build_fixtures(tmp_dir)
@@ -574,7 +596,50 @@ def run_tests():
         _check("ai.target_persona 透传", "欧美硬核球迷" in (ai_analysis_sofa.get("target_persona") or []))
         _check("FlashScore 没 ai_analysis（独立合入）", ai_analysis_flash is None)
 
-        print("\n=== 15. 数据新鲜度 / 配置透传 ===")
+        print("\n=== 15. 产品动态聚合（product_updates） ===")
+        pu = payload["product_updates"]
+        items_by_comp = {it["competitor"]: it for it in pu["items"]}
+        # SofaScore: "redesigned widgets and added AI insight panel" → feature
+        _check("SofaScore type=feature", items_by_comp["SofaScore"]["type"] == "feature",
+               f"got {items_by_comp['SofaScore']['type']}")
+        # FlashScore: "minor bug fixes and crash fixes" → bugfix
+        _check("FlashScore type=bugfix", items_by_comp["FlashScore"]["type"] == "bugfix",
+               f"got {items_by_comp['FlashScore']['type']}")
+        # OneFootball: "Premium subscription pricing updated, free trial" → pricing（优先级最高）
+        _check("OneFootball type=pricing（优先级覆盖）", items_by_comp["OneFootball"]["type"] == "pricing",
+               f"got {items_by_comp['OneFootball']['type']}")
+        # 365Scores: "Portuguese and Spanish languages" → localization
+        _check("365Scores type=localization", items_by_comp["365Scores"]["type"] == "localization")
+
+        # release_date 透传
+        _check("FlashScore date 等于 today", items_by_comp["FlashScore"]["date"] == today.strftime("%Y-%m-%d"))
+
+        # source_url 拼接
+        _check("SofaScore source_url 含 App Store",
+               "apps.apple.com" in (items_by_comp["SofaScore"].get("source_url") or ""))
+
+        # error 竞品（Fotmob）不进 items
+        _check("Fotmob (error) 不在 items", "Fotmob" not in items_by_comp)
+        # LiveScore 没 strategy 数据（默认值），不进 items
+        _check("LiveScore (无 strategy) 不在 items", "LiveScore" not in items_by_comp)
+
+        # 时间倒序
+        dates = [it["date"] for it in pu["items"] if it["date"]]
+        _check("items 按 date 倒序", dates == sorted(dates, reverse=True))
+
+        # 周聚合 metrics
+        m = pu["metrics"]
+        _check("week_total = 4（4 个有效更新）", m["week_total"] == 4, f"got {m}")
+        _check("week_feature = 1（SofaScore）", m["week_feature"] == 1)
+        _check("week_bugfix = 1（FlashScore）", m["week_bugfix"] == 1)
+        _check("week_pricing = 1（OneFootball）", m["week_pricing"] == 1)
+        _check("week_localization = 1（365Scores）", m["week_localization"] == 1)
+
+        # change_tags 多标签：OneFootball 同时命中 pricing + feature（"updated" 不在字典；"trial"/"premium"/"pricing" 在 pricing；"new"... 等不在）
+        # 实际只测命中至少 pricing 即可
+        _check("OneFootball tags 含 pricing", "pricing" in items_by_comp["OneFootball"]["tags"])
+
+        print("\n=== 16. 数据新鲜度 / 配置透传 ===")
         _check("data_freshness.strategy 非空", payload["meta"]["data_freshness"]["strategy"] is not None)
         _check("regions 透传", "us" in payload["regions"])
         _check("competitor_registry 透传", "SofaScore" in payload["competitor_registry"])

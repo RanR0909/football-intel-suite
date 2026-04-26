@@ -38,6 +38,8 @@ from data_pipeline.schema import (
     FeedItem,
     Meta,
     Metrics,
+    ProductUpdateItem,
+    ProductUpdatesView,
     RankInfo,
     TimelineEvent,
     VersionInfo,
@@ -247,6 +249,7 @@ def _fill_version(snapshots: dict[str, CompetitorSnapshot], strategy: dict):
             continue
         snap.version.current = info.get("version")
         snap.version.release_notes = info.get("release_notes")
+        snap.version.release_date = info.get("release_date")     # Phase C：strategy_monitor 抓到时填充
         snap.version.has_changed = bool(info.get("has_changed"))
         snap.version.version_changed = bool(info.get("version_changed"))
         snap.version.is_first_record = bool(info.get("is_first_record"))
@@ -315,6 +318,83 @@ def _fill_comments(
             snap.comments.deep_analysis = fa["summary"]
         if fa.get("feature_keywords"):
             snap.comments.feature_keywords = dict(fa["feature_keywords"])
+
+
+def _build_product_updates(
+    snapshots: dict[str, CompetitorSnapshot],
+    days: int = 7,
+) -> ProductUpdatesView:
+    """从 snapshots[*].version 派生 product_updates 视图（metrics + items）。
+
+    分类逻辑使用 strategy_monitor.changelog_classifier，不修改 snap.version 本身（保持单一真实数据源）。
+    时间窗用 release_date 优先，缺失时用 has_changed / is_first_record 兜底（保证 strategy_monitor 未抓 date 也能渲染）。
+    """
+    from strategy_monitor.changelog_classifier import classify_changelog
+
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    items: list[ProductUpdateItem] = []
+    metrics = {
+        "week_total": 0, "week_feature": 0,
+        "week_bugfix": 0, "week_pricing": 0,
+        "week_localization": 0,
+    }
+
+    for name, snap in snapshots.items():
+        v = snap.version
+        if v.error:
+            continue
+        # 仅当 strategy_monitor 中存在该竞品的真实数据时才进 items
+        if not (v.current or v.release_notes or v.has_changed or v.is_first_record or v.changes):
+            continue
+        change_type, tags = classify_changelog(v.release_notes, v.changes)
+        v.change_type = change_type
+        v.change_tags = tags
+
+        # 摘要：优先 changes 列表（精炼），否则 release_notes 截断
+        if v.changes:
+            summary = "；".join(v.changes[:3])
+        elif v.release_notes:
+            summary = v.release_notes.strip()[:200]
+        else:
+            summary = "（无更新日志）"
+
+        # source_url：用 ios_id 拼 App Store 应用页（含 changelog）
+        ios_id = snap.ios_id
+        gp_id = snap.android_id
+        source_url = None
+        if ios_id:
+            source_url = f"https://apps.apple.com/us/app/id{ios_id}"
+        elif gp_id:
+            source_url = f"https://play.google.com/store/apps/details?id={gp_id}"
+
+        # release_date 可能含 'T' 时间分；统一截 10 位
+        date_str = (v.release_date or "")[:10] or None
+
+        items.append(ProductUpdateItem(
+            competitor=name,
+            version=v.current,
+            date=date_str,
+            type=change_type,
+            tags=list(tags),
+            summary=summary,
+            source_url=source_url,
+            has_changed=bool(v.has_changed),
+            is_first_record=bool(v.is_first_record),
+        ))
+
+        # 周聚合：仅统计真发生变化的；date 缺失时用 has_changed/is_first_record 兜底
+        in_window = (
+            (date_str and date_str >= cutoff) or
+            (not date_str and (v.has_changed or v.is_first_record))
+        )
+        if in_window:
+            metrics["week_total"] += 1
+            metrics["week_" + change_type] += 1
+
+    # date desc 排序，缺失日期排后面
+    items.sort(key=lambda x: x.date or "", reverse=True)
+
+    return ProductUpdatesView(metrics=metrics, items=items)
 
 
 def _fill_community(
@@ -745,6 +825,7 @@ def build_dashboard_data() -> DashboardData:
     _fill_commercial(snapshots, commercial)
     _fill_ads(snapshots, fb_raw, ads_ai)
     _fill_community(snapshots, reddit_raw, community_ai)
+    product_updates = _build_product_updates(snapshots)
 
     alerts = _build_alerts(snapshots)
     feed = _build_feed(snapshots)
@@ -780,6 +861,7 @@ def build_dashboard_data() -> DashboardData:
             "comparison": market.get("baseline_comparison") or {},
         },
         ai_brief=market.get("ai_brief"),
+        product_updates=product_updates,
     )
 
 
