@@ -109,6 +109,38 @@ def fetch(pkg, country):
 
 
 def fetch_ios(app_id, country):
+    """iOS 评论抓取。
+
+    优先使用 app-store-scraper 库（基于 Apple 内部 customer-reviews JSON API）。
+    旧的 itunes.apple.com/rss/customerreviews 接口 Apple 已弃用全局返回 0。
+    库不可用时降级到 RSS 兼容旧行为。
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=CUTOFF_DAYS)
+    # 主路径：app-store-scraper
+    try:
+        from app_store_scraper import AppStore
+        scraper = AppStore(country=country, app_name=str(app_id), app_id=int(app_id))
+        # 库会内部翻页直到 how_many；中途异常则停
+        scraper.review(how_many=FETCH_COUNT, sleep=1)
+        rows = []
+        for r in scraper.reviews or []:
+            ts = r.get("date")
+            if ts:
+                if not getattr(ts, "tzinfo", None):
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if ts < cutoff:
+                    continue
+            rows.append({
+                "score": int(r.get("rating") or 5),
+                "version": r.get("version") or "",
+                "content": (r.get("review") or r.get("title") or "").strip(),
+            })
+        return rows
+    except Exception as e:
+        print(f"    [iOS][{app_id}/{country}] app-store-scraper 失败 ({type(e).__name__}: {e})，降级 RSS",
+              file=sys.stderr)
+
+    # 降级：旧 RSS（已知 Apple 弃用，多数情况下返回空）
     rows, page = [], 1
     while len(rows) < FETCH_COUNT and page <= 10:
         url = f"https://itunes.apple.com/{country}/rss/customerreviews/page={page}/id={app_id}/sortby=mostrecent/json"

@@ -39,9 +39,14 @@ class RedditCrawler(BaseCrawler):
     COMMENT_TOP_N = 20
     POST_SELFTEXT_MAX = 2000
     COMMENT_BODY_MAX = 1000
-    # 默认只用 1 个关键词模板，把每竞品的搜索调用从 3 减到 1
-    KEYWORD_TEMPLATES = ["{name}"]
+    # 用引号包裹精确短语匹配（避免 "365Scores" 被分词为 score+足球新闻噪声）
+    # %22 = URL-encoded "；保持 1 个模板减少调用次数
+    KEYWORD_TEMPLATES = ['%22{name}%22']
     SEARCH_TIME_FILTER = "month"   # hour / day / week / month / year / all
+    # Reddit sort=new 会跳过 quoted-phrase 匹配 → 用 relevance 抓全后再按时间重排
+    SEARCH_SORT = "relevance"
+    # post-filter：抓回来再确认 title+selftext 真含关键词（兜底假阳性）
+    POSTFILTER_REQUIRE_KEYWORD = True
     UA = "FootballIntelBot/1.0 (competitive analysis)"
     # 是否对每条帖子单独 fetch 评论（默认关，开启会让总调用 × 30）
     # 通过 env 变量 REDDIT_FETCH_COMMENTS=1 启用
@@ -67,12 +72,14 @@ class RedditCrawler(BaseCrawler):
     async def _crawl_competitor(self, app_name: str) -> list[dict]:
         seen: set[str] = set()
         out: list[dict] = []
+        # 关键词小写形式用于 post-filter 比对
+        name_lc = app_name.lower()
         for tpl in self.KEYWORD_TEMPLATES:
             kw = tpl.format(name=app_name)
             url = (
                 "https://www.reddit.com/search.json"
                 f"?q={kw.replace(' ', '+')}"
-                f"&sort=new&limit={self.POST_LIMIT}&t={self.SEARCH_TIME_FILTER}"
+                f"&sort={self.SEARCH_SORT}&limit={self.POST_LIMIT}&t={self.SEARCH_TIME_FILTER}"
             )
             self.log.info(f"[{app_name}/{kw}] {url}")
             try:
@@ -81,25 +88,34 @@ class RedditCrawler(BaseCrawler):
                 self.log.error(f"[{app_name}/{kw}] 搜索失败: {e}")
                 continue
 
+            dropped = 0
             for child in (data.get("data") or {}).get("children") or []:
                 d = child.get("data") or {}
                 pid = d.get("id")
                 if not pid or pid in seen:
                     continue
-                seen.add(pid)
 
+                title = (d.get("title") or "")[:500]
+                selftext = (d.get("selftext") or "")[:self.POST_SELFTEXT_MAX]
+
+                # post-filter 兜底：title + selftext 任一含关键词才保留
+                if self.POSTFILTER_REQUIRE_KEYWORD:
+                    haystack = (title + " " + selftext).lower()
+                    if name_lc not in haystack:
+                        dropped += 1
+                        continue
+
+                seen.add(pid)
                 subreddit = d.get("subreddit") or ""
                 permalink = d.get("permalink") or ""
-                # 默认跳过 per-post 评论抓取（避免 30 帖 × 6 竞品 = 180 + 调用），
-                # 需要时设 env REDDIT_FETCH_COMMENTS=1
                 comments = await self._fetch_comments(subreddit, pid) if self.FETCH_COMMENTS else []
 
                 out.append({
                     "post_id": pid,
                     "keyword": kw,
                     "subreddit": subreddit,
-                    "title": (d.get("title") or "")[:500],
-                    "selftext": (d.get("selftext") or "")[:self.POST_SELFTEXT_MAX],
+                    "title": title,
+                    "selftext": selftext,
                     "url": f"https://www.reddit.com{permalink}" if permalink else d.get("url", ""),
                     "score": int(d.get("score") or 0),
                     "num_comments": int(d.get("num_comments") or 0),
@@ -107,6 +123,11 @@ class RedditCrawler(BaseCrawler):
                     "created_utc": float(d.get("created_utc") or 0),
                     "comments": comments,
                 })
+            if dropped:
+                self.log.info(f"[{app_name}/{kw}] post-filter 丢弃 {dropped} 条假阳性")
+
+        # 按 created_utc 降序（API 用了 relevance，这里恢复时序）
+        out.sort(key=lambda p: p.get("created_utc") or 0, reverse=True)
         return out
 
     async def _fetch_comments(self, subreddit: str, post_id: str) -> list[dict]:

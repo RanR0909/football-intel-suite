@@ -74,9 +74,12 @@ class IAPPricingCrawler(BaseCrawler):
                 }, region=region)
                 results.append(rec)
         self.log.info(f"IAP 定价: {len(results)} 条")
-        await db.save(self.source_name, results)
-        # 持久化 raw 给 aggregator 消费
+        # 先写 raw（aggregator 消费），再尝试 db.save（失败不影响 raw）
         self._write_raw_snapshot(results)
+        try:
+            await database.save(self.source_name, results)
+        except Exception as e:
+            self.log.warning(f"db.save 跳过：{e}")
         return results
 
     def _write_raw_snapshot(self, results: list[dict]):
