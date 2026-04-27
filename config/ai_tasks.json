@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "_doc": "AI 任务统一配置。改这里就能换模型/节点/prompt，不用动业务代码。",
+
+  "endpoints": {
+    "flashapi": {
+      "_doc": "中转代理（默认）",
+      "url": "https://ai.flashapi.top/v1/messages",
+      "provider": "anthropic",
+      "auth_header": "x-api-key",
+      "api_key_env": "CLAUDE_API_KEY",
+      "extra_headers": { "anthropic-version": "2023-06-01" },
+      "verify_ssl": false
+    },
+    "anthropic_official": {
+      "_doc": "Anthropic 官方端点（备用 / fallback）",
+      "url": "https://api.anthropic.com/v1/messages",
+      "provider": "anthropic",
+      "auth_header": "x-api-key",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "extra_headers": { "anthropic-version": "2023-06-01" },
+      "verify_ssl": true
+    }
+  },
+
+  "models": {
+    "haiku_4_5": {
+      "_doc": "最快（~1-3s）— 标签 / 短 JSON / 结构化抽取",
+      "name": "claude-haiku-4-5-20251001",
+      "endpoint": "flashapi",
+      "fallback_endpoint": "anthropic_official",
+      "fallback_on_status": [502, 503, 504, 429],
+      "timeout": 60,
+      "max_tokens": 4096,
+      "temperature": 0.3,
+      "retries": 3,
+      "retry_backoff": [2, 4, 6]
+    },
+    "sonnet_4_6": {
+      "_doc": "中等（~10-20s）— 长 markdown / 深度推理",
+      "name": "claude-sonnet-4-6",
+      "endpoint": "flashapi",
+      "fallback_endpoint": "anthropic_official",
+      "fallback_on_status": [502, 503, 504, 429],
+      "timeout": 120,
+      "max_tokens": 8192,
+      "temperature": 0.4,
+      "retries": 3,
+      "retry_backoff": [3, 6, 9]
+    },
+    "opus_4_6": {
+      "_doc": "最强（~30-60s）— 极致质量长文（默认未启用）",
+      "name": "claude-opus-4-6",
+      "endpoint": "flashapi",
+      "fallback_endpoint": "anthropic_official",
+      "fallback_on_status": [502, 503, 504, 429],
+      "timeout": 180,
+      "max_tokens": 8192,
+      "temperature": 0.4,
+      "retries": 3,
+      "retry_backoff": [3, 6, 9]
+    },
+    "monetize_tag": {
+      "_doc": "haiku 但 max_tokens 压低 — 给 IAP 标签用，省 token",
+      "name": "claude-haiku-4-5-20251001",
+      "endpoint": "flashapi",
+      "fallback_endpoint": "anthropic_official",
+      "fallback_on_status": [502, 503, 504, 429],
+      "timeout": 60,
+      "max_tokens": 1024,
+      "temperature": 0.2,
+      "retries": 3,
+      "retry_backoff": [2, 4, 6]
+    }
+  },
+
+  "tasks": {
+    "comment_label": {
+      "_doc": "auto_report 内 — 给评论批量打分类标签",
+      "model": "haiku_4_5",
+      "prompt": { "module": "prompts.comment_prompts", "function": "build_label_prompt" },
+      "output_format": "text"
+    },
+    "comment_daily_summary": {
+      "_doc": "auto_report 内 — 单地区评论日摘要",
+      "model": "haiku_4_5",
+      "prompt": { "module": "prompts.comment_prompts", "function": "build_daily_summary_prompt" },
+      "output_format": "text"
+    },
+    "weekly_review_report": {
+      "_doc": "评论周报主体 markdown",
+      "model": "sonnet_4_6",
+      "max_tokens": 8192,
+      "prompt": { "module": "prompts.comment_prompts", "function": "build_weekly_report_prompt" },
+      "output_format": "text"
+    },
+    "weekly_review_localization": {
+      "_doc": "评论周报本地化分析",
+      "model": "sonnet_4_6",
+      "prompt": { "module": "prompts.comment_prompts", "function": "build_localization_prompt" },
+      "output_format": "text"
+    },
+    "competitor_detail": {
+      "_doc": "竞品深度功能分析",
+      "model": "sonnet_4_6",
+      "prompt": { "module": "prompts.comment_prompts", "function": "build_competitor_detail_prompt" },
+      "output_format": "text"
+    },
+    "review_3d": {
+      "_doc": "3 日评论 AI 摘要（per-competitor）",
+      "model": "haiku_4_5",
+      "prompt": {
+        "template": "你是资深竞品分析师。下面是 **{competitor}** 应用近 {days} 天的用户评论样本（共 {count} 条），请生成结构化 JSON 报告。\n\n要求：\n1. 200-400 字中文摘要，聚焦本期内\"用户在抱怨什么 / 在表扬什么 / 是否有突发问题\"\n2. 抽出 Top 3-5 个用户痛点（每个：topic 短语、count 出现次数、severity 1-5、sample_quote 用户原话不超 60 字）\n3. 抽出 Top 3-5 条代表原话（直接引用用户的句子，正面或负面均可，每条 ≤ 80 字）\n4. 抽出本期高频话题标签 3-8 个\n\n只输出严格的 JSON（无 markdown 代码框），格式：\n{{\n  \"summary\": \"...\",\n  \"top_pains\": [{{\"topic\":\"...\", \"count\": N, \"severity\": 1-5, \"sample_quote\":\"...\"}}],\n  \"top_quotes\": [\"...\", \"...\"],\n  \"tagged_topics\": [\"...\", \"...\"]\n}}\n\n评论样本：\n{samples}\n"
+      },
+      "output_format": "json",
+      "json_strip_markdown": true
+    },
+    "commercial_monetize_tag": {
+      "_doc": "IAP 内购变现策略打标签",
+      "model": "monetize_tag",
+      "prompt": { "module": "prompts.commercial_prompts", "function": "build_monetize_tag_prompt" },
+      "output_format": "json",
+      "json_strip_markdown": true
+    },
+    "commercial_intent": {
+      "_doc": "应用描述商业意图分析",
+      "model": "monetize_tag",
+      "prompt": { "module": "prompts.commercial_prompts", "function": "build_intent_prompt" },
+      "output_format": "text"
+    },
+    "commercial_weekly": {
+      "_doc": "商业策略周报",
+      "model": "sonnet_4_6",
+      "max_tokens": 4096,
+      "prompt": { "module": "prompts.commercial_prompts", "function": "build_weekly_prompt" },
+      "output_format": "text"
+    },
+    "ads_strategy": {
+      "_doc": "Meta 广告投放策略 AI（per-competitor）",
+      "model": "haiku_4_5",
+      "prompt": { "module": "prompts.ads_prompts", "function": "build_ads_strategy_prompt" },
+      "output_format": "json",
+      "json_strip_markdown": true
+    },
+    "community_insights": {
+      "_doc": "社媒舆情 AI（per-competitor）",
+      "model": "haiku_4_5",
+      "prompt": { "module": "prompts.community_prompts", "function": "build_community_insights_prompt" },
+      "output_format": "json",
+      "json_strip_markdown": true
+    }
+  }
+}

@@ -24,6 +24,13 @@ DATA_DIR = _PROJECT_ROOT / "data"
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# 兜底加载 .env.local（绕过 启动看板.command 直接跑 python 也能读到 key）
+try:
+    from shared.env_loader import load_env_file
+    load_env_file()
+except Exception:
+    pass
+
 # API Key 从环境变量获取
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
