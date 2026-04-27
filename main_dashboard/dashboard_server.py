@@ -84,6 +84,14 @@ SCRIPTS = {
         "cwd": str(_PROJECT_ROOT / "commercial_strategy"),
         "label": "商业策略周报",
     },
+    # AppMagic 登录（一次性手动）— 弹浏览器，登录完关窗口
+    "appmagic_login": {
+        "path": "-m",
+        "module": "market_rank.scrape_appmagic",
+        "args": ["login"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "AppMagic 登录（手动）",
+    },
     # async_crawler 子源（共享入口 -m async_crawler --sources <key>）
     "fb_adlib": {
         "path": "-m",
@@ -591,6 +599,9 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
             success = (result.returncode == 0)
             stdout_tail = (result.stdout or "")[-1500:]
             stderr_tail = (result.stderr or "")[-1500:]
+            # exit code 2 = AppMagic 登录失效（约定，见 market_rank/scrape_appmagic.py）
+            if result.returncode == 2 and "LoginRequired" in (stderr_tail + stdout_tail) or "登录态" in stderr_tail:
+                error_kind = "LOGIN_REQUIRED"
             with _tasks_lock:
                 _running_tasks[script_name] = {
                     "running": False,

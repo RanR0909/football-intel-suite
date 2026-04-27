@@ -190,6 +190,19 @@ body::before {
 }
 .rank-row:hover { background: var(--surface2); }
 .rank-row:last-child { border-bottom: none; }
+/* 一级页 watchlist 简化版（4 列：产品 / 全球排名 / 周变化 / 趋势）*/
+.rank-row-watchlist {
+  display: grid;
+  grid-template-columns: 1fr 110px 110px 90px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.rank-row-watchlist:hover { background: var(--surface2); }
+.rank-row-watchlist:last-child { border-bottom: none; }
 .rank-num { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .rank-name { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
 .rank-tag { font-size: 10px; background: rgba(123,110,246,0.15); color: var(--accent); padding: 1px 6px; border-radius: 4px; font-family: var(--mono); }
@@ -522,8 +535,8 @@ body::before {
       <div class="card-title">重点竞品 · 当前排名</div>
       <div class="card-action" style="color:var(--muted);font-size:11px">点击行进入竞品详情</div>
     </div>
-    <div class="rank-row" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border)">
-      <span></span><span>产品</span><span>当前</span><span>日变化</span><span>周变化</span><span>下载量</span><span>评分</span><span>趋势</span>
+    <div class="rank-row-watchlist" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border);cursor:default">
+      <span>产品</span><span>全球排名</span><span>周变化</span><span>趋势</span>
     </div>
     <div id="rank-watchlist-rows"></div>
   </div>
@@ -555,8 +568,10 @@ body::before {
       <div class="card-title">全市场扫描</div>
       <div id="rank-filter-bar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>
     </div>
-    <div class="rank-row" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border)">
-      <span></span><span>产品</span><span>当前</span><span>日变化</span><span>周变化</span><span>下载量</span><span>评分</span><span>趋势</span>
+    <!-- 国家 tabs（worldwide + 12 国，AppMagic 数据源）-->
+    <div id="rank-country-tabs" style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 20px;border-bottom:1px solid var(--border)"></div>
+    <div class="rank-row" style="font-size:10px;font-family:var(--mono);color:var(--muted);padding:8px 20px;border-bottom:1px solid var(--border);cursor:default">
+      <span></span><span>产品</span><span>当前</span><span>日变化</span><span>周变化</span><span>下载量</span><span>发行商</span><span>趋势</span>
     </div>
     <div id="rank-full-rows"></div>
   </div>
@@ -4153,6 +4168,13 @@ function toggleIapTable(name) {
 
 var _rankFilter = 'top100';   // top100 | up | down | fast（仅二级页 page-ranking-full 用）
 var _rankLimit = 100;
+var _rankCountry = 'worldwide';  // worldwide | us | ng | my | id | sa | ae | jp | ca | vn | gb | br | ru
+
+var _RANK_COUNTRY_ORDER = ['us','ng','my','id','sa','ae','jp','ca','vn','gb','br','ru'];
+var _RANK_COUNTRY_LABEL = {
+  us: '美国', ng: '尼日', my: '马来', id: '印尼', sa: '沙特', ae: '阿联酋',
+  jp: '日本', ca: '加拿大', vn: '越南', gb: '英国', br: '巴西', ru: '俄罗斯',
+};
 
 // ───── 一级页：我的竞品快照（仅 competitors.json 注册的竞品）─────
 function renderRankPage() {
@@ -4177,13 +4199,66 @@ function renderRankWatchlist() {
     rowsEl.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">暂无竞品配置</div>';
     return;
   }
-  rowsEl.innerHTML = entries.map(function(row) { return renderRankRowHtml(row, true, false); }).join('');
+  rowsEl.innerHTML = entries.map(_renderWatchlistRow4Col).join('');
+}
+
+// 一级页简化行渲染（4 列：产品 / 全球排名 / 周变化 / 趋势）
+function _renderWatchlistRow4Col(row) {
+  var name = row.name;
+  var color = ((RANK_DATA || {}).competitors || {})[name];
+  color = (color && color.color) || 'var(--accent)';
+  var rankCell = row.current != null
+    ? '<span style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--text)">#' + row.current + '</span>'
+    : '<span style="font-family:var(--mono);color:var(--muted)">未上榜</span>';
+  var wow = formatRankDelta(row.delta_wow);
+  var trend = renderRankTrendInline(name);
+  return '<div class="rank-row-watchlist" onclick="showCompetitorDetail(\'' + name + '\')">' +
+    '<span style="display:flex;align-items:center;gap:8px">' +
+      '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + color + '"></span>' +
+      '<span style="font-size:13px;font-weight:500;color:var(--text)">' + escapeHtml(name) + '</span>' +
+    '</span>' +
+    '<span style="text-align:right">' + rankCell + '</span>' +
+    '<span style="text-align:right">' + wow + '</span>' +
+    '<span style="text-align:center">' + trend + '</span>' +
+  '</div>';
 }
 
 // ───── 二级页：完整 Top 100 全市场扫描（含筛选）─────
 function renderRankFullPage() {
+  renderRankCountryTabs();
   renderRankFilters();
   renderRankFullRows();
+}
+
+// 国家 tab 渲染（worldwide + 12 国；按 _RANK_COUNTRY_ORDER）
+function renderRankCountryTabs() {
+  var byCountry = ((RANK_DATA || {}).by_country || {}).countries || {};
+  var tabs = [{ key: 'worldwide', label: '全球' }];
+  _RANK_COUNTRY_ORDER.forEach(function(code) {
+    var hasData = byCountry[code] && (byCountry[code].leaderboard || []).length > 0;
+    tabs.push({
+      key: code,
+      label: code.toUpperCase() + ' · ' + (_RANK_COUNTRY_LABEL[code] || code),
+      hasData: hasData,
+    });
+  });
+  document.getElementById('rank-country-tabs').innerHTML = tabs.map(function(t) {
+    var active = t.key === _rankCountry;
+    var border = active ? 'var(--accent)' : 'var(--border)';
+    var bg = active ? 'rgba(123,110,246,0.20)' : 'var(--surface2)';
+    var opacity = (t.key === 'worldwide' || t.hasData) ? '1' : '0.45';
+    var hint = (t.key !== 'worldwide' && !t.hasData)
+      ? ' <span style="font-size:9px;color:var(--muted)">无数据</span>' : '';
+    return '<button onclick="setRankCountry(\'' + t.key + '\')" ' +
+      'style="padding:5px 12px;border-radius:6px;border:1px solid ' + border +
+      ';background:' + bg + ';color:var(--text);font-size:11px;cursor:pointer;font-family:var(--mono);opacity:' + opacity + '">' +
+      escapeHtml(t.label) + hint + '</button>';
+  }).join('');
+}
+
+function setRankCountry(key) {
+  _rankCountry = key;
+  renderRankFullPage();
 }
 
 function renderRankFilters() {
@@ -4255,6 +4330,12 @@ function renderRankRowHtml(row, isRegistered, fullMode) {
     ? 'onclick="showCompetitorDetail(\'' + row.name + '\')" style="cursor:pointer;' + leftBorder + '"'
     : 'style="cursor:default;' + leftBorder + '"';
 
+  // 列：rank# / name / current / dod / wow / 下载量 / 发行商 / trend
+  var publisher = row.artist || '—';
+  var publisherHtml = publisher === '—'
+    ? '<span style="color:var(--muted);font-family:var(--mono)">—</span>'
+    : '<span style="color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(publisher) + '">' + escapeHtml(publisher.slice(0, 12)) + '</span>';
+
   return '<div class="rank-row" ' + rowAttrs + '>' +
     '<span style="font-family:var(--mono);color:var(--muted)">#' + (row.current != null ? row.current : '?') + '</span>' +
     '<span style="' + nameStyle + '">' + escapeHtml(row.name || '?') + registeredBadge + unregisteredBadge + firstSeenBadge + riserBadge + '</span>' +
@@ -4262,7 +4343,7 @@ function renderRankRowHtml(row, isRegistered, fullMode) {
     '<span>' + dod + '</span>' +
     '<span>' + wow + '</span>' +
     '<span style="color:var(--muted);font-family:var(--mono)">—</span>' +
-    '<span style="color:var(--muted);font-family:var(--mono)">—</span>' +
+    publisherHtml +
     '<span>' + trend + '</span>' +
   '</div>';
 }
@@ -4297,6 +4378,33 @@ function getSortedCompetitors(filterKey) {
   var R = RANK_DATA || {};
   var compsObj = R.competitors || {};
 
+  // 国家维度：直接从 by_country.countries[code].leaderboard 取
+  if (_rankCountry !== 'worldwide') {
+    var country = ((R.by_country || {}).countries || {})[_rankCountry];
+    if (!country || !country.leaderboard) return [];
+    var lb = country.leaderboard.slice(0, _rankLimit);
+    var rows = lb.map(function(item) {
+      var stdName = item.competitor;
+      var snap = stdName ? (compsObj[stdName] || {}) : {};
+      return {
+        name: stdName || item.name || '',
+        current: item.rank,
+        delta_dod: item.delta,
+        delta_wow: null,         // AppMagic 国家维度不带周变化（仅 worldwide 有时序）
+        is_known: !!item.is_tracked,
+        is_first_seen: false,
+        is_new_contender: false,
+        new_contender_delta: null,
+        app_id: snap.app_id || null,
+        artist: item.publisher || '',
+      };
+    });
+    if (filterKey === 'up') rows.sort(function(a,b){ return (b.delta_dod||0) - (a.delta_dod||0); });
+    else if (filterKey === 'down') rows.sort(function(a,b){ return (a.delta_dod||0) - (b.delta_dod||0); });
+    else if (filterKey === 'fast') rows = rows.filter(function(r){ return r.delta_dod != null && Math.abs(r.delta_dod) > 20; });
+    return rows;
+  }
+
   if (filterKey === 'up' || filterKey === 'down') {
     var entries = Object.keys(compsObj)
       .filter(function(n) { return compsObj[n].delta_dod != null; })
@@ -4314,7 +4422,7 @@ function getSortedCompetitors(filterKey) {
       .sort(function(a, b) { return Math.abs(b.delta_wow) - Math.abs(a.delta_wow); });
   }
 
-  // top100：以 leaderboard 为序，缺字段用 competitors[name] 补
+  // worldwide top100：以 leaderboard 为序，缺字段用 competitors[name] 补
   var lb = (R.leaderboard || []).slice(0, _rankLimit);
   return lb.map(function(item) {
     var snap = compsObj[item.name] || {};

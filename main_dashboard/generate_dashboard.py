@@ -250,6 +250,7 @@ def _adapt_rank_view(D):
         "baseline": dict(D.get("baseline") or {}),
         "registry": dict(D.get("competitor_registry") or {}),
         "competitors": {},
+        "by_country": dict(D.get("market_by_country") or {}),  # AppMagic 12 国分榜
     }
     for name, snap in (D.get("competitors") or {}).items():
         r = snap.get("rank") or {}

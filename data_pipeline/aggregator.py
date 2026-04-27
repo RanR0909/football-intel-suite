@@ -1040,6 +1040,7 @@ def build_dashboard_data() -> DashboardData:
     regions_cfg = _load_json("regions.json")
     strategy = _load_json("strategy_monitor.json")
     market = _load_json("market_rank.json")
+    market_by_country = _load_json("market_rank_by_country.json")
     history = _load_json("ranking_history.json")
     comments = _load_json("competitor_comments.json")
     weekly = _load_json("weekly_review.json")
@@ -1111,6 +1112,7 @@ def build_dashboard_data() -> DashboardData:
         ai_brief=market.get("ai_brief"),
         product_updates=product_updates,
         reviews_analysis=reviews_analysis,
+        market_by_country=dict(market_by_country or {}),
     )
 
 
