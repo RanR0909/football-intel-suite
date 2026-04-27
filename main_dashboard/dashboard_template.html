@@ -4087,7 +4087,18 @@ function renderIapTable(comps, names) {
 
     var rows = collapsed ? '' : items.map(function(it){
       var s = _iapCatStyle(it.category || '其他');
-      var price = it.price_usd != null ? '$' + Number(it.price_usd).toFixed(2) : '—';
+      // 价格优先级：1) it.price（已带符号如 "$24.99"）2) price_num + currency 3) price_usd（旧字段兜底）4) '—'
+      var price;
+      if (it.price && String(it.price).trim() && String(it.price).trim() !== '0') {
+        price = String(it.price);
+      } else if (it.price_num != null && !isNaN(it.price_num) && it.price_num > 0) {
+        var ccy = it.currency || '';
+        price = ccy ? (ccy + ' ' + Number(it.price_num).toFixed(2)) : Number(it.price_num).toFixed(2);
+      } else if (it.price_usd != null) {
+        price = '$' + Number(it.price_usd).toFixed(2);
+      } else {
+        price = '—';
+      }
       var statusBadge = '';
       if (alertNames[it.name]) {
         var pa = alertNames[it.name];
