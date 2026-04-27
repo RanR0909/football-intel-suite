@@ -1,114 +1,255 @@
 # INTEL-OPS
 
-INTEL-OPS 是一个面向足球/体育 App 的竞品情报平台，统一监控 App Store 和 Google Play 上的竞品评论、排名变化、版本更新和商业化动作，并把结果汇总到 HTML 看板。
+面向足球 / 体育 App 的竞品情报平台。统一监控 **App Store / Google Play / Reddit / X / Meta 广告库** 上的排名、评论、版本更新、商业化动作和社媒舆情，统一聚合到 HTML 看板，含 AI 触发的深度分析。
 
-## 当前结构
+---
 
-四个采集模块通过 `data/` 目录解耦，主看板只读取 JSON 结果：
+## 模块拓扑
 
-```text
-competitor_comment/   -> data/competitor_comments.json, weekly_review.json, competitor_detail_*.json
-strategy_monitor/     -> data/strategy_monitor.json, strategy_state.json
-market_rank/          -> data/market_rank.json, ranking_history.json
-commercial_strategy/  -> data/commercial_strategy.json, commercial_weekly.json, commercial_history.json
-main_dashboard/       -> 读取 data/*.json，生成 dashboard.html，并提供 HTTP API
+```
+┌── 数据采集（7 大数据源） ──────────────────────────────────────────┐
+│                                                                      │
+│  strategy_monitor/         ─→ data/strategy_monitor.json   产品动态  │
+│  market_rank/              ─→ data/market_rank.json        排名+收入 │
+│  competitor_comment/       ─→ data/competitor_comments.json 用户评论 │
+│  commercial_strategy/      ─→ data/commercial_strategy.json 商业 IAP │
+│  async_crawler/sources/    ─→ data/raw/*.json              社媒+广告 │
+│    ├ reddit                                                         │
+│    ├ twitter (X)                                                    │
+│    ├ fb_adlib (Meta 广告)                                            │
+│    ├ iap_pricing                                                    │
+│    └ appstore_rank / reviews / sensor_tower / androidrank            │
+│  community_insights/       ─→ data/community_ai_analysis.json AI 派生│
+│                                                                      │
+└──────────────────────────────────────┬──────────────────────────────┘
+                                       │ 7 大 JSON 源
+                                       ▼
+┌── 聚合层 ────────────────────────────────────────────────────────────┐
+│  data_pipeline/aggregator.py     ─→ data/dashboard_data.json         │
+│    ├ schema.py（统一 dataclass）                                      │
+│    └ alert_engine.py（22 条预警触发器，配置见 alert_config.json）    │
+└──────────────────────────────────────┬──────────────────────────────┘
+                                       ▼
+┌── 看板层 ────────────────────────────────────────────────────────────┐
+│  main_dashboard/dashboard_server.py   HTTP API                       │
+│  main_dashboard/generate_dashboard.py 生成 dashboard.html            │
+│                                                                      │
+│  页面：总览 4 层金字塔 / 预警中心 / 产品动态 / 排名 / 评论 / 周报 /    │
+│        商业分析 / 社媒舆情（汇总 + 单竞品）                            │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## 配置约定
+---
 
-- 竞品注册表只保留一份：`data/competitors.json`
-- 地区配置只保留一份：`data/regions.json`
-- 评论分析类 prompt 统一维护在 `prompts/comment_prompts.py`
-
-## 评论分析现状
-
-- 滚动评论监测：抓近 3 天全量评论，不再只抓差评
-- 评论周报：按 `competitors.json` 和 `regions.json` 动态生成 prompt
-- 竞品详情页：支持单竞品深度分析和批量分析全部竞品
-- 评论标签已切换为信号型分类：
-  - `[问题抱怨]`
-  - `[高价值功能请求]`
-  - `[竞品对比]`
-  - `[流失信号]`
-  - `[正向反馈]`
-  - `[其他]`
-
-## 运行方式
+## 快速启动
 
 ```bash
-# 一键启动
+# 1. 第一次配置密钥
+cp .env.local.example .env.local
+# 用编辑器打开 .env.local 填入 CLAUDE_API_KEY 等
+
+# 2. 一键启动看板（自动加载 .env.local）
 ./启动看板.command
+# 浏览器自动打开 http://localhost:8899
+```
 
-# HTML 看板服务
-python3 main_dashboard/dashboard_server.py
+启动器会显示当前 key 配置状态（`已配置` / `未配置`），不打印 key 值。
 
-# 只生成静态看板
-python3 main_dashboard/generate_dashboard.py
+---
 
-# 采集/分析
-python3 competitor_comment/auto_report.py
-python3 competitor_comment/weekly_review.py
-python3 competitor_comment/competitor_detail.py SofaScore --days 7
-python3 competitor_comment/run_all_details.py
+## 核心改动 v2（最近重构）
+
+### 1. AI 配置统一
+
+所有模型 / Prompt / 节点 / 阈值集中在 [`config/ai_tasks.json`](config/ai_tasks.json)。
+业务代码只调 `run_task("name", context)` — 不再硬编码模型、URL、retries。
+
+详见 [`config/README.md`](config/README.md)。
+
+| 层 | 文件 | 内容 |
+|---|---|---|
+| Endpoints | `ai_tasks.json::endpoints` | `flashapi`（中转） + `anthropic_official`（官方备用） |
+| Models | `ai_tasks.json::models` | `haiku_4_5` / `sonnet_4_6` / `opus_4_6` / `monetize_tag` |
+| Tasks | `ai_tasks.json::tasks` | 11 个 AI 任务，每个绑定 model + prompt + format |
+
+**自动 fallback**：中转 5xx/429 时自动切官方端点。
+
+### 2. 密钥外置
+
+| 项 | 位置 | git 跟踪 |
+|---|---|---|
+| Key 实际值 | `.env.local`（项目根，gitignored） | ❌ |
+| Key 模板 | `.env.local.example` | ✅ |
+| 配置中只引用变量名 | `ai_tasks.json::api_key_env: "CLAUDE_API_KEY"` | ✅ |
+
+支持的 key：`CLAUDE_API_KEY` / `ANTHROPIC_API_KEY` / `X_BEARER_TOKEN`。
+
+启动器和 `dashboard_server.py` 都会自动 `load_env_file()` 加载 `.env.local`。
+
+### 3. 统一抓取流（7 脚本并行）
+
+总览顶部"同步数据"按钮一键并行 7 个抓取：
+
+```
+strategy_monitor / market_rank / daily_report / commercial_strategy /
+fb_adlib / reddit_crawl / twitter_crawl
+        │
+        ▼ Promise.all 并行（任一失败不阻塞）
+        ▼
+generate_dashboard（聚合 + 重算 22 条预警）
+        │
+        ▼
+增量刷新前端（不重载页面）+ 进度文案 + Toast 通知
+```
+
+### 4. 预警引擎
+
+[`data_pipeline/alert_engine.py`](data_pipeline/alert_engine.py) — 22 条触发器集中：
+
+- 排名跳变 / 周对比 / 基线偏离
+- 评论负面爆发 / 占比 / 体量
+- 社媒情绪占比 / AI alert level / 痛点严重度
+- 产品更新爆发 / bugfix 集中
+- 广告投放异常 / 节奏 z-score
+- IAP 价格 / 收入漂移
+- 下载日 / 周突变
+
+阈值配置：[`data/alert_config.json`](data/alert_config.json)（自动生成默认值，可手改）。
+
+### 5. 总览看板 4 层金字塔
+
+```
+L0 一眼态势   ─ 综合健康度 / 高风险数 / 新机会数 / 行业脉搏 sparkline
+L0.5 预警精华 ─ 最高 severity 一条 + 共 N 条
+L1 模块 KPI   ─ 5 张迷你看板（排名 / 产品 / 评论 / 社媒 / 商业）
+L2 横切对比   ─ 战况表（多维排序） + 风险机会 2x2 矩阵
+L3 信号流     ─ 时间轴 + 痛点机会 Top5
+```
+
+### 6. AI 触发按钮（per-page）
+
+| 页面 | 按钮 | 后端 |
+|---|---|---|
+| 评论周报 | "重新生成" | `weekly_review.py` |
+| 商业分析 | "生成周报" | `commercial_strategy --weekly` |
+| 商业分析（弹窗） | "AI 策略分析" | `POST /api/ai/ads-strategy` |
+| 社媒舆情（per comp） | "启动 AI 分析" / "重新分析" | `POST /api/ai/community-insights` |
+| 社媒舆情（汇总） | "批量分析（N 个未生成）" | 串行触发上述 |
+| 竞品详情 | "运行分析"（功能深度） | `competitor_detail.py` |
+| 竞品详情 | "生成 3 日评论 AI"（NEW） | `review_3d_summary.py` |
+
+---
+
+## 目录速查
+
+```
+config/
+  ai_tasks.json       AI 模型/任务/节点（核心配置）
+  README.md           AI 配置说明（详细）
+
+shared/
+  ai_client.py        run_task 统一入口
+  env_loader.py       .env.local 加载（零依赖）
+
+prompts/
+  comment_prompts.py  评论类 prompt builder
+  community_prompts.py 社媒
+  ads_prompts.py      广告
+
+data_pipeline/
+  schema.py           统一 dataclass（Alert / Snapshot / Reviews / …）
+  aggregator.py       7 源 → dashboard_data.json
+  alert_engine.py     22 条预警触发器
+
+main_dashboard/
+  dashboard_server.py 后端 HTTP API
+  dashboard_template.html 前端模板（JSON-driven）
+  generate_dashboard.py 模板渲染入口
+
+data/
+  dashboard_data.json 唯一聚合产物（前端消费）
+  alert_config.json   预警阈值配置
+  *.json              各采集模块产物（多数 gitignored）
+  raw/                async_crawler 的原始抓取（gitignored）
+
+.env.local            密钥（gitignored，永不提交）
+.env.local.example    密钥模板（提交）
+启动看板.command      启动器（已去硬编码，从 .env.local 加载）
+```
+
+---
+
+## 常见操作
+
+### 改 AI 模型 / Prompt
+
+完全不动业务代码。详见 [`config/README.md`](config/README.md)。
+
+```bash
+# 看某个 task 的实际生效配置（合并 endpoint + model + task + env）
+python3 -m shared.ai_client review_3d --explain
+
+# 临时调温度
+export AI_OVERRIDE__review_3d__temperature=0.7
+```
+
+### 单独跑某模块
+
+```bash
+# 抓取
 python3 strategy_monitor/run_headless.py
 python3 market_rank/run_headless.py
+python3 competitor_comment/auto_report.py
 python3 commercial_strategy/run_headless.py
-python3 commercial_strategy/run_headless.py --weekly
+python3 -m async_crawler --sources reddit,twitter,fb_adlib
+
+# AI 分析（per competitor）
+python3 competitor_comment/competitor_detail.py SofaScore --days 7
+python3 competitor_comment/review_3d_summary.py SofaScore --days 3
+python3 competitor_comment/weekly_review.py
+python3 competitor_comment/run_all_details.py
+
+# 看板
+python3 main_dashboard/generate_dashboard.py
+python3 main_dashboard/dashboard_server.py
 ```
+
+### 同步看板（手动 + 一键）
+
+```bash
+# 全部抓取 + 聚合 + 生成（命令行）
+python3 main_dashboard/generate_dashboard.py --sync
+
+# 浏览器一键（推荐）
+打开 http://localhost:8899 → 总览右上"同步数据"
+```
+
+---
 
 ## 外部依赖
 
-- 环境变量：`CLAUDE_API_KEY`
-- AI API：`https://ai.flashapi.top/v1/messages`
-- 核心依赖：`streamlit`, `pandas`, `plotly`, `requests`, `google-play-scraper`
+- Python 3.10+（stdlib + `aiohttp`）
+- API：[flashapi.top](https://ai.flashapi.top/v1/messages) 中转 / 可选 [api.anthropic.com](https://api.anthropic.com/v1/messages) 官方
+- macOS（`启动看板.command` 是 bash），Linux/WSL 可手动 `python3 main_dashboard/dashboard_server.py`
 
-## 数据说明
+---
 
-- `data/competitors.json`、`data/regions.json` 应纳入版本管理
-- `data/*.json` 其余大多属于运行产物
-- `main_dashboard/dashboard.html` 属于生成产物，不应手改
-- `competitor_comment/reports/*.md` 属于历史报告产物
+## 数据 / 文件 git 政策
 
-## 推荐版本管理方式
+| 类型 | 路径 | git |
+|---|---|---|
+| 源码 + 配置模板 | `*.py` / `config/*.json` / `.env.local.example` | ✅ |
+| 主索引 | `data/competitors.json` / `data/regions.json` | ✅ |
+| 运行产物 | `data/*.json`（除上 2 个）/ `data/raw/` / `competitor_comment/reports/*.md` | ❌ |
+| 生成产物 | `main_dashboard/dashboard.html` | ❌ |
+| 密钥 | `.env` / `.env.local` / `.env.*.local` | ❌ |
+| 缓存 | `__pycache__/` / `.DS_Store` / `.claude/` | ❌ |
 
-这个项目最适合用 Git 做“源码与配置入库、运行产物忽略”的管理方式：
+---
 
-1. 跟踪源码和配置
-   - 跟踪 `competitor_comment/`, `strategy_monitor/`, `market_rank/`, `commercial_strategy/`, `main_dashboard/`, `prompts/`
-   - 跟踪 `data/competitors.json` 和 `data/regions.json`
+## 安全
 
-2. 忽略运行产物
-   - 忽略 `__pycache__/`, `.DS_Store`
-   - 忽略运行生成的 `data/*.json`
-   - 但保留 `data/competitors.json` 和 `data/regions.json`
-   - 忽略 `main_dashboard/dashboard.html`
-   - 忽略 `competitor_comment/reports/*.md`
-
-3. 建议提交节奏
-   - 配置变更单独提交，例如“调整监控地区”或“新增竞品”
-   - 功能改动单独提交，例如“评论分析切换为全量评论抓取”
-   - 生成产物不要混在功能提交里
-
-4. 建议分支规则
-   - `main`：稳定可运行版本
-   - `feature/*`：功能开发
-   - `fix/*`：缺陷修复
-   - `ops/*`：配置或监控口径调整
-
-5. 建议提交信息
-   - `feat: 评论分析改为全量评论抓取`
-   - `fix: 统一 competitors.json 为唯一竞品配置源`
-   - `chore: 清理缓存并补充 gitignore`
-   - `docs: 重写项目 README`
-
-## 当前建议
-
-如果你准备正式开始做版本管理，下一步最合适的是：
-
-```bash
-git init
-git add .
-git commit -m "chore: initialize INTEL-OPS repository"
-```
-
-提交前建议先确认 `.gitignore` 已经排除了运行产物，避免把实时数据快照一并提交进去。
+- ⚠️ **永远不要**把 key 写进任何 `*.py` / `*.json` / `*.command` 文件
+- ✅ 只通过 `.env.local`（gitignored）或浏览器顶部 API Key 框输入
+- ✅ 密钥泄露处置：去 [flashapi 控制台](https://ai.flashapi.top) 或 [anthropic 控制台](https://console.anthropic.com/settings/keys) 撤销旧 key + 申请新 key
+- ✅ 历史已用 `git filter-repo` 清洗过，旧硬编码 key 不再存在于任何 commit 中
