@@ -166,6 +166,25 @@ def fetch_ios(app_id, country):
     return rows
 
 
+_VALID_LABELS = {"[问题抱怨]", "[高价值功能请求]", "[竞品对比]", "[流失信号]", "[正向反馈]", "[其他]"}
+
+
+def _normalize_label(raw_label: str) -> str:
+    """把 Claude 返回的标签归一到带方括号的标准形式。
+
+    Claude 有时会返回 '问题抱怨'（无方括号）或 '[问题抱怨]'（含方括号）。
+    下游 SENTIMENT_BY_LABEL 字典 key 一律带方括号，所以这里 force 归一。
+    """
+    if not raw_label:
+        return "[其他]"
+    s = str(raw_label).strip().strip("'\"")
+    if not s.startswith("["):
+        s = "[" + s
+    if not s.endswith("]"):
+        s = s + "]"
+    return s if s in _VALID_LABELS else "[其他]"
+
+
 def label(rows):
     """使用 Claude 对评论打标"""
     id_map = {str(i): r["content"] for i, r in enumerate(rows)}
@@ -176,7 +195,7 @@ def label(rows):
             raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
         mapping = json.loads(raw)
         for i, r in enumerate(rows):
-            r["label"] = mapping.get(str(i), "[其他]")
+            r["label"] = _normalize_label(mapping.get(str(i), "[其他]"))
     except Exception as exc:
         print(f"  [AI] 打标失败，降级为默认标签: {exc}")
         for r in rows:

@@ -359,9 +359,21 @@ SENTIMENT_BY_LABEL = {
 
 
 def _derive_sentiment(label: str | None, rating: int) -> str:
-    """从 label 派生情绪；无 label 时按 rating 兜底。"""
-    if label and label in SENTIMENT_BY_LABEL:
-        return SENTIMENT_BY_LABEL[label]
+    """从 label 派生情绪；[其他] / 无 label / 格式异常时按 rating 兜底。
+
+    label 容错：'问题抱怨' / '[问题抱怨]' / "'问题抱怨'" 都能正确映射。
+    [其他] 不直接返回 neutral — 回落到 rating（避免 5 星评论被误判为中性）。
+    """
+    if label:
+        # 归一：去引号 → 补方括号 → 查表
+        s = str(label).strip().strip("'\"")
+        if s and not s.startswith("["):
+            s = "[" + s
+        if s and not s.endswith("]"):
+            s = s + "]"
+        # 明确语义的 5 个 label 走查表；[其他] 不强归 neutral，回落到 rating
+        if s in SENTIMENT_BY_LABEL and s != "[其他]":
+            return SENTIMENT_BY_LABEL[s]
     if rating >= 4:
         return "positive"
     if rating and rating <= 2:
