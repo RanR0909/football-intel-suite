@@ -13,9 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from async_crawler.base import BaseCrawler
 from async_crawler import db
 from competitors import get_comment_competitors
-from regions import get_region_codes  # noqa: F401  (保留，便于未来切换 region 来源)
+from regions import get_region_codes
 
-IAP_REGIONS = ["us", "gb", "br", "de", "jp"]
+# 从 data/regions.json 动态读取（与全站 region 配置保持一致）
+IAP_REGIONS = get_region_codes()
 _RAW_OUTPUT = Path(__file__).resolve().parent.parent.parent / "data" / "raw" / "iap_pricing.json"
 
 

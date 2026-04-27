@@ -332,7 +332,7 @@ def now_str():
 def date_str():
     return datetime.now().strftime("%Y年%m月%d日")
 
-# 竞品颜色映射
+# 竞品颜色映射（与 data_pipeline/aggregator.py 保持一致）
 COMP_COLORS = {
     "SofaScore": "#7b6ef6",
     "FlashScore": "#4ecca3",
@@ -340,8 +340,11 @@ COMP_COLORS = {
     "365Scores": "#ff5c5c",
     "Fotmob": "#60a5fa",
     "LiveScore": "#a78bfa",
-    "ESPN": "#f472b6",
-    "theScore": "#34d399",
+    "AiScore": "#f472b6",
+    "BeSoccer": "#34d399",
+    "310Scores": "#fbbf24",
+    "ESPN": "#22d3ee",
+    "theScore": "#fb923c",
 }
 
 # ---------------------------------------------------------------------------

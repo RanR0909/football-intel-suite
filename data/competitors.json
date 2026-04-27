@@ -34,5 +34,23 @@
     "ios": 356928178,
     "app_id": "356928178",
     "bundle_id": "com.livescore.ios"
+  },
+  "AiScore": {
+    "gp": "com.onesports.score",
+    "ios": 1477171291,
+    "app_id": "1477171291",
+    "bundle_id": "com.onesports.score"
+  },
+  "BeSoccer": {
+    "gp": "com.resultadosfutbol.mobile",
+    "ios": 550928207,
+    "app_id": "550928207",
+    "bundle_id": "com.resultadosfutbol.resultadosfutboliphone"
+  },
+  "310Scores": {
+    "gp": "com.scores.tfz",
+    "ios": 6449077229,
+    "app_id": "6449077229",
+    "bundle_id": "com.scores.tfz"
   }
 }

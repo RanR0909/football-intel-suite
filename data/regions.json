@@ -42,5 +42,9 @@
   "br": {
     "label": "巴西",
     "lang": "pt"
+  },
+  "ru": {
+    "label": "俄罗斯",
+    "lang": "ru"
   }
 }

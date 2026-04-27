@@ -71,10 +71,13 @@ COMP_COLORS = {
     "365Scores": "#ff5c5c",
     "Fotmob": "#60a5fa",
     "LiveScore": "#a78bfa",
-    "ESPN": "#f472b6",
-    "theScore": "#34d399",
+    "AiScore": "#f472b6",
+    "BeSoccer": "#34d399",
+    "310Scores": "#fbbf24",
+    "ESPN": "#22d3ee",
+    "theScore": "#fb923c",
 }
-COLOR_FALLBACK = ["#7b6ef6", "#4ecca3", "#f5a623", "#ff5c5c", "#60a5fa", "#a78bfa", "#f472b6", "#34d399"]
+COLOR_FALLBACK = ["#7b6ef6", "#4ecca3", "#f5a623", "#ff5c5c", "#60a5fa", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#22d3ee", "#fb923c"]
 
 VERSION_FEATURE_KEYWORDS = [
     "功能", "feature", "new", "更新", "上线", "新增",
