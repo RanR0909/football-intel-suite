@@ -227,8 +227,26 @@ def _adapt_rank_view(D):
     - registry：透传 competitors.json，给"数据来源链接"工具用
     - competitors：每竞品的 rank 视图（current/delta_dod/delta_wow/history/app_id 等）
     """
+    # 把 new_contenders 的 is_first_seen 标志合并进 leaderboard 项（按 app_id）
+    leaderboard = [dict(it) for it in (D.get("leaderboard") or [])]
+    new_ids = {
+        str(c.get("app_id")): c
+        for c in (D.get("new_contenders") or [])
+        if c.get("app_id") is not None
+    }
+    for it in leaderboard:
+        aid = str(it.get("app_id") or "")
+        nc = new_ids.get(aid)
+        if nc:
+            it["is_new_contender"] = True
+            it["is_first_seen"] = bool(nc.get("is_first_seen"))
+            if nc.get("delta") is not None:
+                it["new_contender_delta"] = nc.get("delta")
+
     out = {
-        "leaderboard": list(D.get("leaderboard") or []),
+        "leaderboard": leaderboard,
+        "new_contenders": list(D.get("new_contenders") or []),
+        "fast_movers": list(D.get("fast_movers") or []),
         "baseline": dict(D.get("baseline") or {}),
         "registry": dict(D.get("competitor_registry") or {}),
         "competitors": {},

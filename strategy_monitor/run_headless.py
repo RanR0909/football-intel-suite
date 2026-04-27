@@ -45,6 +45,7 @@ def export_json(results: list) -> None:
         entry = {
             "version": r["current_data"]["version"],
             "release_notes": r["current_data"]["release_notes"],
+            "release_date": r["current_data"].get("release_date", ""),
             "in_app_purchases": r["current_data"]["in_app_purchases"],
             "has_changed": diff["has_changed"],
             "is_first_record": diff["is_first_record"],

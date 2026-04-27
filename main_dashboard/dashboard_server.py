@@ -120,6 +120,37 @@ SCRIPTS = {
 _running_tasks = {}
 _tasks_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# 同步抓取日志（持久化到 data/sync_log.json，rolling 最近 50 条）
+# ---------------------------------------------------------------------------
+SYNC_LOG_PATH = DATA_DIR / "sync_log.json"
+SYNC_LOG_MAX_ENTRIES = 50
+_sync_log_lock = threading.Lock()
+
+
+def _append_sync_log(entry: dict) -> None:
+    """每次脚本运行结束后追加一条记录。线程安全。"""
+    with _sync_log_lock:
+        try:
+            entries = []
+            if SYNC_LOG_PATH.exists():
+                try:
+                    entries = json.loads(SYNC_LOG_PATH.read_text(encoding="utf-8")) or []
+                    if not isinstance(entries, list):
+                        entries = []
+                except Exception:
+                    entries = []
+            entries.append(entry)
+            entries = entries[-SYNC_LOG_MAX_ENTRIES:]
+            SYNC_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SYNC_LOG_PATH.write_text(
+                json.dumps(entries, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            # 日志写失败不能影响主流程
+            print(f"[sync_log] write failed: {e}", file=sys.stderr)
+
 
 class DashboardAPIHandler(BaseHTTPRequestHandler):
     """HTTP 请求处理器"""
@@ -363,6 +394,23 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
             data = self._load_json_file("ranking_history.json")
             self._send_json(data)
 
+        elif path == "/api/sync_log":
+            # 同步抓取日志（最近 50 条）
+            try:
+                if SYNC_LOG_PATH.exists():
+                    entries = json.loads(SYNC_LOG_PATH.read_text(encoding="utf-8")) or []
+                else:
+                    entries = []
+                limit = int(params.get("limit", ["50"])[0])
+                entries = entries[-limit:]
+                self._send_json({
+                    "entries": entries,
+                    "total": len(entries),
+                    "max_kept": SYNC_LOG_MAX_ENTRIES,
+                })
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 500)
+
         elif path == "/api/data/dashboard_data":
             # 返回聚合后的统一数据（dashboard 唯一需要的产物）
             # 若 dashboard_data.json 不存在则即时聚合
@@ -481,7 +529,8 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
             return {}
 
     def _run_script(self, script_name, competitor="", days="7", api_key=""):
-        """在后台线程中运行脚本"""
+        """在后台线程中运行脚本（结束后写一条 sync_log.json 记录）"""
+        from datetime import datetime as _dt
         config = SCRIPTS[script_name]
         script_path = config["path"]
         cwd = config.get("cwd", os.path.dirname(script_path) or str(_PROJECT_ROOT))
@@ -504,14 +553,21 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
         elif CLAUDE_API_KEY:
             env["CLAUDE_API_KEY"] = CLAUDE_API_KEY
 
-        # 更新状态
+        # 入口时间
+        started_at = _dt.now()
         with _tasks_lock:
             _running_tasks[script_name] = {
                 "running": True,
                 "label": config["label"],
-                "started_at": __import__("datetime").datetime.now().isoformat(),
+                "started_at": started_at.isoformat(),
                 "output": "",
             }
+
+        # 默认值（任何分支都会写日志）
+        success = False
+        stdout_tail = ""
+        stderr_tail = ""
+        error_kind = None
 
         try:
             result = subprocess.run(
@@ -522,32 +578,55 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
                 cwd=cwd,
                 env=env,
             )
+            success = (result.returncode == 0)
+            stdout_tail = (result.stdout or "")[-1500:]
+            stderr_tail = (result.stderr or "")[-1500:]
             with _tasks_lock:
                 _running_tasks[script_name] = {
                     "running": False,
                     "label": config["label"],
-                    "success": result.returncode == 0,
-                    "output": (result.stdout or "")[-500:] + (result.stderr or "")[-500:],
-                    "finished_at": __import__("datetime").datetime.now().isoformat(),
+                    "success": success,
+                    "output": stdout_tail[-500:] + stderr_tail[-500:],
+                    "finished_at": _dt.now().isoformat(),
                 }
         except subprocess.TimeoutExpired:
+            error_kind = "timeout"
+            stderr_tail = "执行超时（600秒）"
             with _tasks_lock:
                 _running_tasks[script_name] = {
                     "running": False,
                     "label": config["label"],
                     "success": False,
-                    "output": "执行超时（600秒）",
-                    "finished_at": __import__("datetime").datetime.now().isoformat(),
+                    "output": stderr_tail,
+                    "finished_at": _dt.now().isoformat(),
                 }
         except Exception as e:
+            error_kind = type(e).__name__
+            stderr_tail = str(e)
             with _tasks_lock:
                 _running_tasks[script_name] = {
                     "running": False,
                     "label": config["label"],
                     "success": False,
-                    "output": str(e),
-                    "finished_at": __import__("datetime").datetime.now().isoformat(),
+                    "output": stderr_tail,
+                    "finished_at": _dt.now().isoformat(),
                 }
+
+        # 持久化日志（无论成败）
+        finished_at = _dt.now()
+        _append_sync_log({
+            "script": script_name,
+            "label": config["label"],
+            "competitor": competitor or None,
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+            "duration_sec": round((finished_at - started_at).total_seconds(), 2),
+            "success": success,
+            "error_kind": error_kind,
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+            "cmd": " ".join(cmd[:6]) + (" ..." if len(cmd) > 6 else ""),
+        })
 
 
 def main():

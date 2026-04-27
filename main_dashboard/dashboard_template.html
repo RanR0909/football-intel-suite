@@ -415,6 +415,19 @@ body::before {
   </div>
 </div>
 
+<!-- L4：同步抓取日志（折叠卡，按运行批次分组） -->
+<div class="card full-card" id="ov-sync-log-card" style="margin-top:16px">
+  <div class="card-head" id="ov-sync-log-head" style="cursor:pointer" onclick="toggleSyncLog()">
+    <div class="card-title">同步抓取日志</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span id="ov-sync-log-meta" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+      <button class="btn" style="font-size:11px;padding:3px 10px" onclick="event.stopPropagation();refreshSyncLog()">刷新</button>
+      <span id="ov-sync-log-toggle" style="color:var(--muted);font-size:11px;font-family:var(--mono);user-select:none">展开 ▼</span>
+    </div>
+  </div>
+  <div id="ov-sync-log-body" style="display:none;padding:12px 20px"></div>
+</div>
+
 </div><!-- end overview -->
 
 <!-- PAGE: ALERTS -->
@@ -1987,13 +2000,26 @@ function syncAllData() {
       _setSyncBtn('已同步', false);
       var msg = '同步完成 · ' + (total - failures.length) + ' / ' + total + ' 抓取成功';
       if (failures.length) {
-        _showSyncToast(msg + ' · 失败：' + failures.slice(0,3).join('、'), 'warn');
+        _showSyncToast(msg + ' · 失败：' + failures.slice(0,3).join('、') + ' · 详情见同步日志 ↓', 'warn');
+        // 失败时自动展开同步日志卡
+        var logBody = document.getElementById('ov-sync-log-body');
+        var logToggle = document.getElementById('ov-sync-log-toggle');
+        if (logBody && logBody.style.display === 'none') {
+          logBody.style.display = 'block';
+          if (logToggle) logToggle.textContent = '折叠 ▲';
+        }
+        // 滚动到日志卡
+        setTimeout(function(){
+          var card = document.getElementById('ov-sync-log-card');
+          if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 600);
       } else {
         _showSyncToast(msg, 'success');
       }
       // 增量刷新：拉新 dashboard_data 并 re-render（替代 location.reload）
       _reloadDashboardData(function(){
         try { renderOverviewPage(); } catch(e) { console.error(e); }
+        try { if (typeof refreshSyncLog === 'function') refreshSyncLog(); } catch(e) {}
         try { if (typeof refreshReviewData === 'function') refreshReviewData(function(){}); } catch(e) {}
       });
     });
@@ -4148,6 +4174,14 @@ function renderRankRowHtml(row, isRegistered, fullMode) {
   var unregisteredBadge = (fullMode && !isRegistered)
     ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(245,166,35,0.15);color:var(--warn);margin-left:6px;font-family:var(--mono)">未监测</span>'
     : '';
+  // 新上榜（首次进入 top100）chip — 永远显示，无论是否已监测
+  var firstSeenBadge = row.is_first_seen
+    ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(78,204,163,0.18);color:var(--accent2);margin-left:6px;font-family:var(--mono)" title="首次进入 Top 100">新上榜</span>'
+    : '';
+  // 快速上升（new_contender 但非 first_seen）chip
+  var riserBadge = (row.is_new_contender && !row.is_first_seen && row.new_contender_delta)
+    ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(245,166,35,0.18);color:var(--warn);margin-left:6px;font-family:var(--mono)" title="' + row.new_contender_delta + ' 位上升">快速上升 ↑' + row.new_contender_delta + '</span>'
+    : '';
 
   var clickable = isRegistered;
   var nameStyle = clickable ? 'color:var(--text)' : 'color:var(--muted)';
@@ -4157,7 +4191,7 @@ function renderRankRowHtml(row, isRegistered, fullMode) {
 
   return '<div class="rank-row" ' + rowAttrs + '>' +
     '<span style="font-family:var(--mono);color:var(--muted)">#' + (row.current != null ? row.current : '?') + '</span>' +
-    '<span style="' + nameStyle + '">' + escapeHtml(row.name || '?') + registeredBadge + unregisteredBadge + '</span>' +
+    '<span style="' + nameStyle + '">' + escapeHtml(row.name || '?') + registeredBadge + unregisteredBadge + firstSeenBadge + riserBadge + '</span>' +
     '<span style="font-family:var(--mono)">' + (row.current != null ? row.current : '—') + '</span>' +
     '<span>' + dod + '</span>' +
     '<span>' + wow + '</span>' +
@@ -4224,6 +4258,9 @@ function getSortedCompetitors(filterKey) {
       delta_dod: snap.delta_dod != null ? snap.delta_dod : item.delta,
       delta_wow: snap.delta_wow,
       is_known: !!item.is_known,
+      is_first_seen: !!item.is_first_seen,
+      is_new_contender: !!item.is_new_contender,
+      new_contender_delta: item.new_contender_delta,
       app_id: item.app_id || snap.app_id,
       artist: item.artist,
     };
@@ -5634,6 +5671,121 @@ function _renderOvPainOpp() {
     oppHtml;
 }
 
+// ====== 同步抓取日志（按 finished_at 时间轴聚合分组）=========
+var _syncLogCache = { entries: [] };
+
+function refreshSyncLog(cb) {
+  fetch(API_BASE + '/api/sync_log?ts=' + Date.now(), { cache: 'no-store' })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      _syncLogCache = d || { entries: [] };
+      _renderOvSyncLog();
+      if (cb) cb();
+    })
+    .catch(function(e){
+      console.error('sync_log fetch failed', e);
+      if (cb) cb();
+    });
+}
+
+function toggleSyncLog() {
+  var body = document.getElementById('ov-sync-log-body');
+  var toggle = document.getElementById('ov-sync-log-toggle');
+  if (!body) return;
+  var visible = body.style.display !== 'none';
+  body.style.display = visible ? 'none' : 'block';
+  if (toggle) toggle.textContent = visible ? '展开 ▼' : '折叠 ▲';
+  if (!visible && (!_syncLogCache.entries || !_syncLogCache.entries.length)) {
+    refreshSyncLog();
+  }
+}
+
+function _renderOvSyncLog() {
+  var meta = document.getElementById('ov-sync-log-meta');
+  var body = document.getElementById('ov-sync-log-body');
+  if (!body) return;
+  var entries = (_syncLogCache.entries || []).slice().reverse(); // 新→旧
+  var fail = entries.filter(function(e){ return !e.success; }).length;
+  var ok = entries.length - fail;
+  if (meta) {
+    meta.textContent = entries.length
+      ? (entries.length + ' 条 · 成功 ' + ok + ' / 失败 ' + fail + ' · 最近 ' + (entries[0].finished_at || '').replace('T',' ').slice(0,16))
+      : '暂无日志';
+  }
+  if (!entries.length) {
+    body.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0">尚未运行任何同步任务。点击右上角"同步数据"开始。</div>';
+    return;
+  }
+
+  // 按"批次"分组：finished_at 间隔 ≤ 5 分钟视为同一批
+  var batches = [];
+  var current = null;
+  entries.slice().reverse().forEach(function(e){  // 时间正序
+    var t = new Date(e.finished_at || e.started_at).getTime();
+    if (!current || (t - current.endTs) > 5 * 60 * 1000) {
+      current = { startTs: t, endTs: t, items: [] };
+      batches.push(current);
+    } else {
+      current.endTs = t;
+    }
+    current.items.push(e);
+  });
+  batches.reverse(); // 新批次在前
+
+  body.innerHTML = batches.slice(0, 5).map(function(b, bi){
+    var startStr = new Date(b.startTs).toISOString().replace('T',' ').slice(0,16);
+    var endStr   = new Date(b.endTs).toISOString().replace('T',' ').slice(0,16);
+    var bFail = b.items.filter(function(e){ return !e.success; }).length;
+    var bOk = b.items.length - bFail;
+    var totalDur = b.items.reduce(function(s,e){ return s + (e.duration_sec||0); }, 0);
+    var batchColor = bFail === 0 ? 'var(--accent2)' : (bFail < b.items.length ? 'var(--warn)' : 'var(--danger)');
+
+    var rows = b.items.slice().reverse().map(function(e){
+      var color = e.success ? 'var(--accent2)' : 'var(--danger)';
+      var icon = e.success ? '✓' : '✗';
+      var stderr = (e.stderr_tail || '').trim();
+      var stdoutHint = (e.stdout_tail || '').trim();
+      var hasErr = !!stderr;
+      var rowId = 'sync-row-' + bi + '-' + (e.script || '') + '-' + (e.started_at || '').replace(/[^0-9]/g,'');
+      var detailHtml = (hasErr || stdoutHint)
+        ? '<div id="' + rowId + '" style="display:none;margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:4px;font-family:var(--mono);font-size:10px;color:var(--muted);max-height:240px;overflow-y:auto;white-space:pre-wrap;line-height:1.5">' +
+          (hasErr ? '<div style="color:var(--danger);margin-bottom:6px">stderr ↓</div>' + escapeHtml(stderr.slice(-1500)) : '') +
+          (stdoutHint ? '<div style="color:var(--muted);margin-top:8px;margin-bottom:4px">stdout ↓</div>' + escapeHtml(stdoutHint.slice(-1000)) : '') +
+          '</div>'
+        : '';
+      var toggleAttr = (hasErr || stdoutHint)
+        ? 'onclick="(function(){var el=document.getElementById(\'' + rowId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\';})()" style="cursor:pointer"'
+        : 'style="cursor:default"';
+
+      return '<div ' + toggleAttr + ' style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:11px">' +
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+          '<span style="color:' + color + ';font-family:var(--mono);width:14px">' + icon + '</span>' +
+          '<span style="font-family:var(--mono);color:var(--text);min-width:140px">' + escapeHtml(e.label || e.script) + '</span>' +
+          '<span style="font-family:var(--mono);color:var(--muted);font-size:10px">' + (e.duration_sec != null ? e.duration_sec + 's' : '—') + '</span>' +
+          (e.competitor ? '<span style="font-family:var(--mono);color:var(--accent);font-size:10px">' + escapeHtml(e.competitor) + '</span>' : '') +
+          (e.error_kind ? '<span style="padding:1px 6px;border-radius:3px;background:rgba(255,92,92,0.18);color:var(--danger);font-size:9px;font-family:var(--mono)">' + escapeHtml(e.error_kind) + '</span>' : '') +
+          '<span style="margin-left:auto;font-family:var(--mono);color:var(--muted);font-size:10px">' + (e.finished_at||'').replace('T',' ').slice(11,19) + '</span>' +
+          (hasErr ? '<span style="color:var(--accent);font-size:10px;font-family:var(--mono)">▼ 详情</span>' : '') +
+        '</div>' +
+        detailHtml +
+      '</div>';
+    }).join('');
+
+    return '<div style="margin-bottom:14px;border:1px solid var(--border);border-radius:6px;overflow:hidden">' +
+      '<div style="padding:8px 12px;background:var(--surface2);display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+        '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + batchColor + '"></span>' +
+        '<span style="font-family:var(--mono);font-size:11px;color:var(--text)">批次 #' + (batches.length - bi) + '</span>' +
+        '<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">' + startStr + (b.startTs !== b.endTs ? ' → ' + endStr.slice(11) : '') + '</span>' +
+        '<span style="font-family:var(--mono);font-size:10px;color:var(--accent2)">✓ ' + bOk + '</span>' +
+        (bFail ? '<span style="font-family:var(--mono);font-size:10px;color:var(--danger)">✗ ' + bFail + '</span>' : '') +
+        '<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">总耗时 ' + totalDur.toFixed(1) + 's</span>' +
+      '</div>' +
+      '<div style="background:var(--surface)">' + rows + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+
 // ====== 总入口 ==================================================
 function renderOverviewPage() {
   try { _renderOvL0(); }          catch(e) { console.error('ov L0', e); }
@@ -5643,6 +5795,7 @@ function renderOverviewPage() {
   try { _renderOvL2B(); }         catch(e) { console.error('ov L2B', e); }
   try { _renderOvTimeline(); }    catch(e) { console.error('ov L3A', e); }
   try { _renderOvPainOpp(); }     catch(e) { console.error('ov L3B', e); }
+  try { refreshSyncLog(); }       catch(e) { console.error('ov syncLog', e); }
 }
 
 

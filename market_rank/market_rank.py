@@ -783,16 +783,24 @@ def detect_new_contenders(
                 break
 
         if past_rank is None:
+            # 历史 lookback 窗口里完全没出现过 → 真"首次上榜"
+            app_with_flag = dict(app)
+            app_with_flag["delta"] = None
+            app_with_flag["is_first_seen"] = True
+            contenders.append(app_with_flag)
             continue
 
         delta = past_rank - current_rank
         if delta >= rise_threshold:
             app_with_delta = dict(app)
             app_with_delta["delta"] = delta
+            app_with_delta["is_first_seen"] = False
             contenders.append(app_with_delta)
 
-    # Sort by delta descending (biggest mover first)
-    contenders.sort(key=lambda x: x["delta"], reverse=True)
+    # 排序：first_seen 优先（None delta 排最前），其余按 delta 降序
+    contenders.sort(
+        key=lambda x: (0 if x.get("is_first_seen") else 1, -(x.get("delta") or 0))
+    )
     return contenders
 
 
