@@ -363,6 +363,7 @@ body::before {
   </div>
   <div class="header-actions">
     <button class="btn" onclick="syncAllData()">同步数据</button>
+    <span id="ov-last-sync-badge" style="display:none;padding:5px 10px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);font-size:11px;font-family:var(--mono);color:var(--muted);align-self:center" title="最近一次同步完成时间"></span>
     <button class="btn btn-primary" onclick="window.print()">导出报告</button>
   </div>
 </div>
@@ -5725,14 +5726,23 @@ function _renderOvPainOpp() {
     oppHtml;
 }
 
-// ====== 同步抓取日志（按 finished_at 时间轴聚合分组）=========
+// ====== 同步抓取日志（仅显示本次浏览器会话内的同步）=========
+// 浏览器刷新即重置 → 历史日志在 UI 上自动隐藏（后端仍保留持久化）
+var _syncSessionStart = Date.now();
 var _syncLogCache = { entries: [] };
+
+function _entryTs(e) {
+  var t = new Date(e.started_at || e.finished_at || 0).getTime();
+  return isNaN(t) ? 0 : t;
+}
 
 function refreshSyncLog(cb) {
   fetch(API_BASE + '/api/sync_log?ts=' + Date.now(), { cache: 'no-store' })
     .then(function(r){ return r.json(); })
     .then(function(d){
       _syncLogCache = d || { entries: [] };
+      // 同时更新最后一次同步 badge（无论 session 是否触发过）
+      _updateLastSyncBadge();
       _renderOvSyncLog();
       if (cb) cb();
     })
@@ -5740,6 +5750,40 @@ function refreshSyncLog(cb) {
       console.error('sync_log fetch failed', e);
       if (cb) cb();
     });
+}
+
+function _updateLastSyncBadge() {
+  var badge = document.getElementById('ov-last-sync-badge');
+  if (!badge) return;
+  var entries = _syncLogCache.entries || [];
+  if (!entries.length) {
+    badge.style.display = 'none';
+    return;
+  }
+  // 找"最后一次成功的 generate_dashboard"作为同步完成时间锚点；
+  // 若无则取最近一条 finished_at
+  var anchor = null;
+  for (var i = entries.length - 1; i >= 0; i--) {
+    var e = entries[i];
+    if (e.success && e.script === 'generate_dashboard' && e.finished_at) { anchor = e; break; }
+  }
+  if (!anchor) {
+    for (var j = entries.length - 1; j >= 0; j--) {
+      if (entries[j].finished_at) { anchor = entries[j]; break; }
+    }
+  }
+  if (!anchor) {
+    badge.style.display = 'none';
+    return;
+  }
+  var t = new Date(anchor.finished_at);
+  if (isNaN(t.getTime())) { badge.style.display = 'none'; return; }
+  // 精确到分：YYYY-MM-DD HH:MM
+  var pad = function(n){ return n < 10 ? '0' + n : '' + n; };
+  var stamp = t.getFullYear() + '-' + pad(t.getMonth()+1) + '-' + pad(t.getDate())
+              + ' ' + pad(t.getHours()) + ':' + pad(t.getMinutes());
+  badge.textContent = '最近同步：' + stamp;
+  badge.style.display = '';
 }
 
 function toggleSyncLog() {
@@ -5758,16 +5802,21 @@ function _renderOvSyncLog() {
   var meta = document.getElementById('ov-sync-log-meta');
   var body = document.getElementById('ov-sync-log-body');
   if (!body) return;
-  var entries = (_syncLogCache.entries || []).slice().reverse(); // 新→旧
+  // 只展示"本次浏览器会话内"产生的条目（刷新即清）
+  var allEntries = (_syncLogCache.entries || []);
+  var sessionEntries = allEntries.filter(function(e){
+    return _entryTs(e) >= _syncSessionStart;
+  });
+  var entries = sessionEntries.slice().reverse(); // 新→旧
   var fail = entries.filter(function(e){ return !e.success; }).length;
   var ok = entries.length - fail;
   if (meta) {
     meta.textContent = entries.length
-      ? (entries.length + ' 条 · 成功 ' + ok + ' / 失败 ' + fail + ' · 最近 ' + (entries[0].finished_at || '').replace('T',' ').slice(0,16))
-      : '暂无日志';
+      ? (entries.length + ' 条（本次会话）· 成功 ' + ok + ' / 失败 ' + fail)
+      : '本次会话暂未触发同步';
   }
   if (!entries.length) {
-    body.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0">尚未运行任何同步任务。点击右上角"同步数据"开始。</div>';
+    body.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0">本次浏览器会话尚未触发同步。点击右上角"同步数据"开始；刷新页面将清空此处显示。</div>';
     return;
   }
 
