@@ -18,6 +18,7 @@ import json
 import os
 import re
 import ssl
+import time
 import urllib.parse
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -253,21 +254,43 @@ def fetch_androidrank_data(package_name: str) -> dict:
     return result
 
 
-def fetch_sensor_tower_data(package_name: str) -> dict:
-    """Fetch download trend, revenue range, category rank from Sensor Tower public API."""
+def fetch_sensor_tower_data(package_name: str, max_retries: int = 4) -> dict:
+    """Fetch download trend, revenue range, category rank from Sensor Tower public API.
+
+    429 退避：base 5s 起步指数（5/10/20/40s），优先用响应头的 Retry-After。
+    """
     url = f"https://app.sensortower.com/api/android/apps/{package_name}?country=US"
-    try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        })
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
-            data = json.loads(resp.read())
-    except Exception as e:
-        return {"error": str(e)}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                data = json.loads(resp.read())
+            break
+        except urllib.error.HTTPError as e:
+            last_err = f"HTTP {e.code}: {e.reason}"
+            if e.code == 429 and attempt < max_retries - 1:
+                ra = e.headers.get("Retry-After") if hasattr(e, "headers") and e.headers else None
+                wait = max(5 * (2 ** attempt), int(ra) if ra and ra.isdigit() else 0)
+                wait = min(wait, 60)  # cap 60s
+                print(f"      [ST 限流] 等待 {wait}s 重试 ({attempt + 1}/{max_retries})...", flush=True)
+                time.sleep(wait)
+                continue
+            return {"error": last_err}
+        except Exception as e:
+            return {"error": str(e)}
+    else:
+        return {"error": last_err or "unknown error"}
 
     result = {}
 

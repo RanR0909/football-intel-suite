@@ -569,12 +569,15 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
         stderr_tail = ""
         error_kind = None
 
+        # 超时阈值：抓取类（评论 / Reddit / Twitter）可能耗时较长，给 1200s
+        # 普通脚本 600s 够用；通过 SCRIPTS[name].get("timeout", 1200) 覆盖
+        script_timeout = int(config.get("timeout", 1200))
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=script_timeout,
                 cwd=cwd,
                 env=env,
             )
@@ -591,7 +594,7 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
                 }
         except subprocess.TimeoutExpired:
             error_kind = "timeout"
-            stderr_tail = "执行超时（600秒）"
+            stderr_tail = f"执行超时（{script_timeout}秒）"
             with _tasks_lock:
                 _running_tasks[script_name] = {
                     "running": False,

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -34,13 +35,17 @@ class RedditCrawler(BaseCrawler):
     source_name = "reddit"
     rate_limit = 2.0
 
-    POST_LIMIT = 50
+    POST_LIMIT = 30                 # 50 → 30
     COMMENT_TOP_N = 20
     POST_SELFTEXT_MAX = 2000
     COMMENT_BODY_MAX = 1000
-    KEYWORD_TEMPLATES = ["{name} app", "{name} review", "{name}"]
+    # 默认只用 1 个关键词模板，把每竞品的搜索调用从 3 减到 1
+    KEYWORD_TEMPLATES = ["{name}"]
     SEARCH_TIME_FILTER = "month"   # hour / day / week / month / year / all
     UA = "FootballIntelBot/1.0 (competitive analysis)"
+    # 是否对每条帖子单独 fetch 评论（默认关，开启会让总调用 × 30）
+    # 通过 env 变量 REDDIT_FETCH_COMMENTS=1 启用
+    FETCH_COMMENTS = (os.environ.get("REDDIT_FETCH_COMMENTS", "0") == "1")
 
     async def crawl(self, database) -> list[dict]:
         competitors = get_comment_competitors()
@@ -85,7 +90,9 @@ class RedditCrawler(BaseCrawler):
 
                 subreddit = d.get("subreddit") or ""
                 permalink = d.get("permalink") or ""
-                comments = await self._fetch_comments(subreddit, pid)
+                # 默认跳过 per-post 评论抓取（避免 30 帖 × 6 竞品 = 180 + 调用），
+                # 需要时设 env REDDIT_FETCH_COMMENTS=1
+                comments = await self._fetch_comments(subreddit, pid) if self.FETCH_COMMENTS else []
 
                 out.append({
                     "post_id": pid,

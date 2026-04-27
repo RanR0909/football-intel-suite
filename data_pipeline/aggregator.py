@@ -808,6 +808,55 @@ def _fill_commercial(snapshots: dict[str, CompetitorSnapshot], commercial: dict)
         )
 
 
+def _load_iap_pricing_raw() -> list[dict]:
+    """data/raw/iap_pricing.json — async_crawler/sources/iap_pricing 输出。"""
+    p = RAW_DIR / "iap_pricing.json"
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _fill_iap_from_raw(snapshots: dict[str, CompetitorSnapshot], iap_raw: list[dict]):
+    """把 iap_pricing.json 的 IAP 项合并到 commercial.iap_items（去重 by name）。
+
+    raw 结构：[{source, competitor, region, timestamp, data: {iap_count, iaps:[{name,price,price_num,currency,category}]}}]
+    优先级：commercial_strategy.json 已有 iap_items > 直接覆盖
+    若 commercial.iap_items 为空，用 raw 数据填充。
+    """
+    by_comp: dict[str, list[dict]] = {}
+    for rec in iap_raw or []:
+        comp = rec.get("competitor")
+        if not comp:
+            continue
+        iaps = (rec.get("data") or {}).get("iaps") or []
+        if not iaps:
+            continue
+        # 用 (name, currency) 去重；同一 name 不同 region 不合并以保留全球价差
+        bucket = by_comp.setdefault(comp, [])
+        seen = {(it.get("name"), it.get("currency")) for it in bucket}
+        for it in iaps:
+            key = (it.get("name"), it.get("currency"))
+            if key in seen:
+                continue
+            seen.add(key)
+            bucket.append({
+                "name": it.get("name") or "",
+                "price": it.get("price") or "",
+                "price_num": it.get("price_num"),
+                "currency": it.get("currency") or "",
+                "category": it.get("category") or "",
+                "region": rec.get("region") or "",
+            })
+
+    for name, snap in snapshots.items():
+        if not snap.commercial.iap_items:
+            snap.commercial.iap_items = by_comp.get(name) or []
+
+
 # ---------------------------------------------------------------------------
 # 预警 / Feed / 指标
 # ---------------------------------------------------------------------------
@@ -994,6 +1043,7 @@ def build_dashboard_data() -> DashboardData:
     _fill_version(snapshots, strategy)
     _fill_comments(snapshots, comments, weekly, details, regions_cfg)
     _fill_commercial(snapshots, commercial)
+    _fill_iap_from_raw(snapshots, _load_iap_pricing_raw())
     _fill_ads(snapshots, fb_raw, ads_ai)
     _fill_community(snapshots, reddit_raw, twitter_raw, community_ai)
     product_updates = _build_product_updates(snapshots)
