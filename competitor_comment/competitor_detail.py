@@ -69,14 +69,23 @@ def call_claude(prompt, max_tokens=8192):
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_gp(pkg, country, cutoff_dt):
-    """抓取 Google Play 评论"""
+    """抓取 Google Play 评论。
+
+    NotFoundError 或 0 条返回都显式打 stderr，方便同步日志面板看到根因。
+    """
     from google_play_scraper import reviews, Sort
     lang = REGIONS.get(country, {}).get("lang", "en")
     try:
         result, _ = reviews(pkg, lang=lang, country=country, sort=Sort.NEWEST, count=FETCH_COUNT)
     except Exception as e:
-        print(f"    [GP] 抓取失败: {e}")
+        print(f"    [GP][{pkg}/{country}] 抓取失败（包名错？）: {type(e).__name__}: {e}", file=sys.stderr)
         return []
+    if not result:
+        print(
+            f"    [GP][{pkg}/{country}] 警告：返回 0 条 — 通常是包名 {pkg!r} "
+            f"在 Google Play 不存在（'幽灵 ID'）。",
+            file=sys.stderr,
+        )
     rows = []
     for r in result:
         at = r["at"].replace(tzinfo=timezone.utc) if r["at"].tzinfo is None else r["at"]

@@ -89,7 +89,17 @@ def translate_to_english(rows):
 def fetch(pkg, country):
     cutoff = datetime.now(timezone.utc) - timedelta(days=CUTOFF_DAYS)
     lang = REGION_INFO.get(country, {}).get("lang", "en")
-    result, _ = reviews(pkg, lang=lang, country=country, sort=Sort.NEWEST, count=FETCH_COUNT)
+    try:
+        result, _ = reviews(pkg, lang=lang, country=country, sort=Sort.NEWEST, count=FETCH_COUNT)
+    except Exception as e:
+        print(f"    [GP][{pkg}/{country}] 抓取失败（包名错？）: {type(e).__name__}: {e}", file=sys.stderr)
+        return []
+    if not result:
+        print(
+            f"    [GP][{pkg}/{country}] 警告：返回 0 条 — 通常是包名 {pkg!r} "
+            f"在 Google Play 不存在（'幽灵 ID'）。",
+            file=sys.stderr,
+        )
     rows = []
     for r in result:
         at = r["at"].replace(tzinfo=timezone.utc) if r["at"].tzinfo is None else r["at"]

@@ -6,31 +6,31 @@
     "bundle_id": "com.SofaScore.iOS"
   },
   "FlashScore": {
-    "gp": "com.flashscore.app",
+    "gp": "eu.livesport.FlashScore_com",
     "ios": 766443283,
     "app_id": "766443283",
     "bundle_id": "eu.livesport.FlashScore-com"
   },
   "OneFootball": {
-    "gp": "com.onefootball.onefootball.google",
+    "gp": "de.motain.iliga",
     "ios": 382002079,
     "app_id": "382002079",
     "bundle_id": "de.motain.iliga"
   },
   "365Scores": {
-    "gp": "com.scores365.android",
+    "gp": "com.scores365",
     "ios": 571801488,
     "app_id": "571801488",
     "bundle_id": "com.365scores.365scroesapp"
   },
   "Fotmob": {
-    "gp": "com.fotmob.fotmob",
+    "gp": "com.mobilefootie.wc2010",
     "ios": 488575683,
     "app_id": "488575683",
     "bundle_id": "com.mobilefootie.fotmobpro"
   },
   "LiveScore": {
-    "gp": "com.livescore.livescores",
+    "gp": "com.livescore",
     "ios": 356928178,
     "app_id": "356928178",
     "bundle_id": "com.livescore.ios"

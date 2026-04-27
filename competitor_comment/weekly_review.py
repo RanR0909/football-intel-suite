@@ -78,14 +78,26 @@ def call_claude(prompt, max_tokens=8192, timeout=120, retries=3):
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_gp(pkg, country, cutoff_dt):
-    """抓取 Google Play 评论"""
+    """抓取 Google Play 评论。
+
+    - NotFoundError → 包名错（最常见的"幽灵 ID"问题）
+    - 返回 0 条 + total_fetched=0 → 包名"能调通"但实际不存在（同上）
+    - 都会显式打 stderr，方便在同步日志面板里看到根因
+    """
     from google_play_scraper import reviews, Sort
     lang = REGIONS.get(country, {}).get("lang", "en")
     try:
         result, _ = reviews(pkg, lang=lang, country=country, sort=Sort.NEWEST, count=FETCH_COUNT)
     except Exception as e:
-        print(f"    [GP] 抓取失败: {e}")
+        print(f"    [GP][{pkg}/{country}] 抓取失败（包名错？）: {type(e).__name__}: {e}", file=sys.stderr)
         return []
+    if not result:
+        print(
+            f"    [GP][{pkg}/{country}] 警告：返回 0 条原始评论 — "
+            f"通常是包名 {pkg!r} 在 Google Play 不存在（'幽灵 ID'）。"
+            f"请用 google_play_scraper.app('<pkg>') 确认。",
+            file=sys.stderr,
+        )
     rows = []
     for r in result:
         at = r["at"].replace(tzinfo=timezone.utc) if r["at"].tzinfo is None else r["at"]
