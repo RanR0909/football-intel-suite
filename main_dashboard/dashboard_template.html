@@ -4366,7 +4366,7 @@ function renderBaselineCards() {
     return;
   }
 
-  var metrics = ['rank', 'downloads', 'rating_growth', 'review_count', 'sentiment_score'];
+  var metrics = ['downloads', 'rating_growth', 'review_count'];
   var rows = names.map(function(comp) {
     var info = cmpData[comp] || {};
     var cells = metrics.map(function(m) {
@@ -4376,7 +4376,7 @@ function renderBaselineCards() {
     }).join('');
     var color = (RANK_DATA.competitors[comp] || {}).color || 'var(--accent)';
     return '<div onclick="showCompetitorDetail(\'' + comp + '\')" ' +
-      'style="display:grid;grid-template-columns:160px repeat(5,1fr);gap:10px;align-items:stretch;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);cursor:pointer;margin-bottom:8px;transition:.15s" ' +
+      'style="display:grid;grid-template-columns:160px repeat(3,1fr);gap:10px;align-items:stretch;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);cursor:pointer;margin-bottom:8px;transition:.15s" ' +
       'onmouseover="this.style.borderColor=\'' + color + '\'" onmouseout="this.style.borderColor=\'var(--border)\'">' +
       '<div style="display:flex;flex-direction:column;justify-content:center">' +
         '<div style="font-weight:600;font-size:14px;color:var(--text)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:8px;vertical-align:middle"></span>' + escapeHtml(comp) + '</div>' +
