@@ -1929,6 +1929,60 @@ function renderDetailDataSources(name) {
 // ====== 后端 API 基础 URL ======
 var API_BASE = window.location.origin;
 
+// 静态模式检测：file:// 直接打开 / origin 是 null/file/about
+// 或 URL 带 ?static=1 强制启用 → 隐藏同步 / AI 触发按钮（避免无效 fetch 报错）
+var IS_STATIC_MODE = (function() {
+  try {
+    if (location.protocol === 'file:' || !location.origin || location.origin === 'null') return true;
+    if ((location.search || '').indexOf('static=1') >= 0) return true;
+    return false;
+  } catch (e) { return true; }
+})();
+
+// 静态模式下：禁用所有服务依赖按钮 + 加视觉提示
+function _applyStaticMode() {
+  if (!IS_STATIC_MODE) return;
+  // 隐藏顶部"同步数据" + "导出报告"
+  var headerBtns = document.querySelectorAll('#page-overview .header-actions .btn');
+  headerBtns.forEach(function(b){
+    if ((b.textContent || '').indexOf('同步') >= 0) {
+      b.style.display = 'none';
+    }
+  });
+  // 顶部加 banner
+  var page = document.getElementById('page-overview');
+  if (page && !document.getElementById('static-mode-banner')) {
+    var banner = document.createElement('div');
+    banner.id = 'static-mode-banner';
+    banner.style.cssText = 'padding:8px 14px;margin-bottom:12px;border-radius:6px;background:rgba(123,110,246,0.10);border:1px solid rgba(123,110,246,0.3);color:var(--accent);font-size:11px;font-family:var(--mono);display:flex;align-items:center;gap:8px';
+    banner.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent)"></span>' +
+      '<span>分享视图 · 静态快照（' + (new Date().toISOString().slice(0,16).replace('T',' ')) + '）· 同步 / AI 生成功能仅在本地服务下可用</span>';
+    page.insertBefore(banner, page.children[1] || null);
+  }
+  // 隐藏同步日志卡（无服务器无新日志）
+  var sl = document.getElementById('ov-sync-log-card');
+  if (sl) sl.style.display = 'none';
+  // 拦截所有同步 / AI 触发按钮
+  function disableBtn(el, hint) {
+    if (!el) return;
+    el.style.opacity = '0.4';
+    el.style.pointerEvents = 'none';
+    el.title = hint || '此功能需要本地服务器';
+  }
+  ['detail-analysis-btn','detail-review-3d-btn','cmty-ai-action-btn','run-all-btn'].forEach(function(id){
+    disableBtn(document.getElementById(id), '需启动本地服务器');
+  });
+  // 把后续 fetch 调用点包一层 — 静态模式直接 reject，避免红色控制台错误
+  var origFetch = window.fetch;
+  window.fetch = function(input, init) {
+    var url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.indexOf('/api/') >= 0) {
+      return Promise.reject(new Error('静态模式：服务端 API 不可用 (' + url + ')'));
+    }
+    return origFetch.apply(this, arguments);
+  };
+}
+
 // ====== 同步所有数据 ======
 // ====== 同步数据 v2（7 个抓取脚本并行 + 进度反馈 + toast） ======
 var SYNC_SCRIPTS = [
@@ -7070,6 +7124,7 @@ function pollCommunityAI(competitor, statusEl) {
 // ====== 初次加载渲染（默认 overview 已显示）======================
 (function ovInit() {
   function tryRender() {
+    try { _applyStaticMode(); } catch(e) { console.error('static mode setup failed', e); }
     try { renderOverviewPage(); } catch (e) { console.error('initial overview render failed', e); }
   }
   if (document.readyState === 'loading') {
