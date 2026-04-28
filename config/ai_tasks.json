@@ -76,15 +76,9 @@
 
   "tasks": {
     "comment_label": {
-      "_doc": "auto_report 内 — 给评论批量打分类标签",
+      "_doc": "comment_label.py 内 — 给评论批量打分类标签",
       "model": "haiku_4_5",
       "prompt": { "module": "prompts.comment_prompts", "function": "build_label_prompt" },
-      "output_format": "text"
-    },
-    "comment_daily_summary": {
-      "_doc": "auto_report 内 — 单地区评论日摘要",
-      "model": "haiku_4_5",
-      "prompt": { "module": "prompts.comment_prompts", "function": "build_daily_summary_prompt" },
       "output_format": "text"
     },
     "weekly_review_report": {
@@ -148,6 +142,15 @@
       "prompt": { "module": "prompts.community_prompts", "function": "build_community_insights_prompt" },
       "output_format": "json",
       "json_strip_markdown": true
+    },
+    "strategy_monitor_analysis": {
+      "_doc": "strategy_monitor 内 — 检测到产品 diff 时的策略解读（每竞品独立调）",
+      "model": "haiku_4_5",
+      "max_tokens": 1024,
+      "prompt": {
+        "template": "你是一名资深的体育产品分析师。请对以下竞品情报进行深度分析。\n\n## 竞品名称\n{app_name}\n\n## 检测到的变更\n{changes}\n\n## 更新日志\n{release_notes}\n\n## 当前内购项\n{in_app_purchases}\n\n请从以下三个维度进行分析：\n\n### 1. [产品迭代]\n分析更新日志是否涉及核心数据维度、AI 功能或重大交互变动。\n\n### 2. [商业策略]\n深度拆解内购项变动背后的变现逻辑（如试水订阅制、增加广告位）。\n\n### 3. [本地化信号]\n检查是否加强了对德甲、中超等特定联赛的数据覆盖或语言适配。\n\n### 4. [威胁等级]\n给出 1-5 星评分（5 星为最高威胁），并简要说明理由。\n\n请用中文回答，保持分析简洁、有洞察力。"
+      },
+      "output_format": "text"
     }
   }
 }

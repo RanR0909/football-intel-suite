@@ -191,73 +191,41 @@ def compute_diff(app_name: str, current: dict, history: dict) -> dict:
 
 
 # ============================================================
-# AI 策略分析 (Claude Haiku via flashapi proxy)
+# AI 策略分析 — 走 shared.ai_client.run_task("strategy_monitor_analysis")
+# 配置在 config/ai_tasks.json，模型 / prompt / fallback 集中管理
 # ============================================================
 
-CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
-CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
-
-ANALYSIS_PROMPT_TEMPLATE = """你是一名资深的体育产品分析师。请对以下竞品情报进行深度分析。
-
-## 竞品名称
-{app_name}
-
-## 检测到的变更
-{changes}
-
-## 更新日志
-{release_notes}
-
-## 当前内购项
-{in_app_purchases}
-
-请从以下三个维度进行分析：
-
-### 1. [产品迭代]
-分析更新日志是否涉及核心数据维度、AI 功能或重大交互变动。
-
-### 2. [商业策略]
-深度拆解内购项变动背后的变现逻辑（如试水订阅制、增加广告位）。
-
-### 3. [本地化信号]
-检查是否加强了对德甲、中超等特定联赛的数据覆盖或语言适配。
-
-### 4. [威胁等级]
-给出 1-5 星评分（5 星为最高威胁），并简要说明理由。
-
-请用中文回答，保持分析简洁、有洞察力。"""
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")  # 兼容旧引用（run_headless.py 启动检查）
 
 
 def analyze_with_ai(app_name: str, changes: list, release_notes: str, in_app_purchases: list, api_key: str = "") -> str:
-    """使用 Claude Haiku 对变更进行策略分析"""
-    key = api_key or CLAUDE_API_KEY
-    if not key:
-        return "[AI 分析] 未设置 CLAUDE_API_KEY"
-    prompt = ANALYSIS_PROMPT_TEMPLATE.format(
-        app_name=app_name,
-        changes="\n".join(changes) if changes else "无显著变更",
-        release_notes=release_notes if release_notes else "无更新日志",
-        in_app_purchases=json.dumps(in_app_purchases, ensure_ascii=False, indent=2) if in_app_purchases else "无内购项",
-    )
-    data = json.dumps({
-        "model": CLAUDE_MODEL,
-        "max_tokens": 1024,
-        "messages": [{"role": "user", "content": prompt}]
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        CLAUDE_API_URL, data=data,
-        headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
-    )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    """使用统一 AI 入口对变更做策略解读。失败时返回降级文本，不抛异常。"""
+    # 路径兜底：.env.local 通常在外层加载；这里仅做依赖兜底导入
+    _project_root = str(Path(__file__).resolve().parent.parent)
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
+
     try:
-        with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
-            result = json.loads(resp.read())
-        return result["content"][0]["text"]
+        from shared.ai_client import run_task  # type: ignore
     except Exception as e:
-        return f"[AI 分析] 失败：{str(e)}"
+        return f"[AI 分析] ai_client 加载失败：{e}"
+
+    if not (api_key or os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
+        return "[AI 分析] 未设置 CLAUDE_API_KEY / ANTHROPIC_API_KEY"
+
+    context = {
+        "app_name": app_name,
+        "changes": "\n".join(changes) if changes else "无显著变更",
+        "release_notes": release_notes if release_notes else "无更新日志",
+        "in_app_purchases": (
+            json.dumps(in_app_purchases, ensure_ascii=False, indent=2)
+            if in_app_purchases else "无内购项"
+        ),
+    }
+    try:
+        return run_task("strategy_monitor_analysis", context=context)
+    except Exception as e:
+        return f"[AI 分析] 失败：{type(e).__name__}: {e}"
 
 
 # ============================================================
