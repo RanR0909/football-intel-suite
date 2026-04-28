@@ -101,6 +101,85 @@ GOOGLE_CSE_ID=...               # Google CSE 引擎 ID（同上）
 
 ---
 
+## 跨机器迁移：`~/.intelops-secrets`
+
+**问题**：`.env.local` 在仓库根目录、被 gitignore，每台机器都要手动维护。
+
+**解决**：把所有 key 放到 `~/.intelops-secrets`（家目录文件，永远在仓库外）。
+`shared/env_loader.load_all()` 会按这个顺序加载：
+
+1. `<project_root>/.env.local`（项目专属，per-clone）
+2. `~/.intelops-secrets`（用户级 fallback，跨项目跨机器）
+
+两个文件同名变量以**先加载的为准**（即 `.env.local` 优先，`~/.intelops-secrets` 兜底）。已存在的 shell `export` 又比这俩都优先。
+
+### 第一次设置（在你常用的那台 Mac）
+
+```bash
+# 1. 创建家目录配置文件
+cat > ~/.intelops-secrets <<'EOF'
+CLAUDE_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+X_BEARER_TOKEN=...
+GOOGLE_API_KEY=...
+GOOGLE_CSE_ID=...
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+FEISHU_KEYWORD=INTEL-OPS
+EOF
+
+# 2. 锁权限（仅自己可读）
+chmod 600 ~/.intelops-secrets
+
+# 3. 验证读得到
+python3 -m shared.env_loader
+# 输出应列出每个 key 的 <set>/<empty> 状态
+```
+
+之后这台 Mac 上**项目根的 `.env.local` 可以为空 / 不存在**，所有 key 都从家目录读。
+
+### 迁移到新 Mac
+
+**方案 1：iCloud Drive 同步（推荐）**
+
+```bash
+# 在原 Mac 上把家目录文件移到 iCloud Drive
+mkdir -p ~/Library/Mobile\ Documents/com~apple~CloudDocs/intelops
+mv ~/.intelops-secrets ~/Library/Mobile\ Documents/com~apple~CloudDocs/intelops/.intelops-secrets
+ln -s ~/Library/Mobile\ Documents/com~apple~CloudDocs/intelops/.intelops-secrets ~/.intelops-secrets
+
+# 在新 Mac 上（前提：iCloud Drive 已同步）
+ln -s ~/Library/Mobile\ Documents/com~apple~CloudDocs/intelops/.intelops-secrets ~/.intelops-secrets
+chmod 600 ~/Library/Mobile\ Documents/com~apple~CloudDocs/intelops/.intelops-secrets
+
+# 验证
+python3 -m shared.env_loader
+```
+
+改一处所有机器同步，永远不用重填。
+
+**方案 2：手工复制**
+
+```bash
+# 原 Mac 上
+scp ~/.intelops-secrets newmac.local:~/
+
+# 新 Mac 上
+chmod 600 ~/.intelops-secrets
+```
+
+**方案 3：dotfiles 仓库**
+
+如果你已经维护一个**私有** dotfiles 仓库（注意：私有，不能是 public），把 `~/.intelops-secrets` 链接进去，git 同步即可。`football-intel-suite` 仓库本身是 public，**绝对不能**把这个文件提交进来。
+
+### 安全要点
+
+- ❌ 永远不要 `git add ~/.intelops-secrets` 到 public 仓库
+- ❌ 永远不要把 webhook URL / API key 硬编码到代码里
+- ✅ `chmod 600` 让别的用户读不到
+- ✅ 飞书 webhook 一旦泄露 → 删旧机器人重建一个就好（5 秒钟的事）
+
+---
+
 ## 常见操作
 
 ### 把某 task 切到更强模型

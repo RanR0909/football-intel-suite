@@ -26,8 +26,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 # 兜底加载 .env.local（绕过 启动看板.command 直接跑 python 也能读到 key）
 try:
-    from shared.env_loader import load_env_file
-    load_env_file()
+    from shared.env_loader import load_all as _load_env_all
+    _load_env_all()  # .env.local + ~/.intelops-secrets fallback
 except Exception:
     pass
 

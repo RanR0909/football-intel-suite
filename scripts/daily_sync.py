@@ -39,8 +39,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 # 兜底加载 .env.local
 try:
-    from shared.env_loader import load_env_file
-    load_env_file()
+    from shared.env_loader import load_all as _load_env_all
+    _load_env_all()  # .env.local + ~/.intelops-secrets fallback
 except Exception:
     pass
 
