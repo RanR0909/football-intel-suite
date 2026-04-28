@@ -6105,15 +6105,23 @@ function _stateBadge(text, kind) {
   return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:' + p.bg + ';color:' + p.fg + ';font-size:10px;font-family:var(--mono)">' + text + '</span>';
 }
 
+var _retryQueueCache = { items: [] };
+
 function refreshSyncState(cb) {
-  fetch(API_BASE + '/api/sync_state')
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      _syncStateCache = (d && d.sources) ? d : { sources: {} };
-      _renderOvSyncState();
-      if (cb) cb();
-    })
-    .catch(function(e){ console.error('sync_state fetch failed', e); if (cb) cb(); });
+  // 同时拉 sync_state + retry_queue（两个 endpoint 并行）
+  Promise.all([
+    fetch(API_BASE + '/api/sync_state').then(function(r){ return r.json(); }),
+    fetch(API_BASE + '/api/retry_queue').then(function(r){ return r.json(); }).catch(function(){ return { items: [] }; }),
+  ]).then(function(arr){
+    var d = arr[0], q = arr[1];
+    _syncStateCache = (d && d.sources) ? d : { sources: {} };
+    _retryQueueCache = (q && q.items) ? q : { items: [] };
+    _renderOvSyncState();
+    if (cb) cb();
+  }).catch(function(e){
+    console.error('sync_state fetch failed', e);
+    if (cb) cb();
+  });
 }
 
 function toggleSyncState() {
@@ -6146,8 +6154,10 @@ function _renderOvSyncState() {
     else nStale++;
     if (s.last_failure && (!s.last_success || new Date(s.last_failure) > new Date(s.last_success))) nFail++;
   });
+  var nQueue = ((_retryQueueCache || {}).items || []).length;
   summary.innerHTML = '✓ ' + nFresh + ' 新鲜  ·  ⚠ ' + nStale + ' 陈旧  ·  ✗ ' + nFail + ' 失败  '
-    + (nExpired ? '·  🔒 ' + nExpired + ' cookie 失效' : '');
+    + (nExpired ? '·  🔒 ' + nExpired + ' cookie 失效  ' : '')
+    + (nQueue ? '·  🔁 ' + nQueue + ' 待重试' : '');
 
   // 表格
   var rows = SYNC_STATE_META.map(function(m){
@@ -6180,10 +6190,42 @@ function _renderOvSyncState() {
       + '</tr>';
   }).join('');
 
+  // ---- 重试队列子区块（复用同一卡片） ----
+  var queueItems = (_retryQueueCache && _retryQueueCache.items) || [];
+  var queueHtml = '';
+  if (queueItems.length) {
+    var queueRows = queueItems.map(function(it){
+      var nextAt = it.retry_after ? _formatRelativeTime(it.retry_after).replace('前', '后') : '—';
+      var due = it.retry_after && (new Date(it.retry_after).getTime() <= Date.now());
+      var stateBadge = due ? _stateBadge('到期待重试', 'stale') : _stateBadge('等待中', 'never');
+      var attempts = (it.attempts || 1) + ' / ' + (it.max_attempts || 5);
+      var err = (it.last_error || '').slice(0, 80).replace(/</g, '&lt;');
+      return '<tr style="border-bottom:1px solid var(--border)">'
+        + '<td style="padding:6px;font-size:11px">' + (it.script || '?') + '</td>'
+        + '<td style="padding:6px;color:var(--muted);font-family:var(--mono);font-size:10px">' + attempts + '</td>'
+        + '<td style="padding:6px">' + stateBadge + '</td>'
+        + '<td style="padding:6px;color:var(--muted);font-family:var(--mono);font-size:10px">' + (it.last_kind || '—') + '</td>'
+        + '<td style="padding:6px;color:var(--muted);font-size:10px;max-width:280px;overflow:hidden;text-overflow:ellipsis">' + err + '</td>'
+        + '</tr>';
+    }).join('');
+    queueHtml = ''
+      + '<div style="margin-top:18px;border-top:1px dashed var(--border);padding-top:12px">'
+      + '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">'
+      + '🔁 重试队列（' + queueItems.length + ' 项）'
+      + '</div>'
+      + '<table style="width:100%;border-collapse:collapse">'
+      + '<thead><tr style="border-bottom:1px solid var(--border);text-align:left;color:var(--muted);font-family:var(--mono);font-size:10px">'
+      + '<th style="padding:6px">脚本</th><th style="padding:6px">尝试</th><th style="padding:6px">状态</th>'
+      + '<th style="padding:6px">类型</th><th style="padding:6px">上次错误</th>'
+      + '</tr></thead><tbody>' + queueRows + '</tbody></table>'
+      + '</div>';
+  }
+
   body.innerHTML = '<table style="width:100%;border-collapse:collapse">'
     + '<thead><tr style="border-bottom:1px solid var(--border);text-align:left;color:var(--muted);font-family:var(--mono);font-size:10px">'
     + '<th style="padding:6px">数据源</th><th style="padding:6px">节奏</th><th style="padding:6px">最后状态</th>'
     + '</tr></thead><tbody>' + rows + '</tbody></table>'
+    + queueHtml
     + '<div style="margin-top:10px;font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6">'
     + '本地 launchd 自动跑（日更 02:00 / 周更日 03:00）+ dashboard 顶部"同步数据"按钮，两路共享 sync_state.json。'
     + 'cookie 失效请去终端跑：<code style="background:var(--surface2);padding:1px 4px;border-radius:3px">python3 -m market_rank.scrape_X login</code>'

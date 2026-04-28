@@ -37,6 +37,11 @@ try:
 except Exception:
     _sync_state = None  # 不致命；失败时只是不更新 state
 
+try:
+    from shared import retry_queue as _retry_queue  # type: ignore
+except Exception:
+    _retry_queue = None  # 不致命
+
 # 哪些 script_name 对应一个 sync_state 源（其余按钮不污染 state）
 SCRIPT_TO_STATE_NAME = {
     "reddit_crawl": "reddit",
@@ -503,6 +508,16 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
                     self._send_json(_sync_state.snapshot())
                 else:
                     self._send_json({"version": 1, "sources": {}})
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 500)
+
+        elif path == "/api/retry_queue":
+            # 重试队列内容（前端"数据源状态"卡片用）
+            try:
+                if _retry_queue is not None:
+                    self._send_json(_retry_queue.snapshot())
+                else:
+                    self._send_json({"version": 1, "items": []})
             except Exception as e:
                 self._send_json({"status": "error", "message": str(e)}, 500)
 

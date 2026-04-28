@@ -4,7 +4,7 @@ set -e
 
 LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
 
-for label in com.intelops.daily com.intelops.weekly; do
+for label in com.intelops.daily com.intelops.weekly com.intelops.retry; do
     plist="${LAUNCHD_DIR}/${label}.plist"
     if [ -f "${plist}" ]; then
         launchctl unload "${plist}" 2>/dev/null || true

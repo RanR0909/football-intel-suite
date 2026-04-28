@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.intelops.retry</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>bash</string>
+        <string>-c</string>
+        <string>cd /Users/ranr/Desktop/Football_Intel_Suite &amp;&amp; set -a &amp;&amp; [ -f .env.local ] &amp;&amp; source .env.local; set +a; /usr/bin/python3 scripts/daily_sync.py --retry-only</string>
+    </array>
+
+    <!-- 每 60 分钟扫一次重试队列；轻任务，不跑主流水线 -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <!-- 加载时不立即跑（避免装好就触发） -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/intelops-retry.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/intelops-retry.err</string>
+
+    <!-- 优先级低，不影响其他任务 -->
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <!-- 单次执行最多 30 min（队列里通常只有少量任务）-->
+    <key>ExitTimeOut</key>
+    <integer>1800</integer>
+</dict>
+</plist>

@@ -45,6 +45,7 @@ except Exception:
     pass
 
 from shared import sync_state  # noqa: E402
+from shared import retry_queue  # noqa: E402
 
 PYTHON = sys.executable
 SYNC_LOG_PATH = _PROJECT_ROOT / "data" / "sync_log.json"
@@ -96,6 +97,21 @@ PHASE_3_AGG = [
 ]
 
 DAILY_MAX_AGE_HOURS = 20.0  # 各源新鲜度阈值（launchd 02:00 ± 抖动）
+
+
+# 全任务速查表 — 给 Phase 0（重试队列）查 (args, timeout, kind, label)
+def _build_task_registry() -> dict:
+    reg: dict[str, dict] = {}
+    for name, label, args, to, kind in PHASE_1_FETCHERS:
+        reg[name] = {"label": label, "args": args, "timeout": to, "kind": kind}
+    for name, label, args, to in PHASE_2_AI:
+        reg[name] = {"label": label, "args": args, "timeout": to, "kind": "ai"}
+    for name, label, args, to in PHASE_3_AGG:
+        reg[name] = {"label": label, "args": args, "timeout": to, "kind": "aggregate"}
+    return reg
+
+
+TASK_REGISTRY = _build_task_registry()
 
 
 # ---- 子任务运行 -----------------------------------------------------------
@@ -228,6 +244,67 @@ def _should_skip(name: str, force: bool, max_age_hours: float) -> bool:
     return sync_state.is_fresh(name, max_age_hours)
 
 
+def _enqueue_if_failed(name: str, result: dict) -> None:
+    """主流水线某子任务失败 → 推到重试队列（如果该 kind 允许重试）。"""
+    if result.get("success"):
+        # 成功的话，把残留队列条目（如有）清掉
+        retry_queue.remove_by_script(name)
+        return
+    kind = result.get("kind") or ("error" if result.get("exit_code") != 0 else "unknown")
+    err = result.get("stderr_tail") or ""
+    item_id = retry_queue.enqueue(name, err, kind)
+    if item_id:
+        print(f"  [retry-queue] {name} 已入队，下次同步时重试")
+    else:
+        if kind in retry_queue.PERMANENT_FAILURE_KINDS:
+            print(f"  [retry-queue] {name} 失败原因 {kind}，不入队（需人工修）")
+        else:
+            print(f"  [retry-queue] {name} 已超过 max_attempts，永久失败")
+
+
+def run_phase_0_retry(dry_run: bool) -> tuple[int, int]:
+    """主流水线开始前先尝试重跑过期的失败任务。"""
+    items = retry_queue.due_items()
+    if not items:
+        return (0, 0)
+    print("\n" + "=" * 70)
+    print(f"Phase 0/3 — 重试队列（{len(items)} 个到期项）")
+    print("=" * 70)
+    ok = fail = 0
+    for it in items:
+        name = it.get("script")
+        cfg = TASK_REGISTRY.get(name)
+        if not cfg:
+            # 不在 daily registry — 可能是 weekly 任务（如 iap_pricing / weekly_review），
+            # 留给 weekly_sync 去处理；不清除条目
+            print(f"  [skip-not-daily] {name}（不在 daily TASK_REGISTRY，留给 weekly_sync）")
+            continue
+        attempts = it.get("attempts", 1)
+        if dry_run:
+            print(f"  [dry-run] {name} (attempts={attempts}, label={cfg['label']})")
+            continue
+        print(f"  [retry] {name} (attempts={attempts}/{it.get('max_attempts')})")
+        result = _run_one(name, cfg["label"], cfg["args"], cfg["timeout"])
+        _post_process(result, cfg["kind"])
+        tag = "✓" if result["success"] else "✗"
+        kind_msg = result.get("kind") or ""
+        print(f"    [{tag}] {name}  {result['duration_sec']}s  exit={result['exit_code']}  {kind_msg}")
+        if result["success"]:
+            retry_queue.remove(it["id"])
+            ok += 1
+        else:
+            ek = result.get("kind") or "error"
+            updated = retry_queue.update_retry(it["id"], result.get("stderr_tail") or "", ek)
+            if updated is None:
+                if ek in retry_queue.PERMANENT_FAILURE_KINDS:
+                    print(f"    [retry-queue] {name} 改判为永久失败（{ek}），已移出队列")
+                else:
+                    print(f"    [retry-queue] {name} 达 max_attempts，永久失败移出队列")
+            fail += 1
+    print(f"[phase0] 完成：ok={ok} fail={fail}")
+    return (ok, fail)
+
+
 def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, int, list[str]]:
     """并行跑所有抓取源；返回 (ok, fail, expired_cookies)。"""
     print("\n" + "=" * 70)
@@ -258,6 +335,7 @@ def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, 
             name, kind = futures[fut]
             result = fut.result()
             _post_process(result, kind)
+            _enqueue_if_failed(name, result)
             tag = "✓" if result["success"] else "✗"
             ekind = result.get("kind") or ""
             print(f"  [{tag}] {name}  {result['duration_sec']}s  exit={result['exit_code']}  {ekind}")
@@ -289,6 +367,7 @@ def run_phase_2(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, 
         print(f"[start] {name} ({label})")
         result = _run_one(name, label, args, to)
         _post_process(result, "ai")
+        _enqueue_if_failed(name, result)
         tag = "✓" if result["success"] else "✗"
         print(f"  [{tag}] {name}  {result['duration_sec']}s  exit={result['exit_code']}")
         if result["success"]:
@@ -324,23 +403,42 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--force", action="store_true", help="忽略新鲜度，全部重跑")
     ap.add_argument("--max-age-hours", type=float, default=DAILY_MAX_AGE_HOURS)
     ap.add_argument("--dry-run", action="store_true", help="只打印计划不执行")
+    ap.add_argument("--retry-only", action="store_true",
+                    help="只跑 Phase 0（重试队列），不跑主流水线 — 用于小时级 launchd")
     args = ap.parse_args(argv)
 
     t0 = time.monotonic()
     print(f"=== daily_sync 开始 {datetime.now().isoformat(timespec='seconds')} ===")
-    print(f"force={args.force}  max-age={args.max_age_hours}h  dry-run={args.dry_run}")
+    print(f"force={args.force}  max-age={args.max_age_hours}h  dry-run={args.dry_run}"
+          + ("  retry-only=True" if args.retry_only else ""))
 
+    # --retry-only：只清理队列，不跑主流水线
+    if args.retry_only:
+        p0_ok, p0_fail = run_phase_0_retry(args.dry_run)
+        queue_size = len(retry_queue.snapshot().get("items") or [])
+        total = time.monotonic() - t0
+        print("\n" + "=" * 70)
+        print(f"=== daily_sync --retry-only 完成 — {total/60:.1f} min ===")
+        print(f"  Phase 0: ok={p0_ok} fail={p0_fail}  剩余 {queue_size} 项")
+        print("=" * 70)
+        return 0 if p0_fail == 0 else 1
+
+    # Phase 0：重试队列里到期的失败任务（不一定每次都有）
+    p0_ok, p0_fail = run_phase_0_retry(args.dry_run)
     p1_ok, p1_fail, expired = run_phase_1(args.force, args.max_age_hours, args.dry_run)
     p2_ok, p2_fail = run_phase_2(args.force, args.max_age_hours, args.dry_run)
     p3_ok = run_phase_3(args.dry_run)
 
     total = time.monotonic() - t0
-    total_fail = p1_fail + p2_fail + (0 if p3_ok else 1)
+    total_fail = p0_fail + p1_fail + p2_fail + (0 if p3_ok else 1)
+    queue_size = len(retry_queue.snapshot().get("items") or [])
     print("\n" + "=" * 70)
     print(f"=== daily_sync 完成 — 总耗时 {total/60:.1f} min ===")
-    print(f"  Phase 1: ok={p1_ok} fail={p1_fail}")
-    print(f"  Phase 2: ok={p2_ok} fail={p2_fail}")
-    print(f"  Phase 3: {'ok' if p3_ok else 'fail'}")
+    print(f"  Phase 0 (retry): ok={p0_ok} fail={p0_fail}")
+    print(f"  Phase 1 (fetch): ok={p1_ok} fail={p1_fail}")
+    print(f"  Phase 2 (AI):    ok={p2_ok} fail={p2_fail}")
+    print(f"  Phase 3 (agg):   {'ok' if p3_ok else 'fail'}")
+    print(f"  retry_queue 当前条目: {queue_size}")
     print("=" * 70)
 
     # 通知

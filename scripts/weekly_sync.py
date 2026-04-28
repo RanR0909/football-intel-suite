@@ -33,9 +33,14 @@ try:
 except Exception:
     pass
 
-# 复用 daily_sync 的 _run_one / _post_process / _notify
-from scripts.daily_sync import _run_one, _post_process, _notify, _PROJECT_ROOT as PR  # noqa: E402
+# 复用 daily_sync 的 _run_one / _post_process / _notify / _enqueue_if_failed
+from scripts.daily_sync import (  # noqa: E402
+    _run_one, _post_process, _notify, _enqueue_if_failed,
+    TASK_REGISTRY as DAILY_TASK_REGISTRY,
+    _PROJECT_ROOT as PR,
+)
 from shared import sync_state  # noqa: E402
+from shared import retry_queue  # noqa: E402
 from competitors import get_comment_competitors  # noqa: E402
 
 WEEKLY_MAX_AGE_HOURS = 6 * 24  # 6 天内已成功的不重跑
@@ -81,6 +86,36 @@ def main(argv: Optional[list[str]] = None) -> int:
         [str(PR / "main_dashboard" / "generate_dashboard.py")], 120, "aggregate",
     ))
 
+    # 周更任务 registry —— 与 daily 合并供 retry queue lookup 使用
+    weekly_registry = {n: {"label": l, "args": a, "timeout": t, "kind": k}
+                       for n, l, a, t, k in tasks}
+    full_registry = {**DAILY_TASK_REGISTRY, **weekly_registry}
+
+    # ---- Phase 0：到期的重试队列项（含 daily 留下的） ----
+    p0_ok = p0_fail = 0
+    for it in retry_queue.due_items():
+        name = it.get("script")
+        cfg = full_registry.get(name)
+        if not cfg:
+            print(f"[skip-unknown] retry_queue 项 {name} 不在 registry，已清除")
+            retry_queue.remove(it["id"])
+            continue
+        if args.dry_run:
+            print(f"[dry-run retry] {name} (attempts={it.get('attempts')})")
+            continue
+        print(f"\n[retry] {name} (attempts={it.get('attempts')}/{it.get('max_attempts')})")
+        result = _run_one(name, cfg["label"], cfg["args"], cfg["timeout"])
+        _post_process(result, cfg["kind"])
+        tag = "✓" if result["success"] else "✗"
+        print(f"  [{tag}] {name}  {result['duration_sec']}s  exit={result['exit_code']}")
+        if result["success"]:
+            retry_queue.remove(it["id"])
+            p0_ok += 1
+        else:
+            retry_queue.update_retry(it["id"], result.get("stderr_tail") or "",
+                                     result.get("kind") or "error")
+            p0_fail += 1
+
     ok = fail = 0
     for name, label, sub_args, to, kind in tasks:
         if _should_skip(name, args.force, args.max_age_hours):
@@ -92,6 +127,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"\n[start] {name} ({label})")
         result = _run_one(name, label, sub_args, to)
         _post_process(result, kind)
+        _enqueue_if_failed(name, result)
         tag = "✓" if result["success"] else "✗"
         ekind = result.get("kind") or ""
         print(f"  [{tag}] {name}  {result['duration_sec']}s  exit={result['exit_code']}  {ekind}")
@@ -101,9 +137,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             fail += 1
 
     total = time.monotonic() - t0
+    queue_size = len(retry_queue.snapshot().get("items") or [])
     print("\n" + "=" * 70)
     print(f"=== weekly_sync 完成 — 总耗时 {total/60:.1f} min ===")
-    print(f"  ok={ok}  fail={fail}")
+    print(f"  Phase 0 (retry): ok={p0_ok}  fail={p0_fail}")
+    print(f"  Phase 1 (周更):  ok={ok}     fail={fail}")
+    print(f"  retry_queue 当前条目: {queue_size}")
     print("=" * 70)
 
     if fail >= 3:

@@ -17,7 +17,7 @@ LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
 
 mkdir -p "${LAUNCHD_DIR}"
 
-for label in com.intelops.daily com.intelops.weekly; do
+for label in com.intelops.daily com.intelops.weekly com.intelops.retry; do
     src="${PROJECT_ROOT}/launchd/${label}.plist"
     dst="${LAUNCHD_DIR}/${label}.plist"
     if [ ! -f "${src}" ]; then
@@ -36,5 +36,8 @@ done
 echo ""
 echo "查看状态：launchctl list | grep intelops"
 echo "立刻触发一次 daily：launchctl start com.intelops.daily"
-echo "查看日志：tail -f /tmp/intelops-daily.log /tmp/intelops-daily.err"
+echo "立刻触发一次 retry：launchctl start com.intelops.retry"
+echo "查看日志：tail -f /tmp/intelops-{daily,weekly,retry}.log"
 echo "卸载：bash scripts/uninstall_launchd.sh"
+echo ""
+echo "调度：daily 02:00 / weekly 周日 03:00 / retry 每小时（只清队列）"
