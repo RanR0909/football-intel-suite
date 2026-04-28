@@ -27,10 +27,7 @@
 import argparse
 import json
 import os
-import ssl
 import sys
-import time
-import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -38,40 +35,12 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent
 DATA_DIR = _PROJECT_ROOT / "data"
 
-CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
-CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
+from shared.ai_client import run_task  # noqa: E402
 
-def call_claude(prompt: str, max_tokens: int = 4096, timeout: int = 60, retries: int = 3) -> str:
-    last_error = None
-    for attempt in range(1, retries + 1):
-        try:
-            data = json.dumps({
-                "model": CLAUDE_MODEL,
-                "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": prompt}],
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                CLAUDE_API_URL,
-                data=data,
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": CLAUDE_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                },
-            )
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                result = json.loads(resp.read())
-            return result["content"][0]["text"]
-        except Exception as exc:
-            last_error = exc
-            if attempt < retries:
-                time.sleep(min(attempt * 2, 6))
-    raise last_error
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")  # 兼容旧入口检查
 
 
 def _parse_iso(ts: str | None):
@@ -136,48 +105,20 @@ def _quick_sentiment(reviews: list[dict]) -> dict:
     }
 
 
-def _build_prompt(competitor: str, reviews: list[dict], days: int) -> str:
-    samples = []
+def _format_samples(reviews: list[dict]) -> str:
+    """格式化评论样本为 prompt 内嵌字符串（review_3d 任务 prompt 模板的 {samples} 槽）。"""
+    if not reviews:
+        return "（无评论样本）"
+    lines = []
     for i, r in enumerate(reviews[:80]):
         snippet = (r.get("content") or "").replace("\n", " ")[:240]
-        samples.append(f"[{i+1}] ({r.get('region')} · {r.get('rating')}星) {snippet}")
-    sample_block = "\n".join(samples) if samples else "（无评论样本）"
-    return f"""你是资深竞品分析师。下面是 **{competitor}** 应用近 {days} 天的用户评论样本（共 {len(reviews)} 条），请生成结构化 JSON 报告。
-
-要求：
-1. 200-400 字中文摘要，聚焦本期内"用户在抱怨什么 / 在表扬什么 / 是否有突发问题"
-2. 抽出 Top 3-5 个用户痛点（每个：topic 短语、count 出现次数、severity 1-5、sample_quote 用户原话不超 60 字）
-3. 抽出 Top 3-5 条代表原话（直接引用用户的句子，正面或负面均可，每条 ≤ 80 字）
-4. 抽出本期高频话题标签 3-8 个（分词，例：登录 / 推送 / 直播 / UI / 数据准确性）
-
-只输出严格的 JSON（无 markdown 代码框），格式：
-{{
-  "summary": "...",
-  "top_pains": [
-    {{"topic":"...", "count": N, "severity": 1-5, "sample_quote":"..."}}
-  ],
-  "top_quotes": ["...", "..."],
-  "tagged_topics": ["...", "..."]
-}}
-
-评论样本：
-{sample_block}
-"""
-
-
-def _strip_json(text: str) -> str:
-    s = text.strip()
-    if s.startswith("```"):
-        s = s.split("```", 2)[1]
-        if s.lower().startswith("json"):
-            s = s[4:]
-        s = s.rsplit("```", 1)[0]
-    return s.strip()
+        lines.append(f"[{i+1}] ({r.get('region')} · {r.get('rating')}星) {snippet}")
+    return "\n".join(lines)
 
 
 def run(competitor: str, days: int = 3) -> dict:
-    if not CLAUDE_API_KEY:
-        raise RuntimeError("CLAUDE_API_KEY 未配置（环境变量）")
+    if not (os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
+        raise RuntimeError("CLAUDE_API_KEY / ANTHROPIC_API_KEY 未配置（环境变量）")
     reviews = _collect_reviews(competitor, days)
     sentiment = _quick_sentiment(reviews)
 
@@ -195,18 +136,15 @@ def run(competitor: str, days: int = 3) -> dict:
             "skipped": True,
         }
     else:
-        prompt = _build_prompt(competitor, reviews, days)
-        raw = call_claude(prompt)
-        try:
-            ai_payload = json.loads(_strip_json(raw))
-        except json.JSONDecodeError:
-            ai_payload = {
-                "summary": raw[:1200],
-                "top_pains": [],
-                "top_quotes": [],
-                "tagged_topics": [],
-                "_parse_error": True,
-            }
+        # run_task 返回 dict（review_3d output_format=json + json_strip_markdown=true）
+        ai_payload = run_task("review_3d", context={
+            "competitor": competitor,
+            "days": days,
+            "count": len(reviews),
+            "samples": _format_samples(reviews),
+        })
+        if not isinstance(ai_payload, dict):
+            ai_payload = {"_parse_error": True}
         result = {
             "competitor": competitor,
             "generated_at": datetime.now(timezone.utc).isoformat(),

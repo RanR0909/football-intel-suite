@@ -79,7 +79,17 @@
       "_doc": "comment_label.py 内 — 给评论批量打分类标签",
       "model": "haiku_4_5",
       "prompt": { "module": "prompts.comment_prompts", "function": "build_label_prompt" },
-      "output_format": "text"
+      "output_format": "json",
+      "json_strip_markdown": true
+    },
+    "comment_translate": {
+      "_doc": "comment_label.py 内 — 非英语区评论批量译为英文",
+      "model": "haiku_4_5",
+      "prompt": {
+        "template": "Translate the following app reviews to English. Return a JSON object mapping each ID to its English translation. If already English, keep as-is. Output only JSON.\n\n{reviews_json}"
+      },
+      "output_format": "json",
+      "json_strip_markdown": true
     },
     "weekly_review_report": {
       "_doc": "评论周报主体 markdown",
@@ -112,21 +122,27 @@
     "commercial_monetize_tag": {
       "_doc": "IAP 内购变现策略打标签",
       "model": "monetize_tag",
-      "prompt": { "module": "prompts.commercial_prompts", "function": "build_monetize_tag_prompt" },
+      "prompt": {
+        "template": "分析竞品「{comp_name}」的变现模式。\n内购项: {iap_summary}\n描述关键词: {keywords}\n\n从以下标签中选择适用的（可多选），仅返回 JSON 数组，不输出其他内容：\n[\"Subscription Heavy\", \"Ad-Driven\", \"Betting Affiliate\", \"Freemium\", \"Premium Paid\"]"
+      },
       "output_format": "json",
       "json_strip_markdown": true
     },
     "commercial_intent": {
       "_doc": "应用描述商业意图分析",
       "model": "monetize_tag",
-      "prompt": { "module": "prompts.commercial_prompts", "function": "build_intent_prompt" },
+      "prompt": {
+        "template": "你是体育App商业分析师。用一句话（30字以内）分析竞品「{comp_name}」的商业意图。\n内购变动: {changes_str}\n更新日志: {release_notes}\n直接输出结论，不要解释。"
+      },
       "output_format": "text"
     },
     "commercial_weekly": {
       "_doc": "商业策略周报",
       "model": "sonnet_4_6",
       "max_tokens": 4096,
-      "prompt": { "module": "prompts.commercial_prompts", "function": "build_weekly_prompt" },
+      "prompt": {
+        "template": "你是体育App商业分析师。根据以下 {date_from} 至 {date_to} 期间的竞品商业数据，生成一份《商业变现策略周报》。\n\n报告周期：{date_from} 至 {date_to}（严格使用此日期，不要编造其他日期）\n\n要求：\n1. 总结本周各竞品的变现策略变化\n2. 标注价格调整趋势（涨价/降价/新增IAP）\n3. 分析变现模式演变（订阅化/广告化/博彩导流）\n4. 给出2-3条可执行的商业建议\n5. 使用纯文本格式，禁止emoji\n\n== 历史IAP快照 ==\n{history_summary}\n\n== 当前竞品状态 ==\n{comp_current}\n\n直接输出报告内容。"
+      },
       "output_format": "text"
     },
     "ads_strategy": {

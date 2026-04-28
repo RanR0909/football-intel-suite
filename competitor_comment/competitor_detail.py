@@ -9,7 +9,7 @@ competitor_detail.py — 单竞品深度分析脚本
   python3 competitor_detail.py SofaScore --days 7
 """
 
-import os, json, re, sys, urllib.request, ssl
+import os, json, re, sys, urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from collections import Counter
@@ -22,7 +22,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from competitors import get_comment_competitors
 from regions import load_regions
-from prompts.comment_prompts import build_label_prompt, build_competitor_detail_prompt
+from shared.ai_client import run_task
 
 # ── 竞品配置 ──────────────────────────────────────────────────
 # 格式: { "竞品名": { "gp": "包名", "ios": AppStore ID } }
@@ -35,33 +35,8 @@ FETCH_COUNT = 200  # 每个平台×地区抓取条数
 DEFAULT_DAYS = 7   # 默认回溯天数
 
 # Claude API 配置
-CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
-CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
-CLAUDE_MODEL = "claude-opus-4-6"  # 主模型
-
-
-def call_claude(prompt, max_tokens=8192):
-    """调用 Anthropic Native 格式的 Claude API"""
-    data = json.dumps({
-        "model": CLAUDE_MODEL,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}]
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        CLAUDE_API_URL,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": CLAUDE_API_KEY,
-            "anthropic-version": "2023-06-01",
-        }
-    )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
-        result = json.loads(resp.read())
-    return result["content"][0]["text"]
+# AI 调用统一走 shared.ai_client.run_task；密钥用 CLAUDE_API_KEY 或 ANTHROPIC_API_KEY
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")  # 兼容旧入口检查
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -137,43 +112,36 @@ CATEGORIES = "[问题抱怨]、[高价值功能请求]、[竞品对比]、[流�
 
 
 def translate_to_english(rows):
-    """批量翻译非英文评论为英文"""
+    """批量翻译非英文评论为英文（统一 AI 入口）"""
     non_en = [(i, r) for i, r in enumerate(rows) if r.get("content")]
     if not non_en:
         return rows
     id_map = {str(i): r["content"] for i, r in non_en}
-    prompt = (
-        "Translate the following app reviews to English. "
-        "Return a JSON object mapping each ID to its English translation. "
-        "If already English, keep as-is. Output only JSON.\n\n"
-        + json.dumps(id_map, ensure_ascii=False)
-    )
     try:
-        raw = call_claude(prompt).strip()
-        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
-        translations = json.loads(raw)
-        for i, r in non_en:
-            if str(i) in translations:
-                r["content"] = translations[str(i)]
+        translations = run_task("comment_translate", context={
+            "reviews_json": json.dumps(id_map, ensure_ascii=False),
+        })
+        if isinstance(translations, dict) and not translations.get("_parse_error"):
+            for i, r in non_en:
+                if str(i) in translations:
+                    r["content"] = translations[str(i)]
     except Exception:
         pass
     return rows
 
 
 def label_reviews(rows):
-    """使用 Claude 对评论打标"""
+    """使用 Claude 对评论打标（统一 AI 入口）"""
     if not rows:
         return rows
     id_map = {str(i): r["content"] for i, r in enumerate(rows)}
     try:
-        resp_text = call_claude(
-            build_label_prompt(id_map, CATEGORIES),
-            max_tokens=4096
-        )
-        raw = resp_text.strip()
-        if "```" in raw:
-            raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
-        mapping = json.loads(raw)
+        mapping = run_task("comment_label", context={
+            "id_map": id_map,
+            "categories": CATEGORIES,
+        })
+        if not isinstance(mapping, dict) or mapping.get("_parse_error"):
+            raise ValueError("AI 返回非 JSON")
         for i, r in enumerate(rows):
             r["label"] = mapping.get(str(i), "[其他]")
     except Exception as e:
@@ -199,10 +167,15 @@ def analyze_features(rows, app_name, days):
     region_dist = dict(Counter(r.get("region_label", "") for r in rows))
 
     region_names = [f"{cfg.get('label', code)}({code})" for code, cfg in REGIONS.items()]
-    prompt = build_competitor_detail_prompt(app_name, days, feature_rows, region_names, list(COMPETITORS.keys()))
 
     try:
-        summary = call_claude(prompt, max_tokens=8192)
+        summary = run_task("competitor_detail", context={
+            "app_name": app_name,
+            "days": days,
+            "rows": feature_rows,
+            "region_names": region_names,
+            "competitor_names": list(COMPETITORS.keys()),
+        })
     except Exception as e:
         summary = f"AI 分析失败: {e}"
 
@@ -247,8 +220,8 @@ def analyze_competitor(comp_name, days=DEFAULT_DAYS):
         print(f"错误: 未知竞品 '{comp_name}'，可选: {list(COMPETITORS.keys())}")
         return None
 
-    if not CLAUDE_API_KEY:
-        print("错误: 未设置 CLAUDE_API_KEY 环境变量")
+    if not (os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
+        print("错误: 未设置 CLAUDE_API_KEY / ANTHROPIC_API_KEY 环境变量")
         return None
 
     comp = COMPETITORS[comp_name]

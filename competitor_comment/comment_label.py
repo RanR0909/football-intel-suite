@@ -30,11 +30,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
-import ssl
 import sys
 import time
-import urllib.request
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -49,46 +46,11 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from regions import load_regions  # type: ignore
-from prompts.comment_prompts import build_label_prompt  # type: ignore
+from shared.ai_client import run_task  # type: ignore
 
 CATEGORIES = "[问题抱怨]、[高价值功能请求]、[竞品对比]、[流失信号]、[正向反馈]、[其他]"
-CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
-CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 _VALID_LABELS = {"[问题抱怨]", "[高价值功能请求]", "[竞品对比]", "[流失信号]", "[正向反馈]", "[其他]"}
-
-
-def call_claude(prompt: str, max_tokens: int = 4096, timeout: int = 60, retries: int = 3) -> str:
-    """Anthropic native 接口（沿用 auto_report.py）。"""
-    last_error: Exception | None = None
-    for attempt in range(1, retries + 1):
-        try:
-            data = json.dumps({
-                "model": CLAUDE_MODEL,
-                "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": prompt}],
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                CLAUDE_API_URL,
-                data=data,
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": CLAUDE_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                },
-            )
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                result = json.loads(resp.read())
-            return result["content"][0]["text"]
-        except Exception as exc:
-            last_error = exc
-            if attempt < retries:
-                time.sleep(min(attempt * 2, 6))
-    raise last_error  # type: ignore
 
 
 def _normalize_label(raw_label: str) -> str:
@@ -102,10 +64,6 @@ def _normalize_label(raw_label: str) -> str:
     return s if s in _VALID_LABELS else "[其他]"
 
 
-def _strip_codefence(raw: str) -> str:
-    return re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
-
-
 def translate_to_english(rows: list[dict]) -> list[dict]:
     """非英语区评论批量译为英文（一次 Claude 调用），失败忽略原样返回。"""
     if not rows:
@@ -113,18 +71,14 @@ def translate_to_english(rows: list[dict]) -> list[dict]:
     id_map = {str(i): r["content"] for i, r in enumerate(rows) if r.get("content")}
     if not id_map:
         return rows
-    prompt = (
-        "Translate the following app reviews to English. "
-        "Return a JSON object mapping each ID to its English translation. "
-        "If already English, keep as-is. Output only JSON.\n\n"
-        + json.dumps(id_map, ensure_ascii=False)
-    )
     try:
-        raw = _strip_codefence(call_claude(prompt))
-        translations = json.loads(raw)
-        for i, r in enumerate(rows):
-            if str(i) in translations:
-                r["content"] = translations[str(i)]
+        translations = run_task("comment_translate", context={
+            "reviews_json": json.dumps(id_map, ensure_ascii=False),
+        })
+        if isinstance(translations, dict) and not translations.get("_parse_error"):
+            for i, r in enumerate(rows):
+                if str(i) in translations:
+                    r["content"] = translations[str(i)]
     except Exception as exc:
         print(f"  [AI] 翻译失败，保留原文: {exc}", file=sys.stderr)
     return rows
@@ -136,8 +90,12 @@ def label_rows(rows: list[dict]) -> list[dict]:
         return rows
     id_map = {str(i): r["content"] for i, r in enumerate(rows)}
     try:
-        raw = _strip_codefence(call_claude(build_label_prompt(id_map, CATEGORIES)))
-        mapping = json.loads(raw)
+        mapping = run_task("comment_label", context={
+            "id_map": id_map,
+            "categories": CATEGORIES,
+        })
+        if not isinstance(mapping, dict) or mapping.get("_parse_error"):
+            raise ValueError("AI 返回非 JSON")
         for i, r in enumerate(rows):
             r["label"] = _normalize_label(mapping.get(str(i), "[其他]"))
     except Exception as exc:
@@ -193,8 +151,8 @@ def _process_competitor(app_name: str, app_raw: dict, region_info: dict) -> dict
 
 
 def main(force: bool = False) -> Path:
-    if not CLAUDE_API_KEY:
-        print("错误: 未设置 CLAUDE_API_KEY 环境变量", file=sys.stderr)
+    if not (os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
+        print("错误: 未设置 CLAUDE_API_KEY / ANTHROPIC_API_KEY 环境变量", file=sys.stderr)
         sys.exit(2)
     if not RAW_IN.exists():
         print(f"错误: 找不到 {RAW_IN}，请先跑 comment_fetch.py", file=sys.stderr)

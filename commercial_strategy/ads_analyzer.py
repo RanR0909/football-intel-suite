@@ -13,10 +13,8 @@ dashboard_server 在 POST /api/ai/ads-strategy 异步触发；
 from __future__ import annotations
 
 import json
-import re
-import ssl
+import os
 import sys
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -26,16 +24,11 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from commercial_strategy.ads_processor import process_competitor_ads
-from prompts.ads_prompts import build_ads_strategy_prompt
+from shared.ai_client import run_task
 
 DATA_DIR = _PROJECT_ROOT / "data"
 RAW_PATH = DATA_DIR / "async_fb_adlib.json"
 AI_OUTPUT_PATH = DATA_DIR / "ads_ai_analysis.json"
-
-CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
-CLAUDE_TIMEOUT = 120
-CLAUDE_MAX_TOKENS = 4096
 
 
 def _load_raw() -> list:
@@ -50,42 +43,6 @@ def _load_raw() -> list:
 
 def _filter_competitor_records(raw: list, competitor: str) -> list:
     return [r for r in raw if r.get("competitor") == competitor]
-
-
-def _call_claude(prompt: str, api_key: str) -> str:
-    body = json.dumps({
-        "model": CLAUDE_MODEL,
-        "max_tokens": CLAUDE_MAX_TOKENS,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        CLAUDE_API_URL,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-        },
-    )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=CLAUDE_TIMEOUT, context=ctx) as resp:
-        payload = json.loads(resp.read())
-    if "content" not in payload or not payload["content"]:
-        raise RuntimeError(f"Claude 返回结构异常: {payload}")
-    return payload["content"][0]["text"]
-
-
-def _parse_ai_json(text: str) -> dict:
-    """容错 markdown fence 和前后噪声。与 community_insights.ai_analyzer 同步实现。"""
-    fence = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
-    if fence:
-        return json.loads(fence.group(1))
-    match = re.search(r"\{[\s\S]*\}", text)
-    if not match:
-        raise ValueError(f"AI 输出未含 JSON 对象，原文：{text[:500]}")
-    return json.loads(match.group(0))
 
 
 def _persist_result(competitor: str, result: dict):
@@ -110,8 +67,8 @@ def analyze(competitor: str, days: int = 7, api_key: str = "") -> dict:
     Raises:
         RuntimeError: 无 fb_adlib 数据 / Claude 失败 / JSON 解析失败
     """
-    if not api_key:
-        raise RuntimeError("缺少 CLAUDE_API_KEY")
+    if not (api_key or os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
+        raise RuntimeError("缺少 CLAUDE_API_KEY / ANTHROPIC_API_KEY")
 
     records = _filter_competitor_records(_load_raw(), competitor)
     if not records:
@@ -122,10 +79,15 @@ def analyze(competitor: str, days: int = 7, api_key: str = "") -> dict:
         raise RuntimeError(f"{competitor} 抓取记录解析后无有效广告")
 
     sample_creatives = ads_info.get("top_creatives") or []
-    prompt = build_ads_strategy_prompt(competitor, ads_info, sample_creatives)
 
-    text = _call_claude(prompt, api_key)
-    result = _parse_ai_json(text)
+    # run_task("ads_strategy") 返回 dict（output_format=json + json_strip_markdown=true）
+    result = run_task("ads_strategy", context={
+        "competitor": competitor,
+        "ads_info": ads_info,
+        "sample_creatives": sample_creatives,
+    })
+    if not isinstance(result, dict) or result.get("_parse_error"):
+        raise RuntimeError(f"AI 输出 JSON 解析失败：{result if isinstance(result, dict) else str(result)[:200]}")
 
     # 强制规范字段
     result.setdefault("target_persona", [])

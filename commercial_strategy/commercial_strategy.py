@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """commercial_strategy.py — 竞品商业变现策略分析"""
-import os, json, re, ssl, urllib.request, sys
+import os, json, sys, urllib.request, ssl
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import Counter
@@ -17,14 +17,13 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from competitors import get_market_rank_competitors
 from regions import get_region_codes
+from shared.ai_client import run_task
 
 COMPETITORS = get_market_rank_competitors()
 REGIONS = get_region_codes()
 BETTING_KEYWORDS = ["betting", "odds", "tips", "prediction", "fantasy", "bet", "wager"]
 
-CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
-CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
-CLAUDE_MODEL   = "claude-haiku-4-5-20251001"
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")  # 兼容旧入口检查（run_headless 启动时校验）
 
 
 # ── SSL Session ───────────────────────────────────────────────
@@ -43,25 +42,6 @@ def _session():
     s.mount("https://", _SSLAdapter())
     s.headers.update({"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"})
     return s
-
-
-# ── Claude API ────────────────────────────────────────────────
-
-def call_claude(prompt, api_key, max_tokens=1024):
-    data = json.dumps({
-        "model": CLAUDE_MODEL,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}]
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        CLAUDE_API_URL, data=data,
-        headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"},
-    )
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
-        return json.loads(resp.read())["content"][0]["text"]
 
 
 # ── History ───────────────────────────────────────────────────
@@ -190,37 +170,35 @@ def compute_rpd(rank, iap_items: list[dict]) -> float:
 
 # ── AI Analysis ───────────────────────────────────────────────
 
-def ai_tag_monetization(comp_name: str, iap_items: list, keywords: list, api_key: str) -> list[str]:
-    if not api_key:
+def ai_tag_monetization(comp_name: str, iap_items: list, keywords: list, api_key: str = "") -> list[str]:
+    if not (api_key or os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
         return []
     iap_summary = ", ".join(f"{i['name']}({i.get('price',0)} {i.get('currency','')})" for i in iap_items[:10]) or "无内购项"
-    prompt = (
-        f"分析竞品「{comp_name}」的变现模式。\n"
-        f"内购项: {iap_summary}\n"
-        f"描述关键词: {', '.join(keywords) or '无'}\n\n"
-        "从以下标签中选择适用的（可多选），仅返回 JSON 数组，不输出其他内容：\n"
-        '["Subscription Heavy", "Ad-Driven", "Betting Affiliate", "Freemium", "Premium Paid"]'
-    )
     try:
-        raw = call_claude(prompt, api_key, max_tokens=256).strip()
-        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
-        return json.loads(raw)
+        result = run_task("commercial_monetize_tag", context={
+            "comp_name": comp_name,
+            "iap_summary": iap_summary,
+            "keywords": ", ".join(keywords) or "无",
+        })
+        # output_format=json → returns list / dict / 解析失败 dict
+        if isinstance(result, list):
+            return result
+        return []
     except Exception:
         return []
 
 
-def ai_intent_analysis(comp_name: str, iap_changes: list, release_notes: str, api_key: str) -> str:
-    if not api_key or (not iap_changes and not release_notes):
+def ai_intent_analysis(comp_name: str, iap_changes: list, release_notes: str, api_key: str = "") -> str:
+    if not (api_key or os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
         return ""
-    changes_str = "、".join(iap_changes) if iap_changes else "无变动"
-    prompt = (
-        f"你是体育App商业分析师。用一句话（30字以内）分析竞品「{comp_name}」的商业意图。\n"
-        f"内购变动: {changes_str}\n"
-        f"更新日志: {release_notes[:300] if release_notes else '无'}\n"
-        "直接输出结论，不要解释。"
-    )
+    if not iap_changes and not release_notes:
+        return ""
     try:
-        return call_claude(prompt, api_key, max_tokens=128).strip()
+        return run_task("commercial_intent", context={
+            "comp_name": comp_name,
+            "changes_str": "、".join(iap_changes) if iap_changes else "无变动",
+            "release_notes": (release_notes[:300] if release_notes else "无"),
+        }).strip()
     except Exception:
         return ""
 
@@ -409,24 +387,15 @@ def generate_weekly_report(api_key: str = "") -> dict:
     date_from = recent_dates[-1] if recent_dates else datetime.now().strftime("%Y-%m-%d")
     date_to = datetime.now().strftime("%Y-%m-%d")
 
-    prompt = (
-        f"你是体育App商业分析师。根据以下 {date_from} 至 {date_to} 期间的竞品商业数据，生成一份《商业变现策略周报》。\n\n"
-        f"报告周期：{date_from} 至 {date_to}（严格使用此日期，不要编造其他日期）\n\n"
-        "要求：\n"
-        "1. 总结本周各竞品的变现策略变化\n"
-        "2. 标注价格调整趋势（涨价/降价/新增IAP）\n"
-        "3. 分析变现模式演变（订阅化/广告化/博彩导流）\n"
-        "4. 给出2-3条可执行的商业建议\n"
-        "5. 使用纯文本格式，禁止emoji\n\n"
-        "== 历史IAP快照 ==\n" + "\n".join(history_summary[:30]) + "\n\n"
-        "== 当前竞品状态 ==\n" + "\n".join(comp_current) + "\n\n"
-        "直接输出报告内容。"
-    )
-
     summary = ""
-    if key:
+    if key or os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"):
         try:
-            summary = call_claude(prompt, key, max_tokens=2048)
+            summary = run_task("commercial_weekly", context={
+                "date_from": date_from,
+                "date_to": date_to,
+                "history_summary": "\n".join(history_summary[:30]) or "无历史快照",
+                "comp_current": "\n".join(comp_current) or "无当前竞品状态",
+            })
         except Exception as e:
             summary = f"AI 生成失败: {e}"
     else:

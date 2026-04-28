@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""ai_analyzer 单元测试（mock Claude API，不发真实请求）。
+"""ai_analyzer 单元测试（mock shared.ai_client.run_task，不发真实请求）。
 
 覆盖：
 - _filter_posts：按 competitor + 时间窗过滤
-- _parse_ai_json：容错 markdown fence / 前后噪声
 - _persist_result：merge 已有竞品
-- analyze 端到端：输入 raw → 调（mock）Claude → 解析 → 持久化
+- analyze 端到端：输入 raw → 调（mock）run_task → 持久化
+
+JSON 解析逻辑已迁移到 shared.ai_client._parse_output（统一管），此处不再覆盖。
 
 运行：
     python3 -m community_insights.tests.test_ai_analyzer
@@ -14,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -80,26 +82,7 @@ def run_tests():
     _check("FlashScore 独立 1 条", len(ai_analyzer._filter_posts(raw, "FlashScore", days=7)) == 1)
     _check("不存在的竞品空", ai_analyzer._filter_posts(raw, "Nope", days=7) == [])
 
-    print("\n=== 2. _parse_ai_json ===")
-    pure = '{"overall_summary":"x","alert_level":"low"}'
-    _check("纯 JSON", ai_analyzer._parse_ai_json(pure)["alert_level"] == "low")
-
-    fenced = "```json\n" + pure + "\n```"
-    _check("markdown 包裹", ai_analyzer._parse_ai_json(fenced)["alert_level"] == "low")
-
-    fenced_plain = "```\n" + pure + "\n```"
-    _check("无语言标识 fence", ai_analyzer._parse_ai_json(fenced_plain)["alert_level"] == "low")
-
-    noisy = "Sure, here it is:\n\n" + pure + "\n\nLet me know!"
-    _check("前后噪声容错", ai_analyzer._parse_ai_json(noisy)["alert_level"] == "low")
-
-    try:
-        ai_analyzer._parse_ai_json("no json at all")
-        raise AssertionError("应抛错")
-    except ValueError:
-        _check("无 JSON 抛 ValueError", True)
-
-    print("\n=== 3. _persist_result merge ===")
+    print("\n=== 2. _persist_result merge ===")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         original = ai_analyzer.AI_OUTPUT_PATH
@@ -119,7 +102,7 @@ def run_tests():
         finally:
             ai_analyzer.AI_OUTPUT_PATH = original
 
-    print("\n=== 4. analyze 端到端 (mock Claude) ===")
+    print("\n=== 3. analyze 端到端 (mock run_task) ===")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         raw_dir = tmp_dir / "raw"
@@ -129,14 +112,15 @@ def run_tests():
 
         original_raw = ai_analyzer.RAW_PATH
         original_out = ai_analyzer.AI_OUTPUT_PATH
-        original_call = ai_analyzer._call_claude
+        original_run_task = ai_analyzer.run_task
         ai_analyzer.RAW_PATH = raw_path
         ai_analyzer.AI_OUTPUT_PATH = tmp_dir / "community_ai_analysis.json"
 
-        # mock Claude：返回带 markdown 包裹的 JSON
-        def fake_claude(prompt, api_key):
-            assert "SofaScore" in prompt and "Reddit 原始数据" in prompt, "prompt 内容异常"
-            return "```json\n" + json.dumps({
+        # mock run_task — 返回 dict（output_format=json 已经解析过）
+        def fake_run_task(task_name, context=None, overrides=None):
+            assert task_name == "community_insights"
+            assert context and context["competitor"] == "SofaScore"
+            return {
                 "overall_summary": "mocked summary",
                 "sentiment": {"positive": 0.3, "neutral": 0.4, "negative": 0.3},
                 "top_topics": ["widgets"],
@@ -145,8 +129,11 @@ def run_tests():
                 "competitor_mentions": ["FlashScore"],
                 "representative_quotes": ["sample quote"],
                 "alert_level": "medium",
-            }) + "\n```"
-        ai_analyzer._call_claude = fake_claude
+            }
+        ai_analyzer.run_task = fake_run_task
+
+        # 测 api_key 检查需要确认环境也清空
+        saved_env_keys = {k: os.environ.pop(k, None) for k in ("CLAUDE_API_KEY", "ANTHROPIC_API_KEY")}
 
         try:
             result = ai_analyzer.analyze("SofaScore", days=7, api_key="dummy")
@@ -157,28 +144,28 @@ def run_tests():
             _check("自动补 sample_size = 2", result["sample_size"] == 2)
             _check("自动补 date_range_days = 7", result["date_range_days"] == 7)
 
-            # 持久化文件存在
             store = json.loads(ai_analyzer.AI_OUTPUT_PATH.read_text(encoding="utf-8"))
             _check("已写入 community_ai_analysis.json", "SofaScore" in store)
 
-            # 无数据竞品报错
             try:
                 ai_analyzer.analyze("Fotmob", days=7, api_key="dummy")
                 raise AssertionError("应抛 RuntimeError")
             except RuntimeError as e:
                 _check("无数据竞品抛 RuntimeError", "无 Reddit 数据" in str(e))
 
-            # 缺 api_key 报错
             try:
                 ai_analyzer.analyze("SofaScore", days=7, api_key="")
                 raise AssertionError("应抛 RuntimeError")
             except RuntimeError as e:
-                _check("缺 api_key 抛 RuntimeError", "CLAUDE_API_KEY" in str(e))
+                _check("缺 api_key 抛 RuntimeError", "CLAUDE_API_KEY" in str(e) or "ANTHROPIC_API_KEY" in str(e))
 
         finally:
             ai_analyzer.RAW_PATH = original_raw
             ai_analyzer.AI_OUTPUT_PATH = original_out
-            ai_analyzer._call_claude = original_call
+            ai_analyzer.run_task = original_run_task
+            for k, v in saved_env_keys.items():
+                if v is not None:
+                    os.environ[k] = v
 
     print("\n🎉 全部断言通过")
     return 0
