@@ -46,6 +46,7 @@ except Exception:
 
 from shared import sync_state  # noqa: E402
 from shared import retry_queue  # noqa: E402
+from shared import feishu_notify  # noqa: E402
 
 PYTHON = sys.executable
 SYNC_LOG_PATH = _PROJECT_ROOT / "data" / "sync_log.json"
@@ -177,6 +178,8 @@ def _post_process(result: dict, source_kind: str) -> None:
     if is_login_required:
         sync_state.mark_cookie_expired(name)
         result["kind"] = "login_required"
+        # 即时飞书告警 — cookie 失效不能等到流水线结束
+        _notify_cookie_expired(name, result.get("stderr_tail", ""))
     elif success:
         sync_state.mark_success(name)
         if source_kind == "playwright":
@@ -221,7 +224,13 @@ def _append_sync_log(entry: dict) -> None:
 # ---- 通知 ----------------------------------------------------------------
 
 def _notify(title: str, msg: str) -> None:
-    """macOS osascript 弹通知；非 mac 平台直接 print。"""
+    """双通道通知：macOS osascript（本机）+ 飞书机器人（远程）。任一失败不影响另一个。"""
+    # 飞书（如配置）
+    try:
+        feishu_notify.send_text(f"{title}\n{msg}")
+    except Exception as e:
+        print(f"[feishu] 通知失败: {e}", file=sys.stderr)
+    # macOS 本机弹窗
     if sys.platform == "darwin":
         try:
             safe_title = title.replace('"', '\\"')
@@ -234,6 +243,32 @@ def _notify(title: str, msg: str) -> None:
         except Exception:
             pass
     print(f"[NOTIFY] {title}: {msg}")
+
+
+def _notify_cookie_expired(source: str, error_tail: str = "") -> None:
+    """Cookie 失效专用即时告警（飞书卡片 + macOS 通知）。"""
+    title = f"🔒 {source} cookie 失效"
+    cmd = f"python3 -m market_rank.scrape_{source} login"
+    fields = [
+        {"label": "数据源", "value": source},
+        {"label": "重新登录命令", "value": f"`{cmd}`"},
+    ]
+    if error_tail:
+        fields.append({"label": "错误信息", "value": error_tail[:200]})
+    try:
+        feishu_notify.send_card(title, fields=fields, color="red",
+                                footer="登录后下次同步会自动恢复")
+    except Exception as e:
+        print(f"[feishu] cookie 告警发送失败: {e}", file=sys.stderr)
+    # 顺便也走 macOS 通知（与原行为兼容）
+    if sys.platform == "darwin":
+        try:
+            subprocess.run([
+                "osascript", "-e",
+                f'display notification "请去终端跑：{cmd}" with title "INTEL-OPS · {title}"',
+            ], timeout=5, check=False)
+        except Exception:
+            pass
 
 
 # ---- Phase runners --------------------------------------------------------
@@ -421,6 +456,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"=== daily_sync --retry-only 完成 — {total/60:.1f} min ===")
         print(f"  Phase 0: ok={p0_ok} fail={p0_fail}  剩余 {queue_size} 项")
         print("=" * 70)
+        # 飞书：只在本轮真处理过任务时通知（避免每小时空跑刷屏）
+        if not args.dry_run and (p0_ok + p0_fail) > 0:
+            try:
+                color = "green" if p0_fail == 0 else "orange"
+                feishu_notify.send_card(
+                    "🔁 重试队列",
+                    fields=[
+                        {"label": "本轮处理", "value": f"✓ {p0_ok} 恢复  /  ✗ {p0_fail} 仍失败"},
+                        {"label": "队列剩余", "value": f"{queue_size} 项"},
+                    ],
+                    color=color,
+                    footer=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
+            except Exception as e:
+                print(f"[feishu] 重试卡片发送失败: {e}", file=sys.stderr)
         return 0 if p0_fail == 0 else 1
 
     # Phase 0：重试队列里到期的失败任务（不一定每次都有）
@@ -431,6 +481,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     total = time.monotonic() - t0
     total_fail = p0_fail + p1_fail + p2_fail + (0 if p3_ok else 1)
+    total_ok = p0_ok + p1_ok + p2_ok + (1 if p3_ok else 0)
     queue_size = len(retry_queue.snapshot().get("items") or [])
     print("\n" + "=" * 70)
     print(f"=== daily_sync 完成 — 总耗时 {total/60:.1f} min ===")
@@ -441,7 +492,38 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"  retry_queue 当前条目: {queue_size}")
     print("=" * 70)
 
-    # 通知
+    # 飞书结束卡片：颜色按失败数 — 0 绿 / 1-2 橙 / 3+ 红
+    if not args.dry_run:
+        if total_fail == 0:
+            color = "green"
+        elif total_fail <= 2:
+            color = "orange"
+        else:
+            color = "red"
+        try:
+            feishu_notify.send_card(
+                "📊 每日抓取完成",
+                fields=[
+                    {"label": "总览",
+                     "value": f"✓ {total_ok} 成功  /  ✗ {total_fail} 失败  ·  ⏱ {total/60:.1f} min"},
+                    {"label": "Phase 0 · 重试队列",
+                     "value": f"✓ {p0_ok} / ✗ {p0_fail}"},
+                    {"label": "Phase 1 · 抓取（10 源并行）",
+                     "value": f"✓ {p1_ok} / ✗ {p1_fail}"},
+                    {"label": "Phase 2 · AI 分析（串行）",
+                     "value": f"✓ {p2_ok} / ✗ {p2_fail}"},
+                    {"label": "Phase 3 · 聚合 + 看板",
+                     "value": "✓" if p3_ok else "✗ 失败"},
+                    {"label": "重试队列剩余",
+                     "value": f"{queue_size} 项" + ("（下次同步重试）" if queue_size else "")},
+                ],
+                color=color,
+                footer=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        except Exception as e:
+            print(f"[feishu] 结束卡片发送失败: {e}", file=sys.stderr)
+
+    # macOS 通知（保留，本机弹窗）
     if expired:
         _notify("INTEL-OPS · Cookie 失效", f"{', '.join(expired)} 需要重新登录")
     if total_fail >= 3:

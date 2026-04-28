@@ -41,6 +41,8 @@ from scripts.daily_sync import (  # noqa: E402
 )
 from shared import sync_state  # noqa: E402
 from shared import retry_queue  # noqa: E402
+from shared import feishu_notify  # noqa: E402
+from datetime import datetime as _dt  # noqa: E402
 from competitors import get_comment_competitors  # noqa: E402
 
 WEEKLY_MAX_AGE_HOURS = 6 * 24  # 6 天内已成功的不重跑
@@ -138,12 +140,39 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     total = time.monotonic() - t0
     queue_size = len(retry_queue.snapshot().get("items") or [])
+    total_fail = p0_fail + fail
+    total_ok = p0_ok + ok
     print("\n" + "=" * 70)
     print(f"=== weekly_sync 完成 — 总耗时 {total/60:.1f} min ===")
     print(f"  Phase 0 (retry): ok={p0_ok}  fail={p0_fail}")
     print(f"  Phase 1 (周更):  ok={ok}     fail={fail}")
     print(f"  retry_queue 当前条目: {queue_size}")
     print("=" * 70)
+
+    # 飞书结束卡片
+    if not args.dry_run:
+        if total_fail == 0:
+            color = "green"
+        elif total_fail <= 2:
+            color = "orange"
+        else:
+            color = "red"
+        try:
+            feishu_notify.send_card(
+                "📅 周更完成",
+                fields=[
+                    {"label": "总览",
+                     "value": f"✓ {total_ok} 成功  /  ✗ {total_fail} 失败  ·  ⏱ {total/60:.1f} min"},
+                    {"label": "Phase 0 · 重试队列", "value": f"✓ {p0_ok} / ✗ {p0_fail}"},
+                    {"label": "Phase 1 · 周更任务（含 9 个竞品深度）",
+                     "value": f"✓ {ok} / ✗ {fail}"},
+                    {"label": "队列剩余", "value": f"{queue_size} 项"},
+                ],
+                color=color,
+                footer=_dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        except Exception as e:
+            print(f"[feishu] 周更卡片发送失败: {e}", file=sys.stderr)
 
     if fail >= 3:
         _notify("INTEL-OPS · 周更告警", f"周更 {fail} 个任务失败，详情见 sync_log")

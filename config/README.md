@@ -50,6 +50,7 @@ GOOGLE_CSE_ID=...               # Google CSE 引擎 ID（同上）
 | Sensor Tower（Playwright） | 无（手动登录） | — | `python3 -m market_rank.scrape_sensor_tower login` |
 | AppMagic（Playwright） | 无（手动登录） | — | `python3 -m market_rank.scrape_appmagic login` |
 | **Google CSE（商业新闻）** | `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` | 整源跳过（warning，不报错） | 见下 |
+| **飞书机器人通知** | `FEISHU_WEBHOOK_URL` + `FEISHU_KEYWORD` | 所有通知静默跳过 | 见下 |
 
 ### Google CSE 申请步骤
 
@@ -65,6 +66,38 @@ GOOGLE_CSE_ID=...               # Google CSE 引擎 ID（同上）
 4. 跑：`python3 -m async_crawler --sources google_news` 或 dashboard 的"Google 商业新闻抓取"按钮
 
 **配额**：免费 100 query/day，目前消耗 9（每竞品 1 query），冗余够。
+
+### 飞书机器人配置
+
+1. **创建群机器人**：
+   - 打开飞书群（建议专门建一个 "INTEL-OPS 通知" 群）
+   - 群设置 → **群机器人** → **添加机器人** → **自定义机器人**
+   - 起名（如 "INTEL-OPS"），选图标
+2. **安全设置**（任选其一）：
+   - **关键词**（推荐）：填 `INTEL-OPS` — 简单，所有发出的消息会自动带这个前缀
+   - 签名校验 / IP 白名单不推荐（本地 Mac 设置麻烦）
+3. **复制 Webhook URL** → 填进 `.env.local`：
+   ```bash
+   FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxxxx-xxxx
+   FEISHU_KEYWORD=INTEL-OPS
+   ```
+4. **手动测试**：
+   ```bash
+   python3 -m shared.feishu_notify "测试消息"
+   ```
+   群里应立刻收到一条测试卡片。
+
+### 飞书通知触发时机
+
+| 场景 | 时机 | 卡片颜色 |
+|---|---|---|
+| 每日抓取完成 | daily_sync 结尾（02:00） | 全成功 → 绿；1-2 失败 → 橙；3+ 失败 → 红 |
+| 周更完成 | weekly_sync 结尾（周日 03:00） | 同上 |
+| Cookie 失效 | 任意 Playwright 源失败时**即时** | 红 |
+| 重试队列处理 | 每小时 retry-only 实际处理过任务时 | 全成功 → 绿；有失败 → 橙 |
+| 总耗时 > 30 min | daily_sync 结尾 | macOS 通知（飞书不发） |
+
+未配置 `FEISHU_WEBHOOK_URL` 时所有飞书通知静默跳过，不影响主流程。
 
 ---
 
