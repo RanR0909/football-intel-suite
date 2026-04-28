@@ -1,269 +1,44 @@
 #!/usr/bin/env python3
-"""auto_report.py — 多竞品 × 多地区 滚动评论监测 (Claude API)"""
-import os, json, re, urllib.request, ssl, sys, time
-from datetime import datetime, timezone, timedelta
+"""auto_report.py — 兼容入口（薄壳）。
+
+P0 拆分后职责：依次调 comment_fetch + comment_label。
+- comment_fetch.py：抓 GP/iOS 评论 → data/raw/comments_raw.json
+- comment_label.py：AI 翻译 + 打标 → data/competitor_comments.json
+
+dashboard 上"滚动评论监测"按钮 / scripts/daily_sync.py 都仍然能调这个入口，
+不破坏现有触发链路。
+
+直接细粒度跑：
+  python3 -m competitor_comment.comment_fetch
+  python3 -m competitor_comment.comment_label [--force]
+"""
+
+from __future__ import annotations
+
+import sys
 from pathlib import Path
-from collections import Counter
-from google_play_scraper import reviews, Sort
 
-# ── 路径自动定位 ──────────────────────────────────────────────
-_SCRIPT_DIR = Path(__file__).resolve().parent
-_PROJECT_ROOT = _SCRIPT_DIR.parent          # Football_Intel_Suite/
-DATA_DIR = _PROJECT_ROOT / "data"           # 统一数据输出目录
-REPORTS_DIR = _SCRIPT_DIR / "reports"       # 报告仍保留在模块内
-sys.path.insert(0, str(_PROJECT_ROOT))
+# 兼容多种调用方式：python -m competitor_comment.auto_report / 直接 python auto_report.py
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-from competitors import get_comment_competitors
-from regions import get_region_codes, load_regions
-from prompts.comment_prompts import build_label_prompt, build_daily_summary_prompt
-
-COMPETITORS = get_comment_competitors()
-REGIONS     = get_region_codes()
-REGION_INFO = load_regions()
-FETCH_COUNT = 200
-CUTOFF_DAYS = 3
-CATEGORIES  = "[问题抱怨]、[高价值功能请求]、[竞品对比]、[流失信号]、[正向反馈]、[其他]"
-
-# Claude API 配置
-CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
-CLAUDE_API_URL = "https://ai.flashapi.top/v1/messages"
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # 快速模型
+from competitor_comment import comment_fetch, comment_label  # noqa: E402
 
 
-def call_claude(prompt, max_tokens=4096, timeout=60, retries=3):
-    """调用 Anthropic Native 格式的 Claude API"""
-    last_error = None
-    for attempt in range(1, retries + 1):
-        try:
-            data = json.dumps({
-                "model": CLAUDE_MODEL,
-                "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": prompt}]
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                CLAUDE_API_URL,
-                data=data,
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": CLAUDE_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                }
-            )
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                result = json.loads(resp.read())
-            return result["content"][0]["text"]
-        except Exception as exc:
-            last_error = exc
-            if attempt < retries:
-                time.sleep(min(attempt * 2, 6))
-    raise last_error
+def main() -> None:
+    print("=" * 60)
+    print("Phase 1/2: 抓取评论（GP + iOS）...")
+    print("=" * 60)
+    comment_fetch.main()
 
+    print("\n" + "=" * 60)
+    print("Phase 2/2: AI 标签 + 摘要...")
+    print("=" * 60)
+    comment_label.main(force=False)
 
-def translate_to_english(rows):
-    """批量翻译非英文评论为英文"""
-    non_en = [(i, r) for i, r in enumerate(rows) if r.get("content")]
-    if not non_en:
-        return rows
-    id_map = {str(i): r["content"] for i, r in non_en}
-    prompt = (
-        "Translate the following app reviews to English. "
-        "Return a JSON object mapping each ID to its English translation. "
-        "If already English, keep as-is. Output only JSON.\n\n"
-        + json.dumps(id_map, ensure_ascii=False)
-    )
-    try:
-        raw = call_claude(prompt).strip()
-        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
-        translations = json.loads(raw)
-        for i, r in non_en:
-            if str(i) in translations:
-                r["content"] = translations[str(i)]
-    except Exception:
-        pass
-    return rows
-
-
-def fetch(pkg, country):
-    cutoff = datetime.now(timezone.utc) - timedelta(days=CUTOFF_DAYS)
-    lang = REGION_INFO.get(country, {}).get("lang", "en")
-    try:
-        result, _ = reviews(pkg, lang=lang, country=country, sort=Sort.NEWEST, count=FETCH_COUNT)
-    except Exception as e:
-        print(f"    [GP][{pkg}/{country}] 抓取失败（包名错？）: {type(e).__name__}: {e}", file=sys.stderr)
-        return []
-    if not result:
-        print(
-            f"    [GP][{pkg}/{country}] 警告：返回 0 条 — 通常是包名 {pkg!r} "
-            f"在 Google Play 不存在（'幽灵 ID'）。",
-            file=sys.stderr,
-        )
-    rows = []
-    for r in result:
-        at = r["at"].replace(tzinfo=timezone.utc) if r["at"].tzinfo is None else r["at"]
-        if at >= cutoff:
-            rows.append({"score": r["score"], "version": r.get("appVersion", ""), "content": r["content"]})
-    return rows
-
-
-def fetch_ios(app_id, country):
-    """iOS 评论抓取。
-
-    优先使用 app-store-scraper 库（基于 Apple 内部 customer-reviews JSON API）。
-    旧的 itunes.apple.com/rss/customerreviews 接口 Apple 已弃用全局返回 0。
-    库不可用时降级到 RSS 兼容旧行为。
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=CUTOFF_DAYS)
-    # 主路径：app-store-scraper
-    try:
-        from app_store_scraper import AppStore
-        scraper = AppStore(country=country, app_name=str(app_id), app_id=int(app_id))
-        # 库会内部翻页直到 how_many；中途异常则停
-        scraper.review(how_many=FETCH_COUNT, sleep=1)
-        rows = []
-        for r in scraper.reviews or []:
-            ts = r.get("date")
-            if ts:
-                if not getattr(ts, "tzinfo", None):
-                    ts = ts.replace(tzinfo=timezone.utc)
-                if ts < cutoff:
-                    continue
-            rows.append({
-                "score": int(r.get("rating") or 5),
-                "version": r.get("version") or "",
-                "content": (r.get("review") or r.get("title") or "").strip(),
-            })
-        return rows
-    except Exception as e:
-        print(f"    [iOS][{app_id}/{country}] app-store-scraper 失败 ({type(e).__name__}: {e})，降级 RSS",
-              file=sys.stderr)
-
-    # 降级：旧 RSS（已知 Apple 弃用，多数情况下返回空）
-    rows, page = [], 1
-    while len(rows) < FETCH_COUNT and page <= 10:
-        url = f"https://itunes.apple.com/{country}/rss/customerreviews/page={page}/id={app_id}/sortby=mostrecent/json"
-        try:
-            with urllib.request.urlopen(url, timeout=10) as r:
-                data = json.loads(r.read())
-        except Exception:
-            break
-        entries = data.get("feed", {}).get("entry", [])
-        if isinstance(entries, dict):
-            entries = [entries]
-        if not isinstance(entries, list) or not entries:
-            break
-        start_idx = 1 if entries and isinstance(entries[0], dict) and "im:name" in entries[0] else 0
-        for e in entries[start_idx:]:
-            score = int(e.get("im:rating", {}).get("label", 5))
-            rows.append({
-                "score": score,
-                "version": e.get("im:version", {}).get("label", ""),
-                "content": e.get("content", {}).get("label", ""),
-            })
-        page += 1
-    return rows
-
-
-_VALID_LABELS = {"[问题抱怨]", "[高价值功能请求]", "[竞品对比]", "[流失信号]", "[正向反馈]", "[其他]"}
-
-
-def _normalize_label(raw_label: str) -> str:
-    """把 Claude 返回的标签归一到带方括号的标准形式。
-
-    Claude 有时会返回 '问题抱怨'（无方括号）或 '[问题抱怨]'（含方括号）。
-    下游 SENTIMENT_BY_LABEL 字典 key 一律带方括号，所以这里 force 归一。
-    """
-    if not raw_label:
-        return "[其他]"
-    s = str(raw_label).strip().strip("'\"")
-    if not s.startswith("["):
-        s = "[" + s
-    if not s.endswith("]"):
-        s = s + "]"
-    return s if s in _VALID_LABELS else "[其他]"
-
-
-def label(rows):
-    """使用 Claude 对评论打标"""
-    id_map = {str(i): r["content"] for i, r in enumerate(rows)}
-    try:
-        resp_text = call_claude(build_label_prompt(id_map, CATEGORIES))
-        raw = resp_text.strip()
-        if "```" in raw:
-            raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw, flags=re.DOTALL).strip()
-        mapping = json.loads(raw)
-        for i, r in enumerate(rows):
-            r["label"] = _normalize_label(mapping.get(str(i), "[其他]"))
-    except Exception as exc:
-        print(f"  [AI] 打标失败，降级为默认标签: {exc}")
-        for r in rows:
-            r["label"] = "[其他]"
-    return rows
-
-
-def summarize(rows, app_name, region):
-    """使用 Claude 生成分析摘要"""
-    prompt = build_daily_summary_prompt(app_name, region, CUTOFF_DAYS, rows, list(COMPETITORS.keys()))
-    try:
-        return call_claude(prompt)
-    except Exception as exc:
-        print(f"  [AI] 摘要失败，写入降级说明: {exc}")
-        return f"AI 分析失败：{exc}"
-
-
-def export_json(all_data):
-    """Export structured JSON to root /data/ for the main dashboard."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = DATA_DIR / "competitor_comments.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(all_data, f, ensure_ascii=False, indent=2)
-    print(f"JSON 数据已导出: {out_path}")
-
-
-def main():
-    if not CLAUDE_API_KEY:
-        print("错误: 未设置 CLAUDE_API_KEY 环境变量。")
-        return
-
-    all_data = {
-        "generated_at": datetime.now().isoformat(),
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "competitors": {}
-    }
-
-    for app_name, comp in COMPETITORS.items():
-        app_data = {"regions": {}}
-        for region in REGIONS:
-            print(f"[{app_name}/{region}] 抓取...")
-            gp_rows = fetch(comp["gp"], region)
-            ios_rows = fetch_ios(comp["ios"], region)
-            rows = gp_rows + ios_rows
-            if not rows:
-                app_data["regions"][region] = {"count": 0, "negative_count": 0, "labels": {}, "summary": "", "reviews": []}
-                continue
-            if REGION_INFO.get(region, {}).get("lang", "en") != "en":
-                print(f"  翻译为英文...")
-                rows = translate_to_english(rows)
-            print(f"  {len(rows)} 条，打标...")
-            rows = label(rows)
-            label_dist = dict(Counter(r["label"] for r in rows))
-            negative_count = sum(1 for r in rows if r["score"] <= 3)
-            app_data["regions"][region] = {
-                "count": len(rows),
-                "negative_count": negative_count,
-                "labels": label_dist,
-                "summary": "",
-                "reviews": [
-                    {"score": r["score"], "version": r["version"], "label": r["label"], "content": r["content"]}
-                    for r in rows
-                ]
-            }
-        all_data["competitors"][app_name] = app_data
-
-    export_json(all_data)
+    print("\n[auto_report] 全部完成")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
