@@ -33,10 +33,11 @@ class Scheduler:
     async def loop(self, tick: int = 60):
         """主循环，每 tick 秒检查哪些源到期需要运行"""
         from async_crawler.sources import (
-            appstore_rank, reviews, sensor_tower,
-            androidrank, reddit, iap_pricing, fb_adlib,
+            appstore_rank, reviews,
+            androidrank, reddit, iap_pricing,
         )
-        modules = [appstore_rank, reviews, sensor_tower, androidrank, reddit, iap_pricing, fb_adlib]
+        # sensor_tower / fb_adlib 已迁移到 Playwright（手动登录），不在自动循环里
+        modules = [appstore_rank, reviews, androidrank, reddit, iap_pricing]
 
         await self.db.connect()
         log.info("调度器启动")

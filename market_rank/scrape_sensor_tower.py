@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""Sensor Tower 概览页抓取 — Playwright 持久 profile（替代失效的 token 版）。
+
+CLI:
+    python3 -m market_rank.scrape_sensor_tower login    # 一次性手动登录免费账号
+    python3 -m market_rank.scrape_sensor_tower scrape   # 抓取（默认）
+    python3 -m market_rank.scrape_sensor_tower --headed # 调试时显示浏览器
+
+输出：data/async_sensor_tower.json
+  shape 与旧 async_crawler/sources/sensor_tower.py 兼容（aggregator 直接消费）：
+  [{source, competitor, region, timestamp, data: {downloads, revenue, rating, ratings_count, raw_text}}]
+
+设计：
+- 免费账号能看到月下载估算 / 评分 / 评分数（收入估算多数 app 锁付费）
+- 每个 competitor 一次概览页（默认 iOS / 美国），共 9 个请求
+- DOM 不稳定 → 用 heuristic：扫所有元素文本，抓"Downloads / Revenue / Ratings"附近的数字
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from playwright.async_api import async_playwright
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent
+
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from competitors import get_comment_competitors  # type: ignore
+
+PROFILE_DIR = Path.home() / ".sensortower-profile"
+DATA_OUT = _PROJECT_ROOT / "data" / "async_sensor_tower.json"
+
+PAGE_TIMEOUT_SEC = 30
+SCRAPE_REGION = "US"   # 概览页默认市场（免费账号能切其他国家）
+SCRAPE_PLATFORM = "ios"
+
+
+# ---- DOM 提取（heuristic — 扫文本对找数字）-------------------------------
+EXTRACT_JS = r"""
+() => {
+  // 把页面按"label → value"扫一遍。Sensor Tower 概览页的卡片通常是
+  //   <div>Downloads</div><div>~3.2M</div>
+  // 或 dt/dd / span/span，我们 heuristic 处理。
+  function parseNum(s) {
+    if (!s) return null;
+    const t = String(s).replace(/[~$,\s>+]/g, '').trim();
+    const m = t.match(/^([\d.]+)\s*([KMB]?)/i);
+    if (!m) return null;
+    let n = parseFloat(m[1]);
+    if (isNaN(n)) return null;
+    const sfx = (m[2] || '').toUpperCase();
+    if (sfx === 'K') n *= 1e3;
+    else if (sfx === 'M') n *= 1e6;
+    else if (sfx === 'B') n *= 1e9;
+    return n;
+  }
+
+  // 收集所有"小卡片"候选 - 扫所有元素的 innerText，找 label 关键字
+  const out = {
+    downloads: null,
+    revenue: null,
+    rating: null,
+    ratings_count: null,
+    raw_text: '',
+  };
+  const labels = {
+    downloads: ['Downloads', 'Total Downloads', 'Worldwide Downloads', 'Last 30 Days Downloads'],
+    revenue:   ['Revenue', 'Total Revenue', 'Worldwide Revenue', 'Last 30 Days Revenue'],
+    rating:    ['Avg. Rating', 'Average Rating', 'Rating'],
+    ratings_count: ['Ratings', 'Total Ratings', 'Number of Ratings'],
+  };
+  // 拿到 main 区域文本以便 fallback 调试
+  const main = document.querySelector('main') || document.body;
+  out.raw_text = (main.innerText || '').slice(0, 4000);
+
+  // 遍历所有元素，按 innerText 第一行匹配 label，取后续紧邻文本作为 value
+  const all = main.querySelectorAll('div, span, dt, dd, li, p');
+  for (const el of all) {
+    const text = (el.innerText || '').trim();
+    if (!text || text.length > 60) continue;  // label 一般短
+    for (const [field, names] of Object.entries(labels)) {
+      if (out[field] !== null) continue;
+      if (!names.some(n => text.toLowerCase() === n.toLowerCase())) continue;
+      // 找 value：先尝试同级 next sibling
+      let valEl = el.nextElementSibling;
+      let valText = '';
+      if (valEl && valEl.innerText) valText = valEl.innerText.trim();
+      // fallback 父节点的下一个兄弟（label 在 dt 里的情况）
+      if (!valText && el.parentElement) {
+        const sib = el.parentElement.nextElementSibling;
+        if (sib) valText = (sib.innerText || '').trim();
+      }
+      // fallback 父容器的全文（取 label 后面的）
+      if (!valText && el.parentElement) {
+        const pTxt = (el.parentElement.innerText || '').trim();
+        const idx = pTxt.toLowerCase().indexOf(text.toLowerCase());
+        if (idx >= 0) {
+          valText = pTxt.slice(idx + text.length).trim().split('\n')[0];
+        }
+      }
+      if (!valText) continue;
+      // 取 value 第一个数字 token
+      const firstLine = valText.split('\n')[0].trim();
+      if (field === 'rating') {
+        const m = firstLine.match(/([\d.]+)/);
+        if (m) out.rating = parseFloat(m[1]);
+      } else {
+        const v = parseNum(firstLine);
+        if (v !== null) out[field] = v;
+      }
+    }
+  }
+  return out;
+}
+"""
+
+
+class LoginRequired(RuntimeError):
+    """需要重新登录 Sensor Tower。"""
+
+
+async def _detect_login_required(page) -> bool:
+    cur = page.url or ""
+    if "/users/sign-in" in cur or "/auth" in cur or "/login" in cur:
+        return True
+    try:
+        has_signin = await page.evaluate(
+            "() => !!document.querySelector('a[href*=\"sign-in\"], a[href*=\"login\"]')"
+        )
+        has_overview = await page.evaluate(
+            "() => !!document.querySelector('main') && document.body.innerText.length > 2000"
+        )
+        return bool(has_signin and not has_overview)
+    except Exception:
+        return False
+
+
+async def _wait_overview_ready(page, timeout_s: int = PAGE_TIMEOUT_SEC) -> None:
+    """等概览页主区域渲染。"""
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout_s
+    while loop.time() < deadline:
+        if await _detect_login_required(page):
+            raise LoginRequired("Sensor Tower 未登录或登录态过期")
+        body_len = await page.evaluate(
+            "() => (document.querySelector('main') || document.body).innerText.length"
+        )
+        if body_len and body_len > 2000:
+            return
+        await asyncio.sleep(0.5)
+    if await _detect_login_required(page):
+        raise LoginRequired("Sensor Tower 未登录或登录态过期（页面加载超时）")
+    raise TimeoutError(f"Sensor Tower 概览页未在 {timeout_s}s 内加载完成")
+
+
+async def _fetch_app(page, app_name: str, app_id: str) -> dict:
+    url = (
+        f"https://app.sensortower.com/overview/{app_id}"
+        f"?country={SCRAPE_REGION}&os={SCRAPE_PLATFORM}"
+    )
+    print(f"[{app_name}] {url}")
+    await page.goto(url, wait_until="domcontentloaded")
+    await _wait_overview_ready(page)
+    # 给 SPA 异步刷数据一点时间
+    await asyncio.sleep(2)
+    data = await page.evaluate(EXTRACT_JS)
+    print(
+        f"  -> downloads={data.get('downloads')} revenue={data.get('revenue')}"
+        f" rating={data.get('rating')} ratings_count={data.get('ratings_count')}"
+    )
+    return data
+
+
+# ---- 命令：login ----------------------------------------------------------
+
+async def cmd_login() -> None:
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    async with async_playwright() as p:
+        ctx = await p.chromium.launch_persistent_context(
+            str(PROFILE_DIR),
+            headless=False,
+            viewport={"width": 1400, "height": 900},
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        await page.goto("https://app.sensortower.com/users/sign-in")
+        print("浏览器已打开。")
+        print("  1. 用 Sensor Tower 免费账号登录（没有就先注册一个）")
+        print("  2. 登录后能看到 dashboard 即可关闭窗口")
+        try:
+            while ctx.pages:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
+    print(f"profile 已保存到：{PROFILE_DIR}")
+
+
+# ---- 命令：scrape ---------------------------------------------------------
+
+async def cmd_scrape(headed: bool = False) -> Path:
+    if not PROFILE_DIR.exists():
+        raise LoginRequired(
+            f"找不到 {PROFILE_DIR}。请先跑：\n"
+            f"  python3 -m market_rank.scrape_sensor_tower login"
+        )
+
+    competitors = get_comment_competitors()
+    results: list[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    async with async_playwright() as p:
+        ctx = await p.chromium.launch_persistent_context(
+            str(PROFILE_DIR),
+            headless=not headed,
+            viewport={"width": 1400, "height": 900},
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        try:
+            for app_name, comp in competitors.items():
+                ios_id = str(comp.get("ios") or comp.get("app_id") or "")
+                if not ios_id:
+                    print(f"[{app_name}] 没有 ios id，跳过", file=sys.stderr)
+                    continue
+                try:
+                    data = await _fetch_app(page, app_name, ios_id)
+                except LoginRequired:
+                    raise
+                except Exception as e:
+                    print(f"  ERROR: {e}", file=sys.stderr)
+                    data = {"error": str(e)}
+                rec = {
+                    "source": "sensor_tower",
+                    "competitor": app_name,
+                    "region": SCRAPE_REGION.lower(),
+                    "timestamp": now_iso,
+                    "data": data,
+                }
+                results.append(rec)
+                await asyncio.sleep(2)  # 节流
+        finally:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
+
+    DATA_OUT.parent.mkdir(parents=True, exist_ok=True)
+    DATA_OUT.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    ok = sum(1 for r in results if not (r.get("data") or {}).get("error"))
+    print(f"\n保存完成 -> {DATA_OUT}（{len(results)} record，{ok} 条有数据）")
+    return DATA_OUT
+
+
+# ---- main -----------------------------------------------------------------
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("command", choices=["login", "scrape"], nargs="?", default="scrape")
+    ap.add_argument("--headed", action="store_true")
+    args = ap.parse_args()
+
+    if args.command == "login":
+        asyncio.run(cmd_login())
+    else:
+        try:
+            asyncio.run(cmd_scrape(headed=args.headed))
+        except LoginRequired as e:
+            print(f"❌ {e}", file=sys.stderr)
+            sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

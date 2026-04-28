@@ -24,20 +24,22 @@ log = logging.getLogger("crawler.main")
 
 
 def _all_sources():
-    """已注册数据源 (key, label, module)；新增源在此加。"""
+    """已注册数据源 (key, label, module)；新增源在此加。
+
+    sensor_tower / fb_adlib 已迁移到 market_rank/ 下的 Playwright 脚本（需手动登录），
+    不在 async_crawler 自动循环里跑 — 由 dashboard_server SCRIPTS 单独触发。
+    """
     from async_crawler.sources import (
-        appstore_rank, reviews, sensor_tower,
-        androidrank, reddit, twitter, iap_pricing, fb_adlib,
+        appstore_rank, reviews,
+        androidrank, reddit, twitter, iap_pricing,
     )
     return [
         ("appstore_rank", "App Store 排名", appstore_rank),
         ("reviews",       "用户评论",       reviews),
-        ("sensor_tower",  "Sensor Tower",   sensor_tower),
         ("androidrank",   "Androidrank",    androidrank),
         ("reddit",        "Reddit 舆情",    reddit),
         ("twitter",       "X (Twitter)",    twitter),
         ("iap_pricing",   "IAP 定价",       iap_pricing),
-        ("fb_adlib",      "Meta Ad Library", fb_adlib),
     ]
 
 

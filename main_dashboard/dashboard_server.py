@@ -107,6 +107,21 @@ SCRIPTS = {
         "cwd": str(_PROJECT_ROOT),
         "label": "Meta 广告投放抓取（Playwright）",
     },
+    # Sensor Tower 概览页（Playwright 持久 profile，免费账号即可）
+    "sensor_tower_login": {
+        "path": "-m",
+        "module": "market_rank.scrape_sensor_tower",
+        "args": ["login"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "Sensor Tower 登录（手动）",
+    },
+    "sensor_tower": {
+        "path": "-m",
+        "module": "market_rank.scrape_sensor_tower",
+        "args": ["scrape"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "Sensor Tower 抓取（Playwright）",
+    },
     "reddit_crawl": {
         "path": "-m",
         "module": "async_crawler",
