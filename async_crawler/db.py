@@ -55,3 +55,18 @@ class Database:
 
     async def close(self):
         return None
+
+
+# ---- 模块级兼容 shim ------------------------------------------------------
+# 旧代码（appstore_rank.py / reviews.py 等）有 `await db.save(name, docs)` 调法，
+# 这里提供一个进程级单例 Database 让那种调法继续工作。
+
+_global_db = None
+
+
+async def save(collection: str, docs: list[dict]):
+    """模块级 save（与 Database.save 等价；兼容旧调用方）。"""
+    global _global_db
+    if _global_db is None:
+        _global_db = Database()
+    await _global_db.save(collection, docs)

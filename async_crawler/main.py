@@ -15,6 +15,13 @@ import aiohttp
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# 加载 .env.local + ~/.intelops-secrets — 确保 MYSQL_DSN / REDIS_URL / 各 API key 可读
+try:
+    from shared.env_loader import load_all as _load_env_all
+    _load_env_all()
+except Exception:
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
