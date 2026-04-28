@@ -34,9 +34,37 @@
 CLAUDE_API_KEY=sk-...           # flashapi 中转（默认）
 ANTHROPIC_API_KEY=sk-ant-...    # 官方备用（fallback）
 X_BEARER_TOKEN=...              # X 抓取（可选）
+GOOGLE_API_KEY=...              # Google CSE（商业新闻，可选）
+GOOGLE_CSE_ID=...               # Google CSE 引擎 ID（同上）
 ```
 
 首次：`cp .env.local.example .env.local` 然后编辑。
+
+### 抓取源 Key 速查
+
+| 源 | 需要的 Key | 未配置时 | 申请入口 |
+|---|---|---|---|
+| Reddit / iOS / GP / Androidrank | 无 | 正常跑 | — |
+| X (Twitter) | `X_BEARER_TOKEN` | 整源跳过 | https://developer.x.com → Apps → Bearer Token |
+| Meta 广告库（Playwright） | 无（手动登录） | — | `python3 -m market_rank.scrape_fb_adlib login` |
+| Sensor Tower（Playwright） | 无（手动登录） | — | `python3 -m market_rank.scrape_sensor_tower login` |
+| AppMagic（Playwright） | 无（手动登录） | — | `python3 -m market_rank.scrape_appmagic login` |
+| **Google CSE（商业新闻）** | `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` | 整源跳过（warning，不报错） | 见下 |
+
+### Google CSE 申请步骤
+
+1. **API Key**：
+   - 进 https://console.cloud.google.com/apis/credentials
+   - 创建项目（或用已有的）→ "Enable APIs" → 搜 "Custom Search API" 启用
+   - "Credentials" → "Create credentials" → "API key" → 复制
+2. **CSE ID（cx）**：
+   - 进 https://programmablesearchengine.google.com/
+   - "Add" 创建搜索引擎，"Search the entire web" 选 ON
+   - 创建后复制 "Search engine ID"（形如 `017576662512468239146:omuauf_lfve`）
+3. 填进 `.env.local` 的 `GOOGLE_API_KEY` / `GOOGLE_CSE_ID`
+4. 跑：`python3 -m async_crawler --sources google_news` 或 dashboard 的"Google 商业新闻抓取"按钮
+
+**配额**：免费 100 query/day，目前消耗 9（每竞品 1 query），冗余够。
 
 ---
 

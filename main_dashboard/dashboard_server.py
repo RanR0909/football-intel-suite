@@ -143,6 +143,13 @@ SCRIPTS = {
         "cwd": str(_PROJECT_ROOT),
         "label": "IAP 定价抓取",
     },
+    "google_news": {
+        "path": "-m",
+        "module": "async_crawler",
+        "args": ["--sources", "google_news"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "Google 商业新闻抓取",
+    },
     # 单竞品 3 日评论 AI 摘要（per-competitor）
     "review_3d": {
         "path": str(_PROJECT_ROOT / "competitor_comment" / "review_3d_summary.py"),

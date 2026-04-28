@@ -31,7 +31,7 @@ def _all_sources():
     """
     from async_crawler.sources import (
         appstore_rank, reviews,
-        androidrank, reddit, twitter, iap_pricing,
+        androidrank, reddit, twitter, iap_pricing, google_news,
     )
     return [
         ("appstore_rank", "App Store 排名", appstore_rank),
@@ -40,6 +40,7 @@ def _all_sources():
         ("reddit",        "Reddit 舆情",    reddit),
         ("twitter",       "X (Twitter)",    twitter),
         ("iap_pricing",   "IAP 定价",       iap_pricing),
+        ("google_news",   "Google 商业新闻", google_news),
     ]
 
 

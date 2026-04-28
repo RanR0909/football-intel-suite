@@ -6,4 +6,5 @@ from async_crawler.sources import (
     reddit,
     iap_pricing,
     fb_adlib,
+    google_news,
 )
