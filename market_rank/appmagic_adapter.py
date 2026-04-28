@@ -49,14 +49,18 @@ def _build_token_to_name() -> dict[str, str]:
 
 
 def _resolve_competitor_name(raw_name: str, token_map: dict[str, str]) -> Optional[str]:
-    """把 AppMagic 的 raw name 映射到 competitors.json 的标准 name。"""
+    """把 AppMagic 的 raw name 映射到 competitors.json 的标准 name。
+
+    匹配规则：tok 必须等于 known_tok 或以 known_tok 起头（避免 'live' → LiveScore 假阳性）。
+    去掉 known_tok.startswith(tok) 这个方向。
+    """
     tok = _app_token(raw_name)
-    if not tok:
+    if not tok or len(tok) < 4:  # 太短的 token 不参与（如 '3' / 'liv'）
         return None
     if tok in token_map:
         return token_map[tok]
     for known_tok, std_name in token_map.items():
-        if tok == known_tok or tok.startswith(known_tok) or known_tok.startswith(tok):
+        if tok == known_tok or tok.startswith(known_tok):
             return std_name
     return None
 

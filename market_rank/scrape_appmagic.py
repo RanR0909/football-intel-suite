@@ -68,11 +68,19 @@ def app_token(name: str) -> str:
 
 
 def match_tracked(name: str) -> str | None:
+    """匹配规则：token 必须等于 key 或以 key 起头（避免 'Live xxx' 假阳性匹配到 livescore）。
+
+    保留 token.startswith(key) 是为了让 '365Scores' (token=365scores) 匹配到 key='365score'。
+    去掉 key.startswith(token) 那个方向（之前会让 token='live' 匹配到 'livescore'）。
+    """
     token = app_token(name)
     if not token:
         return None
+    # 至少 4 字符的 token 才参与前缀匹配，避免 token='3' 匹配 '365score'
+    if len(token) < 4:
+        return None
     for key in TRACKED_APPS:
-        if token == key or token.startswith(key) or key.startswith(token):
+        if token == key or token.startswith(key):
             return key
     return None
 
