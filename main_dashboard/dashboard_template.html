@@ -441,6 +441,18 @@ body::before {
   <div id="ov-sync-state-body" style="display:none;padding:8px 20px 14px"></div>
 </div>
 
+<!-- L4b：数据库健康（MySQL + Redis） -->
+<div class="card full-card" id="ov-db-card" style="margin-top:16px">
+  <div class="card-head" id="ov-db-head" style="cursor:pointer" onclick="toggleDbStatus()">
+    <div class="card-title">数据库健康 <span id="ov-db-summary" style="margin-left:8px;font-size:11px;color:var(--muted);font-family:var(--mono);font-weight:400"></span></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn" style="font-size:11px;padding:3px 10px" onclick="event.stopPropagation();refreshDbStatus()">刷新</button>
+      <span id="ov-db-toggle" style="color:var(--muted);font-size:11px;font-family:var(--mono);user-select:none">展开 ▼</span>
+    </div>
+  </div>
+  <div id="ov-db-body" style="display:none;padding:8px 20px 14px"></div>
+</div>
+
 <!-- L4：同步抓取日志（折叠卡，按运行批次分组） -->
 <div class="card full-card" id="ov-sync-log-card" style="margin-top:16px">
   <div class="card-head" id="ov-sync-log-head" style="cursor:pointer" onclick="toggleSyncLog()">
@@ -6232,6 +6244,95 @@ function _renderOvSyncState() {
     + '</div>';
 }
 
+// ====== 数据库健康（MySQL + Redis） ======
+var _dbStatusCache = { mysql: { enabled: false }, redis: { enabled: false } };
+
+function refreshDbStatus(cb) {
+  fetch(API_BASE + '/api/db/status')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      _dbStatusCache = d || _dbStatusCache;
+      _renderOvDbStatus();
+      if (cb) cb();
+    })
+    .catch(function(e){ console.error('db_status fetch failed', e); if (cb) cb(); });
+}
+
+function toggleDbStatus() {
+  var body = document.getElementById('ov-db-body');
+  var toggle = document.getElementById('ov-db-toggle');
+  if (!body) return;
+  var visible = body.style.display !== 'none';
+  body.style.display = visible ? 'none' : 'block';
+  if (toggle) toggle.textContent = visible ? '展开 ▼' : '折叠 ▲';
+  if (!visible) refreshDbStatus();
+}
+
+function _renderOvDbStatus() {
+  var body = document.getElementById('ov-db-body');
+  var summary = document.getElementById('ov-db-summary');
+  if (!body) return;
+  var d = _dbStatusCache || {};
+  var ms = d.mysql || {};
+  var rs = d.redis || {};
+
+  // 顶部 summary
+  var msIcon = !ms.enabled ? '○ MySQL 未配置' : (ms.ok ? '✓ MySQL' : '✗ MySQL');
+  var rsIcon = !rs.enabled ? '○ Redis 未配置' : (rs.ok ? '✓ Redis' : '✗ Redis');
+  if (summary) summary.innerHTML = msIcon + '  ·  ' + rsIcon;
+
+  // MySQL 详情
+  var mysqlHtml = '';
+  if (!ms.enabled) {
+    mysqlHtml = '<div style="color:var(--muted);font-size:11px;font-family:var(--mono)">MYSQL_DSN 未配置 — JSON-only 模式</div>';
+  } else if (!ms.ok) {
+    mysqlHtml = '<div style="color:#ff5c5c;font-size:11px;font-family:var(--mono)">连接失败：' + (ms.error || '?') + '</div>';
+  } else {
+    var tbl = ms.tables || {};
+    var rows = Object.keys(tbl).sort().map(function(t){
+      var v = tbl[t];
+      var color = (typeof v === 'number') ? 'var(--text)' : '#ff5c5c';
+      return '<tr style="border-bottom:1px solid var(--border)">'
+           + '<td style="padding:4px 6px;font-size:11px;font-family:var(--mono)">' + t + '</td>'
+           + '<td style="padding:4px 6px;font-size:11px;font-family:var(--mono);text-align:right;color:' + color + '">'
+           + (typeof v === 'number' ? v.toLocaleString() : v)
+           + '</td></tr>';
+    }).join('');
+    mysqlHtml = '<table style="width:100%;border-collapse:collapse">'
+              + '<thead><tr style="border-bottom:1px solid var(--border);text-align:left;color:var(--muted);font-family:var(--mono);font-size:10px">'
+              + '<th style="padding:4px 6px">表</th><th style="padding:4px 6px;text-align:right">行数</th>'
+              + '</tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  // Redis 详情
+  var redisHtml = '';
+  if (!rs.enabled) {
+    redisHtml = '<div style="color:var(--muted);font-size:11px;font-family:var(--mono)">REDIS_URL 未配置 — JSON-only 模式</div>';
+  } else if (!rs.ok) {
+    redisHtml = '<div style="color:#ff5c5c;font-size:11px;font-family:var(--mono)">连接失败：' + (rs.error || '?') + '</div>';
+  } else {
+    var memHtml = rs.memory_human ? '内存：' + rs.memory_human : '';
+    var keys = (rs.keys_sample || []).map(function(k){
+      return '<code style="background:var(--surface2);padding:1px 5px;border-radius:3px;margin:0 2px;font-size:10px">' + k + '</code>';
+    }).join(' ');
+    redisHtml = '<div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">' + memHtml + '</div>'
+              + '<div style="font-size:10px;color:var(--muted);font-family:var(--mono)">key sample: ' + (keys || '（空）') + '</div>';
+  }
+
+  body.innerHTML = ''
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'
+    + '<div><div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">📦 MySQL · '
+    + (ms.enabled ? (ms.ok ? '已连接' : '失败') : '未配置') + '</div>' + mysqlHtml + '</div>'
+    + '<div><div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">⚡ Redis · '
+    + (rs.enabled ? (rs.ok ? '已连接' : '失败') : '未配置') + '</div>' + redisHtml + '</div>'
+    + '</div>'
+    + '<div style="margin-top:12px;font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6">'
+    + '本地启动：<code style="background:var(--surface2);padding:1px 4px;border-radius:3px">docker compose up -d</code> + '
+    + '<code style="background:var(--surface2);padding:1px 4px;border-radius:3px">alembic upgrade head</code>'
+    + '</div>';
+}
+
+
 function _renderOvSyncLog() {
   var meta = document.getElementById('ov-sync-log-meta');
   var body = document.getElementById('ov-sync-log-body');
@@ -6334,6 +6435,7 @@ function renderOverviewPage() {
   try { _renderOvPainOpp(); }     catch(e) { console.error('ov L3B', e); }
   try { refreshSyncLog(); }       catch(e) { console.error('ov syncLog', e); }
   try { refreshSyncState(); }     catch(e) { console.error('ov syncState', e); }
+  try { refreshDbStatus(); }      catch(e) { console.error('ov dbStatus', e); }
 }
 
 

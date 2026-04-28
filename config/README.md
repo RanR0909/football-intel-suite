@@ -101,6 +101,107 @@ GOOGLE_CSE_ID=...               # Google CSE 引擎 ID（同上）
 
 ---
 
+## 数据库（MySQL + Redis）
+
+**主存储**：MySQL（评论 / 广告 / IAP / 排名 / 社媒 / sync_log，6 张事实表 + 2 张 lookup）
+**缓存**：Redis（sync_state / retry_queue / sync_log:recent 镜像）
+**JSON**：保留作 dashboard 主读路径 + DB 不可用时的 fallback（双写策略）
+
+未配置 → dao 层降级 JSON-only，dashboard 顶部"数据库健康"卡片显示"未配置"。
+
+### 第一次启动（开发期）
+
+```bash
+# 1. 装 Docker Desktop（如未装）
+#    https://www.docker.com/products/docker-desktop/
+
+# 2. 起 MySQL + Redis
+cd /path/to/Football_Intel_Suite
+docker compose up -d
+docker compose ps      # 两个服务 healthy
+
+# 3. 装 Python 依赖
+pip3 install --break-system-packages -r async_crawler/requirements.txt
+
+# 4. 在 .env.local 添加 DSN
+echo 'MYSQL_DSN=mysql+pymysql://intelops:dev@localhost:3306/football_intel?charset=utf8mb4' >> .env.local
+echo 'REDIS_URL=redis://localhost:6379/0' >> .env.local
+
+# 5. 建表 + seed lookup 数据
+alembic upgrade head
+mysql -u intelops -pdev football_intel -e "SHOW TABLES;"   # 应看到 8 张表
+mysql -u intelops -pdev football_intel -e "SELECT name FROM competitors;"   # 应看到 9 个竞品
+
+# 6. 验证健康
+python3 -m shared.db
+# 输出 mysql.ok=true, redis.ok=true，所有表行数 0
+
+# 7. 跑一次同步看数据流
+python3 scripts/daily_sync.py
+mysql -u intelops -pdev football_intel -e "
+  SELECT 'reviews' tbl, COUNT(*) n FROM reviews UNION
+  SELECT 'community_posts', COUNT(*) FROM community_posts UNION
+  SELECT 'iap_items', COUNT(*) FROM iap_items UNION
+  SELECT 'market_rank_snapshots', COUNT(*) FROM market_rank_snapshots UNION
+  SELECT 'sync_log', COUNT(*) FROM sync_log;
+"
+```
+
+### 日常使用
+
+| 任务 | 命令 |
+|---|---|
+| 启动 DB | `docker compose up -d` |
+| 停止 DB（保留数据） | `docker compose down` |
+| 完全清空数据 | `docker compose down -v` |
+| 看运行状态 | `docker compose ps` |
+| 进 MySQL CLI | `mysql -u intelops -pdev football_intel` |
+| 进 Redis CLI | `redis-cli` |
+
+### 升级 schema
+
+```bash
+# 改 shared/models.py 后，自动生成 revision
+alembic revision --autogenerate -m "add new column"
+# 看 migrations/versions/xxxx.py 是否符合预期，没问题就 apply
+alembic upgrade head
+```
+
+### GUI 工具推荐
+
+| 工具 | 平台 | MySQL | Redis | 备注 |
+|---|---|---|---|---|
+| **TablePlus** | Mac | ✅ | ✅ | 免费版限 2 连接，够用 |
+| Sequel Ace | Mac | ✅ | — | 完全免费 |
+| DBeaver | 跨平台 | ✅ | ✅（社区版插件） | 免费 |
+| RedisInsight | 跨平台 | — | ✅ | Redis 官方 |
+
+连接信息（开发期）：
+- **MySQL**: `localhost:3306` / user `intelops` / pwd `dev` / db `football_intel`
+- **Redis**: `localhost:6379`
+
+### 上线时迁云
+
+把 `.env.local` 的 `MYSQL_DSN` 改成云数据库 endpoint 即可，代码无感：
+
+```bash
+# 阿里云 RDS
+MYSQL_DSN=mysql+pymysql://user:pwd@xxx.mysql.rds.aliyuncs.com:3306/football_intel?charset=utf8mb4
+
+# Supabase
+MYSQL_DSN=mysql+pymysql://user:pwd@db.xxx.supabase.co:6543/football_intel?charset=utf8mb4
+```
+
+迁移建议：本地 `mysqldump` → 云 `mysql -h xxx <`，或者直接 `alembic upgrade head` 在云 DB 上重建空表。
+
+### 双写降级行为
+
+- **MYSQL_DSN 未配置** → 抓取脚本仅写 JSON（与 db 集成前一样），dao 函数 return 0
+- **MYSQL_DSN 配好但 docker 未启动** → dao 函数捕获连接异常，log warning，return 0，主流程不挂
+- **REDIS_URL 未配置** → sync_state / retry_queue 仍用 JSON 文件，dashboard 卡片显示"Redis 未配置"
+
+---
+
 ## 跨机器迁移：`~/.intelops-secrets`
 
 **问题**：`.env.local` 在仓库根目录、被 gitignore，每台机器都要手动维护。

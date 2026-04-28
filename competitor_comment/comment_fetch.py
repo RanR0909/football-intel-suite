@@ -45,6 +45,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from competitors import get_comment_competitors  # type: ignore
 from regions import get_region_codes, load_regions  # type: ignore
+from shared.dao import reviews as dao_reviews  # type: ignore
 
 FETCH_COUNT = 200
 CUTOFF_DAYS = 3
@@ -149,6 +150,7 @@ def main() -> Path:
     }
 
     total_rows = 0
+    total_db = 0
     for app_name, comp in competitors.items():
         app_data = {"regions": {}}
         for region in regions:
@@ -159,12 +161,15 @@ def main() -> Path:
             rows = gp_rows + ios_rows
             app_data["regions"][region] = {"rows": rows}
             total_rows += len(rows)
-            print(f"  -> GP={len(gp_rows)}  iOS={len(ios_rows)}  合计={len(rows)}")
+            # 双写 MySQL（DB 不可用时静默跳过）
+            db_n = dao_reviews.bulk_insert_reviews(app_name, region, rows)
+            total_db += db_n
+            print(f"  -> GP={len(gp_rows)}  iOS={len(ios_rows)}  合计={len(rows)}  DB+{db_n}")
         out["competitors"][app_name] = app_data
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     RAW_OUT.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n[OK] 评论 raw 已保存 -> {RAW_OUT}（{len(competitors)} 竞品 × {len(regions)} 区，共 {total_rows} 条）")
+    print(f"\n[OK] 评论 raw 已保存 -> {RAW_OUT}（{len(competitors)} 竞品 × {len(regions)} 区，共 {total_rows} 条；MySQL 写入 {total_db} 条）")
     return RAW_OUT
 
 

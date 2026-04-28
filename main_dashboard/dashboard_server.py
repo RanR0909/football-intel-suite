@@ -42,6 +42,13 @@ try:
 except Exception:
     _retry_queue = None  # 不致命
 
+try:
+    from shared import db as _shared_db  # type: ignore
+    from shared.dao import sync_log as _dao_sync_log  # type: ignore
+except Exception:
+    _shared_db = None
+    _dao_sync_log = None
+
 # 哪些 script_name 对应一个 sync_state 源（其余按钮不污染 state）
 SCRIPT_TO_STATE_NAME = {
     "reddit_crawl": "reddit",
@@ -236,7 +243,14 @@ _sync_log_lock = threading.Lock()
 
 
 def _append_sync_log(entry: dict) -> None:
-    """每次脚本运行结束后追加一条记录。线程安全。"""
+    """每次脚本运行结束后追加一条记录。线程安全。
+
+    三路写入（任一失败不影响其他）：
+      1. data/sync_log.json（rolling 50，与 dashboard 现状兼容）
+      2. MySQL sync_log 表（长期遥测，仅 MYSQL_DSN 配置时）
+      3. Redis sync_log:recent LIST（dashboard 实时面板，仅 REDIS_URL 配置时）
+    """
+    # 1. JSON
     with _sync_log_lock:
         try:
             entries = []
@@ -255,8 +269,14 @@ def _append_sync_log(entry: dict) -> None:
                 encoding="utf-8",
             )
         except Exception as e:
-            # 日志写失败不能影响主流程
-            print(f"[sync_log] write failed: {e}", file=sys.stderr)
+            print(f"[sync_log] JSON write failed: {e}", file=sys.stderr)
+
+    # 2 + 3. MySQL + Redis（dao 内部各自降级）
+    if _dao_sync_log is not None:
+        try:
+            _dao_sync_log.append_sync_log(entry)
+        except Exception as e:
+            print(f"[sync_log] dao append failed: {e}", file=sys.stderr)
 
 
 class DashboardAPIHandler(BaseHTTPRequestHandler):
@@ -518,6 +538,16 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
                     self._send_json(_retry_queue.snapshot())
                 else:
                     self._send_json({"version": 1, "items": []})
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 500)
+
+        elif path == "/api/db/status":
+            # MySQL + Redis 健康检查（dashboard 数据库健康卡片用）
+            try:
+                if _shared_db is not None:
+                    self._send_json(_shared_db.health())
+                else:
+                    self._send_json({"mysql": {"enabled": False}, "redis": {"enabled": False}})
             except Exception as e:
                 self._send_json({"status": "error", "message": str(e)}, 500)
 

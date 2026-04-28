@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from async_crawler.base import BaseCrawler
 from async_crawler import db
 from competitors import get_comment_competitors
+from shared.dao import community as dao_community
 
 
 _RAW_OUTPUT = Path(__file__).resolve().parent.parent.parent / "data" / "raw" / "reddit_posts.json"
@@ -55,6 +56,7 @@ class RedditCrawler(BaseCrawler):
     async def crawl(self, database) -> list[dict]:
         competitors = get_comment_competitors()
         results: list[dict] = []
+        total_db = 0
         for app_name in competitors:
             posts = await self._crawl_competitor(app_name)
             rec = self.standardize(app_name, {
@@ -62,11 +64,15 @@ class RedditCrawler(BaseCrawler):
                 "posts": posts,
             })
             results.append(rec)
+            # 双写 MySQL
+            if posts:
+                total_db += dao_community.upsert_community_posts(app_name, "reddit", posts)
 
         if results:
             await database.save(self.source_name, results)
             self._write_raw_snapshot(results)
-        self.log.info(f"reddit: 抓取 {len(results)} 个竞品，共 {sum(len(r['data'].get('posts', [])) for r in results)} 条帖子")
+        total_posts = sum(len(r['data'].get('posts', [])) for r in results)
+        self.log.info(f"reddit: 抓取 {len(results)} 个竞品，共 {total_posts} 条帖子；MySQL upsert {total_db} 条")
         return results
 
     async def _crawl_competitor(self, app_name: str) -> list[dict]:

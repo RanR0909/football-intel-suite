@@ -1,41 +1,37 @@
-"""Database — 非全局状态，支持增量写入"""
+"""Database — JSON 落盘 helper（MongoDB scaffolding 已移除，2026-04-28）。
+
+MySQL 主存储现在由 shared/dao/* 处理，各抓取脚本通过 dao 直接写。
+这里保留 JSON 写入路径，让 aggregator 等老调用方继续工作。
+
+调用语义保持兼容：
+    db = Database()
+    await db.connect()       # no-op，保留为了 main.py 调用兼容
+    await db.save(name, docs)  # 写 data/async_<name>.json
+    await db.close()         # no-op
+"""
+
 import json
 import logging
-from pathlib import Path
 from datetime import datetime, timezone
-
-from async_crawler.config import MONGO_URI, MONGO_DB
+from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 log = logging.getLogger("crawler.db")
 
 
 class Database:
-    def __init__(self):
-        self._db = None
-        self._client = None
+    """JSON-only 持久化（兼容旧 motor 调用方接口）。"""
 
-    async def connect(self, uri: str = MONGO_URI, db_name: str = MONGO_DB):
-        try:
-            import motor.motor_asyncio
-            self._client = motor.motor_asyncio.AsyncIOMotorClient(uri, serverSelectionTimeoutMS=3000)
-            await self._client.server_info()
-            self._db = self._client[db_name]
-            log.info(f"MongoDB 已连接: {db_name}")
-        except Exception as e:
-            log.warning(f"MongoDB 不可用，降级为 JSON: {e}")
+    def __init__(self):
+        self._db = None  # 保留属性供老代码 if self._db is not None 检查
+
+    async def connect(self, *args, **kwargs):
+        """空操作 — 保留接口兼容。"""
+        return None
 
     async def save(self, collection: str, docs: list[dict]):
         if not docs:
             return
-        if self._db is not None:
-            col = self._db[collection]
-            for doc in docs:
-                key = {k: doc[k] for k in ("source", "competitor") if k in doc}
-                if "region" in doc:
-                    key["region"] = doc["region"]
-                await col.update_one(key, {"$set": doc}, upsert=True)
-            log.info(f"[Mongo] {collection}: {len(docs)} upserted")
         self._save_json(collection, docs)
 
     def _save_json(self, collection: str, docs: list[dict]):
@@ -58,5 +54,4 @@ class Database:
         return f"{d.get('source')}_{d.get('competitor')}_{d.get('region', '')}"
 
     async def close(self):
-        if self._client:
-            self._client.close()
+        return None

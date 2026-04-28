@@ -1,5 +1,13 @@
 aiohttp>=3.9
-motor>=3.3
 tqdm>=4.66
 google-play-scraper>=1.2
 beautifulsoup4>=4.12
+
+# 数据库（2026-04-28 新加；MongoDB / motor 已弃用）
+sqlalchemy>=2.0
+pymysql>=1.1
+redis>=5.0
+alembic>=1.13
+
+# 测试用
+fakeredis>=2.20

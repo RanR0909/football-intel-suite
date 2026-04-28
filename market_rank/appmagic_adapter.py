@@ -27,6 +27,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from competitors import get_market_rank_competitors  # type: ignore
+from shared.dao import rank as dao_rank  # type: ignore
 
 
 # ---- 工具 -----------------------------------------------------------------
@@ -265,12 +266,41 @@ def adapt(appmagic_path: Optional[Path] = None) -> dict:
             encoding="utf-8",
         )
 
+    # ---- (4) MySQL: market_rank_snapshots（worldwide + 12 国 leaderboard）----
+    db_rows = []
+    today_dt = datetime.now().date()
+    # 全球榜
+    for it in ww_all[:100]:
+        std_name = _resolve_competitor_name(it.get("name", ""), token_map)
+        db_rows.append({
+            "name": it.get("name") or "",
+            "competitor": std_name,
+            "region": None,   # worldwide
+            "rank": it.get("rank"),
+            "delta": _parse_delta(it.get("delta")),
+            "downloads": str(it.get("downloads") or "")[:32] or None,
+        })
+    # 各国
+    for code, country_data in (raw.get("countries") or {}).items():
+        for it in (country_data.get("all") or [])[:100]:
+            std_name = _resolve_competitor_name(it.get("name", ""), token_map)
+            db_rows.append({
+                "name": it.get("name") or "",
+                "competitor": std_name,
+                "region": code.lower(),
+                "rank": it.get("rank"),
+                "delta": _parse_delta(it.get("delta")),
+                "downloads": None,
+            })
+    n_db = dao_rank.bulk_insert_rank_snapshots("appmagic", db_rows, snapshot_date=today_dt)
+
     return {
         "market_rank": str(market_rank_path),
         "by_country": str(by_country_path),
         "ranking_history": str(history_path),
         "tracked_count": sum(1 for p in competitor_performance.values() if p["rank"] is not None),
         "country_count": len(by_country),
+        "mysql_rank_rows": n_db,
     }
 
 

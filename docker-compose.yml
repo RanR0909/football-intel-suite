@@ -1,0 +1,56 @@
+# INTEL-OPS 本地开发数据库
+# 启动：docker compose up -d
+# 停止：docker compose down
+# 完全清理（含数据卷）：docker compose down -v
+#
+# 连接：
+#   MySQL: localhost:3306  user=intelops  pwd=dev  db=football_intel
+#   Redis: localhost:6379
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: intelops-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: dev_root_pass
+      MYSQL_DATABASE: football_intel
+      MYSQL_USER: intelops
+      MYSQL_PASSWORD: dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uintelops", "-pdev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: intelops-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  mysql_data:
+  redis_data:

@@ -1,8 +1,4 @@
-"""全局配置"""
-import os
-
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB = "football_intel"
+"""全局配置（2026-04-28：MongoDB 已弃用，主存储改为 MySQL，配置见 shared/db.py）"""
 
 # 并发控制
 MAX_CONCURRENT = 5       # 同时最多 5 个请求

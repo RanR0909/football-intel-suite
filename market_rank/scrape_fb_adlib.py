@@ -38,6 +38,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from competitors import get_comment_competitors  # type: ignore
 from regions import load_regions  # type: ignore  # noqa: F401  (预留：region → AD_COUNTRIES 映射)
+from shared.dao import ads as dao_ads  # type: ignore
 
 PROFILE_DIR = Path.home() / ".meta-adlib-profile"
 DATA_OUT = _PROJECT_ROOT / "data" / "async_fb_adlib.json"
@@ -229,7 +230,9 @@ async def cmd_scrape(headed: bool = False) -> Path:
                         },
                     }
                     results.append(rec)
-                    print(f"  -> {len(cards)} 条广告")
+                    # 双写 MySQL ad_creatives
+                    n_db = dao_ads.upsert_ad_creatives(app_name, country.lower(), cards) if cards else 0
+                    print(f"  -> {len(cards)} 条广告  DB+{n_db}")
                     await asyncio.sleep(1.5)  # 节流
         finally:
             try:

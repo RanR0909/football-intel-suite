@@ -14,6 +14,7 @@ from async_crawler.base import BaseCrawler
 from async_crawler import db
 from competitors import get_comment_competitors
 from regions import get_region_codes
+from shared.dao import iap as dao_iap
 
 # 从 data/regions.json 动态读取（与全站 region 配置保持一致）
 IAP_REGIONS = get_region_codes()
@@ -101,6 +102,7 @@ class IAPPricingCrawler(BaseCrawler):
     async def crawl(self, database) -> list[dict]:
         competitors = get_comment_competitors()
         results = []
+        total_db = 0
         for app_name, comp in competitors.items():
             app_id = comp.get("ios") or comp.get("app_id")
             if not app_id:
@@ -114,8 +116,12 @@ class IAPPricingCrawler(BaseCrawler):
                     "iaps": iaps,
                 }, region=region)
                 results.append(rec)
-        self.log.info(f"IAP 定价: {len(results)} 条")
-        # 先写 raw（aggregator 消费），再尝试 db.save（失败不影响 raw）
+                # 双写 MySQL
+                if iaps:
+                    n = dao_iap.bulk_insert_iap(app_name, region, iaps)
+                    total_db += n
+        self.log.info(f"IAP 定价: {len(results)} 条；MySQL 写入 {total_db} 个 IAP item")
+        # 先写 raw（aggregator 消费）
         self._write_raw_snapshot(results)
         try:
             await database.save(self.source_name, results)

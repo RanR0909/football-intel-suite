@@ -34,8 +34,41 @@ from typing import Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATE_PATH = _PROJECT_ROOT / "data" / "sync_state.json"
+REDIS_KEY_PREFIX = "sync_state:"   # HASH per source
 
 _lock = threading.Lock()
+
+
+def _redis():
+    """延迟 import，避免循环依赖；Redis 不可用返回 None。"""
+    try:
+        from shared import db as _db
+        return _db.redis_client()
+    except Exception:
+        return None
+
+
+def _mirror_to_redis(source: str, source_dict: dict) -> None:
+    """把单个 source 的当前状态镜像到 Redis HASH。失败静默。"""
+    rc = _redis()
+    if rc is None:
+        return
+    try:
+        # 把 None 转成空串，Redis HSET 不接受 None
+        clean = {k: ("" if v is None else str(v)) for k, v in source_dict.items()}
+        rc.hset(f"{REDIS_KEY_PREFIX}{source}", mapping=clean)
+    except Exception:
+        pass
+
+
+def _delete_from_redis(source: str) -> None:
+    rc = _redis()
+    if rc is None:
+        return
+    try:
+        rc.delete(f"{REDIS_KEY_PREFIX}{source}")
+    except Exception:
+        pass
 
 
 def _now() -> str:
@@ -106,6 +139,7 @@ def mark_attempt(source: str) -> None:
         s = _get_source(state, source)
         s["last_attempt"] = _now()
         _save(state)
+    _mirror_to_redis(source, s)
 
 
 def mark_success(source: str) -> None:
@@ -118,11 +152,8 @@ def mark_success(source: str) -> None:
         s["failure_kind"] = None
         s["failure_msg"] = None
         s["consecutive_failures"] = 0
-        # 成功默认认为 cookie 健康；调用方覆盖更精准
-        if s.get("cookie_status") in (None, "expired", "unknown"):
-            # 只有 Playwright 源会显式 mark cookie；HTTP 源的 cookie_status 留 unknown
-            pass
         _save(state)
+    _mirror_to_redis(source, s)
 
 
 def mark_failure(source: str, kind: str, msg: str = "") -> None:
@@ -135,6 +166,7 @@ def mark_failure(source: str, kind: str, msg: str = "") -> None:
         s["failure_msg"] = (msg or "")[:500]
         s["consecutive_failures"] = int(s.get("consecutive_failures") or 0) + 1
         _save(state)
+    _mirror_to_redis(source, s)
 
 
 def mark_cookie_ok(source: str) -> None:
@@ -143,6 +175,7 @@ def mark_cookie_ok(source: str) -> None:
         s = _get_source(state, source)
         s["cookie_status"] = "ok"
         _save(state)
+    _mirror_to_redis(source, s)
 
 
 def mark_cookie_expired(source: str) -> None:
@@ -152,6 +185,7 @@ def mark_cookie_expired(source: str) -> None:
         s = _get_source(state, source)
         s["cookie_status"] = "expired"
         _save(state)
+    _mirror_to_redis(source, s)
 
 
 def get_cookie_status(source: str) -> str:

@@ -75,6 +75,53 @@ def _load() -> dict:
 def _save(data: dict) -> None:
     QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
     QUEUE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _mirror_to_redis(data)
+
+
+# ---- Redis 镜像 ----------------------------------------------------------
+
+REDIS_ZSET = "retry_queue"          # ZSET 存 item_id score=retry_after_ts
+REDIS_HASH_PREFIX = "retry:"        # HASH 存 item 详情
+
+
+def _redis():
+    """延迟 import 避免循环依赖；Redis 不可用返回 None。"""
+    try:
+        from shared import db as _db
+        return _db.redis_client()
+    except Exception:
+        return None
+
+
+def _mirror_to_redis(data: dict) -> None:
+    """把整个队列状态镜像到 Redis（覆盖式）。失败静默。"""
+    rc = _redis()
+    if rc is None:
+        return
+    try:
+        # 清掉旧的
+        old_ids = rc.zrange(REDIS_ZSET, 0, -1) or []
+        if old_ids:
+            for oid in old_ids:
+                rc.delete(f"{REDIS_HASH_PREFIX}{oid}")
+            rc.delete(REDIS_ZSET)
+        # 写新的
+        for it in data.get("items") or []:
+            iid = it.get("id")
+            if not iid:
+                continue
+            try:
+                ts = datetime.fromisoformat(it["retry_after"])
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                score = ts.timestamp()
+            except Exception:
+                score = 0
+            rc.zadd(REDIS_ZSET, {iid: score})
+            clean = {k: ("" if v is None else str(v)) for k, v in it.items()}
+            rc.hset(f"{REDIS_HASH_PREFIX}{iid}", mapping=clean)
+    except Exception:
+        pass
 
 
 def _next_retry_at(attempts: int) -> str:
