@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.intelops.weekly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>bash</string>
+        <string>-c</string>
+        <string>cd /Users/ranr/Desktop/Football_Intel_Suite &amp;&amp; set -a &amp;&amp; [ -f .env.local ] &amp;&amp; source .env.local; set +a; /usr/bin/python3 scripts/weekly_sync.py</string>
+    </array>
+
+    <!-- 每周日 03:00 触发（紧跟在 daily 02:00 后） -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/intelops-weekly.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/intelops-weekly.err</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <!-- 周报 + 9 竞品深度 + 商业周报，给 90 min -->
+    <key>ExitTimeOut</key>
+    <integer>5400</integer>
+</dict>
+</plist>

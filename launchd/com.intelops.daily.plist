@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.intelops.daily</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>bash</string>
+        <string>-c</string>
+        <string>cd /Users/ranr/Desktop/Football_Intel_Suite &amp;&amp; set -a &amp;&amp; [ -f .env.local ] &amp;&amp; source .env.local; set +a; /usr/bin/python3 scripts/daily_sync.py</string>
+    </array>
+
+    <!-- 每天 02:00 触发 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- 加载时不立即跑（首次安装时不触发） -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- 错过触发不补跑（macOS 默认行为，daily_sync 自己用 max-age 检查处理） -->
+
+    <key>StandardOutPath</key>
+    <string>/tmp/intelops-daily.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/intelops-daily.err</string>
+
+    <!-- 节能模式下不运行（可选；不写默认 false） -->
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <!-- 任务最多跑 60 min；超时强制 SIGTERM -->
+    <key>ExitTimeOut</key>
+    <integer>3600</integer>
+</dict>
+</plist>
