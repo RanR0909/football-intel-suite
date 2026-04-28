@@ -880,6 +880,15 @@ body::before {
     </div>
   </div>
 
+  <!-- Sensor Tower 数据表（顶部，下载估算 / 评分 / 评分数；US iOS）-->
+  <div class="card full-card" id="cm-sensor-tower" style="margin-bottom:16px;display:none">
+    <div class="card-head">
+      <div class="card-title">Sensor Tower 数据</div>
+      <div class="card-action" id="cm-sensor-meta" style="color:var(--muted);font-size:11px"></div>
+    </div>
+    <div id="cm-sensor-tower-body" style="padding:8px 20px 18px"></div>
+  </div>
+
   <!-- KPI 卡片：活跃竞品 / 投放国家 / 近 3 天新增 / 本周价格预警 -->
   <div class="metrics-row" id="cm-summary-cards"></div>
 
@@ -1283,6 +1292,7 @@ var REVIEW_DATA = <!-- REVIEW_DATA_PLACEHOLDER -->;
 var WEEKLY_REVIEW_DATA = <!-- WEEKLY_REVIEW_DATA_PLACEHOLDER -->;
 var COMMERCIAL_DATA = <!-- COMMERCIAL_DATA_PLACEHOLDER -->;
 var COMMERCIAL_WEEKLY_DATA = <!-- COMMERCIAL_WEEKLY_DATA_PLACEHOLDER -->;
+var SENSOR_TOWER_DATA = <!-- SENSOR_TOWER_DATA_PLACEHOLDER -->;
 var MULTI_SOURCE_DATA = <!-- MULTI_SOURCE_DATA_PLACEHOLDER -->;
 var COMMUNITY_DATA = <!-- COMMUNITY_DATA_PLACEHOLDER -->;
 var RANK_DATA = <!-- RANK_DATA_PLACEHOLDER -->;
@@ -2493,6 +2503,64 @@ function refreshAllCompetitorDetails(callback) {
 // ====== 商业分析页 ======
 var _cmFilter = { comp: 'all', windowDays: 7, store: 'all' };
 
+// Sensor Tower 顶部表格（来源：market_rank/scrape_sensor_tower.py）
+function renderSensorTowerTable() {
+  var card = document.getElementById('cm-sensor-tower');
+  var body = document.getElementById('cm-sensor-tower-body');
+  var meta = document.getElementById('cm-sensor-meta');
+  if (!card || !body) return;
+  var rows = (window.SENSOR_TOWER_DATA || []).filter(function(r) {
+    return r && r.data && !r.data.error;
+  });
+  if (!rows.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  var fmtNum = function(n) {
+    if (n === null || n === undefined || isNaN(n)) return '—';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(Math.round(n));
+  };
+  var fmtRating = function(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toFixed(2); };
+
+  // 取最近一次 timestamp（所有行都同一批抓的，取第一个就行）
+  var ts = rows[0].timestamp || '';
+  var tsLabel = ts ? ts.replace('T', ' ').slice(0, 16) + ' UTC' : '';
+  meta.textContent = '美国 · iOS · ' + tsLabel + ' · ' + rows.length + ' 个竞品';
+
+  // 按下载量降序
+  rows.sort(function(a, b) {
+    var da = (a.data && a.data.downloads) || 0;
+    var db = (b.data && b.data.downloads) || 0;
+    return db - da;
+  });
+
+  var html = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html += '<thead><tr style="border-bottom:1px solid var(--border);text-align:left;color:var(--muted);font-family:var(--mono);font-size:11px">' +
+          '<th style="padding:8px 6px">竞品</th>' +
+          '<th style="padding:8px 6px;text-align:right">月下载估算</th>' +
+          '<th style="padding:8px 6px;text-align:right">评分</th>' +
+          '<th style="padding:8px 6px;text-align:right">评分数</th>' +
+          '<th style="padding:8px 6px;text-align:right">区域</th>' +
+          '</tr></thead><tbody>';
+  rows.forEach(function(r) {
+    var d = r.data || {};
+    var color = ((window.RANK_DATA || {}).competitors || {})[r.competitor];
+    color = (color && color.color) || 'var(--text)';
+    html += '<tr style="border-bottom:1px solid var(--border)">' +
+      '<td style="padding:8px 6px"><span style="display:inline-block;width:8px;height:8px;background:' + color + ';border-radius:50%;margin-right:8px;vertical-align:middle"></span>' +
+      (r.competitor || '') + '</td>' +
+      '<td style="padding:8px 6px;text-align:right;font-family:var(--mono)">' + fmtNum(d.downloads) + '</td>' +
+      '<td style="padding:8px 6px;text-align:right;font-family:var(--mono)">' + fmtRating(d.rating) + '</td>' +
+      '<td style="padding:8px 6px;text-align:right;font-family:var(--mono)">' + fmtNum(d.ratings_count) + '</td>' +
+      '<td style="padding:8px 6px;text-align:right;color:var(--muted);font-family:var(--mono)">' + (r.region || '').toUpperCase() + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
+  body.innerHTML = html;
+}
+
 function renderCommercialPage() {
   var data = COMMERCIAL_DATA || {};
   var allComps = data.competitors || {};
@@ -2500,6 +2568,7 @@ function renderCommercialPage() {
   var comps = applyCmFilter(allComps);
   var names = Object.keys(comps);
 
+  renderSensorTowerTable();
   renderAdsSection(comps);
   renderIapSection(comps);
 

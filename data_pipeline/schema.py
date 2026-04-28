@@ -326,6 +326,7 @@ class DashboardData:
     product_updates: ProductUpdatesView = field(default_factory=ProductUpdatesView)
     reviews_analysis: ReviewAnalysisView = field(default_factory=ReviewAnalysisView)
     market_by_country: dict = field(default_factory=dict)  # AppMagic 12 国分榜（v2 替代 iTunes RSS）
+    sensor_tower: list = field(default_factory=list)        # async_sensor_tower.json 透传（商业页顶部表格）
 
 
 def to_dict(obj):

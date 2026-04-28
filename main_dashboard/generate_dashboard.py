@@ -318,6 +318,7 @@ competitor_details = _adapt_competitor_details(_dashboard_data)
 weekly_review_data = _dashboard_data.get("weekly", {}).get("comment") or {}
 commercial_data = _adapt_commercial(_dashboard_data)
 commercial_weekly_data = _dashboard_data.get("weekly", {}).get("commercial") or {}
+sensor_tower_data = _dashboard_data.get("sensor_tower") or []
 community_data = _adapt_community(_dashboard_data)
 rank_data = _adapt_rank_view(_dashboard_data)
 product_updates = _adapt_product_updates(_dashboard_data)
@@ -1506,6 +1507,11 @@ def build_commercial_weekly_json():
     return json.dumps(commercial_weekly_data, ensure_ascii=False)
 
 
+def build_sensor_tower_json():
+    """Sensor Tower 抓取产物 → JSON 数组（每条 = 一个 competitor，data 是免费字段）。"""
+    return json.dumps(sensor_tower_data or [], ensure_ascii=False)
+
+
 def build_community_data_json():
     if not community_data:
         return "{}"
@@ -1548,6 +1554,7 @@ def generate():
         "<!-- WEEKLY_REVIEW_DATA_PLACEHOLDER -->": build_weekly_review_json(),
         "<!-- COMMERCIAL_DATA_PLACEHOLDER -->": build_commercial_json(),
         "<!-- COMMERCIAL_WEEKLY_DATA_PLACEHOLDER -->": build_commercial_weekly_json(),
+        "<!-- SENSOR_TOWER_DATA_PLACEHOLDER -->": build_sensor_tower_json(),
         "<!-- COMMUNITY_DATA_PLACEHOLDER -->": build_community_data_json(),
         "<!-- RANK_DATA_PLACEHOLDER -->": build_rank_data_json(),
         "<!-- PRODUCT_UPDATES_DATA_PLACEHOLDER -->": build_product_updates_json(),

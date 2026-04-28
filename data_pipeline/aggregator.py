@@ -1053,6 +1053,9 @@ def build_dashboard_data() -> DashboardData:
     community_ai = _load_community_ai()
     fb_raw = _load_fb_adlib_raw()
     ads_ai = _load_ads_ai()
+    sensor_tower_raw = _load_json("async_sensor_tower.json") or []
+    if not isinstance(sensor_tower_raw, list):
+        sensor_tower_raw = []
 
     snapshots = _init_competitors(registry)
     _fill_rank(snapshots, market, history)
@@ -1113,6 +1116,7 @@ def build_dashboard_data() -> DashboardData:
         product_updates=product_updates,
         reviews_analysis=reviews_analysis,
         market_by_country=dict(market_by_country or {}),
+        sensor_tower=sensor_tower_raw,
     )
 
 

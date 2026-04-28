@@ -7,13 +7,12 @@ CLI:
     python3 -m market_rank.scrape_sensor_tower --headed # 调试时显示浏览器
 
 输出：data/async_sensor_tower.json
-  shape 与旧 async_crawler/sources/sensor_tower.py 兼容（aggregator 直接消费）：
-  [{source, competitor, region, timestamp, data: {downloads, revenue, rating, ratings_count, raw_text}}]
+  [{source, competitor, region, timestamp, data: {downloads, rating, ratings_count, raw_text}}]
 
 设计：
-- 免费账号能看到月下载估算 / 评分 / 评分数（收入估算多数 app 锁付费）
+- 免费账号能看到月下载估算 / 评分 / 评分数（收入估算锁付费 → 已弃）
 - 每个 competitor 一次概览页（默认 iOS / 美国），共 9 个请求
-- DOM 不稳定 → 用 heuristic：扫所有元素文本，抓"Downloads / Revenue / Ratings"附近的数字
+- DOM 不稳定 → 用 heuristic：扫所有元素文本，抓"Downloads / Ratings"附近的数字
 """
 
 from __future__ import annotations
@@ -66,14 +65,12 @@ EXTRACT_JS = r"""
   // 收集所有"小卡片"候选 - 扫所有元素的 innerText，找 label 关键字
   const out = {
     downloads: null,
-    revenue: null,
     rating: null,
     ratings_count: null,
     raw_text: '',
   };
   const labels = {
     downloads: ['Downloads', 'Total Downloads', 'Worldwide Downloads', 'Last 30 Days Downloads'],
-    revenue:   ['Revenue', 'Total Revenue', 'Worldwide Revenue', 'Last 30 Days Revenue'],
     rating:    ['Avg. Rating', 'Average Rating', 'Rating'],
     ratings_count: ['Ratings', 'Total Ratings', 'Number of Ratings'],
   };
@@ -173,8 +170,8 @@ async def _fetch_app(page, app_name: str, app_id: str) -> dict:
     await asyncio.sleep(2)
     data = await page.evaluate(EXTRACT_JS)
     print(
-        f"  -> downloads={data.get('downloads')} revenue={data.get('revenue')}"
-        f" rating={data.get('rating')} ratings_count={data.get('ratings_count')}"
+        f"  -> downloads={data.get('downloads')} rating={data.get('rating')}"
+        f" ratings_count={data.get('ratings_count')}"
     )
     return data
 
