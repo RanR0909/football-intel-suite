@@ -92,13 +92,20 @@ SCRIPTS = {
         "cwd": str(_PROJECT_ROOT),
         "label": "AppMagic 登录（手动）",
     },
-    # async_crawler 子源（共享入口 -m async_crawler --sources <key>）
+    # Meta 广告库（Playwright 持久 profile，替代 token-based 旧 fb_adlib）
+    "fb_adlib_login": {
+        "path": "-m",
+        "module": "market_rank.scrape_fb_adlib",
+        "args": ["login"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "Meta 广告库登录（手动）",
+    },
     "fb_adlib": {
         "path": "-m",
-        "module": "async_crawler",
-        "args": ["--sources", "fb_adlib"],
+        "module": "market_rank.scrape_fb_adlib",
+        "args": ["scrape"],
         "cwd": str(_PROJECT_ROOT),
-        "label": "Meta 广告投放抓取",
+        "label": "Meta 广告投放抓取（Playwright）",
     },
     "reddit_crawl": {
         "path": "-m",
