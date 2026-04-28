@@ -429,6 +429,18 @@ body::before {
   </div>
 </div>
 
+<!-- L4a：多源同步状态（每个源 last_success / cookie 状态） -->
+<div class="card full-card" id="ov-sync-state-card" style="margin-top:16px">
+  <div class="card-head" id="ov-sync-state-head" style="cursor:pointer" onclick="toggleSyncState()">
+    <div class="card-title">数据源状态 <span id="ov-sync-state-summary" style="margin-left:8px;font-size:11px;color:var(--muted);font-family:var(--mono);font-weight:400"></span></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn" style="font-size:11px;padding:3px 10px" onclick="event.stopPropagation();refreshSyncState()">刷新</button>
+      <span id="ov-sync-state-toggle" style="color:var(--muted);font-size:11px;font-family:var(--mono);user-select:none">展开 ▼</span>
+    </div>
+  </div>
+  <div id="ov-sync-state-body" style="display:none;padding:8px 20px 14px"></div>
+</div>
+
 <!-- L4：同步抓取日志（折叠卡，按运行批次分组） -->
 <div class="card full-card" id="ov-sync-log-card" style="margin-top:16px">
   <div class="card-head" id="ov-sync-log-head" style="cursor:pointer" onclick="toggleSyncLog()">
@@ -2011,14 +2023,26 @@ function _applyStaticMode() {
 
 // ====== 同步所有数据 ======
 // ====== 同步数据 v2（7 个抓取脚本并行 + 进度反馈 + toast） ======
+// 与 scripts/daily_sync.py 的任务图保持一致：
+//   Phase 1（10 个抓取，并行）→ Phase 2（2 个 AI，串行）→ Phase 3（聚合）
+// 前端在 Promise.all 里全部并发触发，后端各自起独立进程；AI 与抓取分离让
+// AI 慢/挂不再连累抓取（旧版 daily_report 1200s timeout 把抓到的评论也丢了）。
 var SYNC_SCRIPTS = [
-  { key: 'strategy_monitor',  label: '产品动态' },
-  { key: 'market_rank',       label: '排名 / 收入' },
-  { key: 'daily_report',      label: '用户评论（含分类）' },
-  { key: 'commercial_strategy', label: '商业 / IAP' },
-  { key: 'fb_adlib',          label: 'Meta 广告' },
-  { key: 'reddit_crawl',      label: 'Reddit 社媒' },
-  { key: 'twitter_crawl',     label: 'X (Twitter) 社媒' },
+  // Phase 1 - 抓取（10 并行）
+  { key: 'appstore_rank',      label: 'App Store 排名',  phase: 1 },
+  { key: 'androidrank',        label: 'Androidrank',     phase: 1 },
+  { key: 'reddit_crawl',       label: 'Reddit 社媒',     phase: 1 },
+  { key: 'twitter_crawl',      label: 'X (Twitter)',     phase: 1 },
+  { key: 'google_news',        label: 'Google 商业新闻', phase: 1 },
+  { key: 'iap_pricing_crawl',  label: 'IAP 定价',        phase: 1 },
+  { key: 'comment_fetch',      label: '评论抓取',        phase: 1 },
+  { key: 'strategy_monitor',   label: '产品动态',        phase: 1 },
+  { key: 'market_rank',        label: 'AppMagic 排名',   phase: 1 },
+  { key: 'fb_adlib',           label: 'Meta 广告',       phase: 1 },
+  { key: 'sensor_tower',       label: 'Sensor Tower',    phase: 1 },
+  // Phase 2 - AI（串行触发由前端控制；这里仅声明）
+  { key: 'comment_label',      label: '评论 AI 标签',    phase: 2 },
+  { key: 'commercial_strategy', label: '商业策略 AI',    phase: 2 },
 ];
 
 function _showSyncToast(text, kind) {
@@ -2045,20 +2069,23 @@ function _setSyncBtn(text, disabled) {
 }
 
 function syncAllData() {
-  _setSyncBtn('⏳ 同步中 (0/' + (SYNC_SCRIPTS.length + 1) + ')', true);
+  // 与 scripts/daily_sync.py 同构：Phase 1 并行 → Phase 2 串行 → Phase 3 聚合
+  var phase1 = SYNC_SCRIPTS.filter(function(s){ return s.phase === 1; });
+  var phase2 = SYNC_SCRIPTS.filter(function(s){ return s.phase === 2; });
+  var totalSteps = phase1.length + phase2.length + 1;  // +1 for generate_dashboard
+  _setSyncBtn('⏳ 同步中 (0/' + totalSteps + ')', true);
 
   var done = 0;
   var failures = [];
-  var total = SYNC_SCRIPTS.length;
 
   function bump(label, ok, msg) {
     done++;
     if (!ok) failures.push(label + (msg ? ' (' + msg.slice(0,80) + ')' : ''));
-    _setSyncBtn('⏳ 同步中 (' + done + '/' + (total + 1) + ')：' + label, true);
+    _setSyncBtn('⏳ 同步中 (' + done + '/' + totalSteps + ')：' + label, true);
   }
 
-  // 7 个抓取脚本并行
-  var promises = SYNC_SCRIPTS.map(function(s){
+  // ---- Phase 1：并行所有抓取 ----
+  var promises = phase1.map(function(s){
     return new Promise(function(resolve){
       runScript(s.key, function(result){
         var ok = !!(result && result.success);
@@ -2069,7 +2096,22 @@ function syncAllData() {
   });
 
   Promise.all(promises).then(function(){
-    // 抓取全部完成后串行跑 generate_dashboard（聚合 + 重算预警）
+    // ---- Phase 2：串行 AI（避免 Claude 限流）----
+    function runPhase2(idx) {
+      if (idx >= phase2.length) return Promise.resolve();
+      var s = phase2[idx];
+      _setSyncBtn('⏳ AI 分析 (' + (done + 1) + '/' + totalSteps + ')：' + s.label, true);
+      return new Promise(function(resolve){
+        runScript(s.key, function(result){
+          var ok = !!(result && result.success);
+          bump(s.label, ok, result && (result.output || result.message));
+          resolve();
+        });
+      }).then(function(){ return runPhase2(idx + 1); });
+    }
+    return runPhase2(0);
+  }).then(function(){
+    // ---- Phase 3：聚合 ----
     _setSyncBtn('⏳ 聚合数据 + 重算预警...', true);
     runScript('generate_dashboard', function(result){
       if (!result || !result.success) {
@@ -2078,7 +2120,7 @@ function syncAllData() {
         return;
       }
       _setSyncBtn('已同步', false);
-      var msg = '同步完成 · ' + (total - failures.length) + ' / ' + total + ' 抓取成功';
+      var msg = '同步完成 · ' + (totalSteps - 1 - failures.length) + ' / ' + (totalSteps - 1) + ' 任务成功';
       if (failures.length) {
         _showSyncToast(msg + ' · 失败：' + failures.slice(0,3).join('、') + ' · 详情见同步日志 ↓', 'warn');
         // 失败时自动展开同步日志卡
@@ -2100,6 +2142,7 @@ function syncAllData() {
       _reloadDashboardData(function(){
         try { renderOverviewPage(); } catch(e) { console.error(e); }
         try { if (typeof refreshSyncLog === 'function') refreshSyncLog(); } catch(e) {}
+        try { if (typeof refreshSyncState === 'function') refreshSyncState(); } catch(e) {}
         try { if (typeof refreshReviewData === 'function') refreshReviewData(function(){}); } catch(e) {}
       });
     });
@@ -6014,6 +6057,139 @@ function toggleSyncLog() {
   }
 }
 
+// ====== 多源同步状态（与 daily_sync.py 共享 sync_state.json） ======
+var _syncStateCache = { sources: {} };
+
+// 源元信息：分类 / 标签 / 是否 Playwright（决定显示 cookie 状态）
+var SYNC_STATE_META = [
+  // 抓取
+  { key: 'appstore_rank',      label: 'App Store 排名',  cadence: 'daily', kind: 'http' },
+  { key: 'androidrank',        label: 'Androidrank',     cadence: 'daily', kind: 'http' },
+  { key: 'reddit',             label: 'Reddit 舆情',     cadence: 'daily', kind: 'http' },
+  { key: 'twitter',            label: 'X (Twitter)',     cadence: 'daily', kind: 'http' },
+  { key: 'google_news',        label: 'Google 商业新闻', cadence: 'daily', kind: 'http' },
+  { key: 'comment_fetch',      label: '评论抓取',        cadence: 'daily', kind: 'http' },
+  { key: 'strategy_monitor',   label: '产品动态',        cadence: 'daily', kind: 'http' },
+  { key: 'iap_pricing',        label: 'IAP 定价',        cadence: 'weekly', kind: 'http' },
+  { key: 'appmagic',           label: 'AppMagic 排名',   cadence: 'daily', kind: 'playwright' },
+  { key: 'fb_adlib',           label: 'Meta 广告',       cadence: 'daily', kind: 'playwright' },
+  { key: 'sensor_tower',       label: 'Sensor Tower',    cadence: 'daily', kind: 'playwright' },
+  // AI
+  { key: 'comment_label',      label: '评论 AI 标签',    cadence: 'daily', kind: 'ai' },
+  { key: 'commercial_strategy', label: '商业策略 AI',    cadence: 'daily', kind: 'ai' },
+];
+
+function _formatRelativeTime(iso) {
+  if (!iso) return '从未';
+  try {
+    var t = new Date(iso).getTime();
+    if (isNaN(t)) return iso;
+    var diffMin = (Date.now() - t) / 60000;
+    if (diffMin < 0) return '刚刚';
+    if (diffMin < 60) return Math.round(diffMin) + ' 分钟前';
+    if (diffMin < 60 * 24) return (diffMin / 60).toFixed(1) + ' 小时前';
+    return (diffMin / 60 / 24).toFixed(1) + ' 天前';
+  } catch(e) { return iso; }
+}
+
+function _stateBadge(text, kind) {
+  var palette = {
+    fresh:    { bg: 'rgba(78,204,163,0.18)',  fg: '#4ecca3' },
+    stale:    { bg: 'rgba(245,166,35,0.18)',  fg: '#f5a623' },
+    failed:   { bg: 'rgba(255,92,92,0.18)',   fg: '#ff5c5c' },
+    expired:  { bg: 'rgba(255,92,92,0.22)',   fg: '#ff5c5c' },
+    never:    { bg: 'rgba(255,255,255,0.06)', fg: 'var(--muted)' },
+    ok:       { bg: 'rgba(78,204,163,0.15)',  fg: '#4ecca3' },
+  };
+  var p = palette[kind] || palette.never;
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:' + p.bg + ';color:' + p.fg + ';font-size:10px;font-family:var(--mono)">' + text + '</span>';
+}
+
+function refreshSyncState(cb) {
+  fetch(API_BASE + '/api/sync_state')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      _syncStateCache = (d && d.sources) ? d : { sources: {} };
+      _renderOvSyncState();
+      if (cb) cb();
+    })
+    .catch(function(e){ console.error('sync_state fetch failed', e); if (cb) cb(); });
+}
+
+function toggleSyncState() {
+  var body = document.getElementById('ov-sync-state-body');
+  var toggle = document.getElementById('ov-sync-state-toggle');
+  if (!body) return;
+  var visible = body.style.display !== 'none';
+  body.style.display = visible ? 'none' : 'block';
+  if (toggle) toggle.textContent = visible ? '展开 ▼' : '折叠 ▲';
+  if (!visible && !Object.keys(_syncStateCache.sources || {}).length) {
+    refreshSyncState();
+  }
+}
+
+function _renderOvSyncState() {
+  var body = document.getElementById('ov-sync-state-body');
+  var summary = document.getElementById('ov-sync-state-summary');
+  if (!body) return;
+  var sources = _syncStateCache.sources || {};
+
+  // 顶部 summary：✓ ok / ⚠ stale / ✗ fail / cookie 失效
+  var nFresh = 0, nStale = 0, nFail = 0, nExpired = 0, nNever = 0;
+  SYNC_STATE_META.forEach(function(m){
+    var s = sources[m.key];
+    if (m.kind === 'playwright' && s && s.cookie_status === 'expired') nExpired++;
+    if (!s || !s.last_success) { nNever++; return; }
+    var maxAgeH = m.cadence === 'weekly' ? 24 * 8 : 28; // 给点弹性
+    var diffH = (Date.now() - new Date(s.last_success).getTime()) / 3600000;
+    if (diffH < maxAgeH) nFresh++;
+    else nStale++;
+    if (s.last_failure && (!s.last_success || new Date(s.last_failure) > new Date(s.last_success))) nFail++;
+  });
+  summary.innerHTML = '✓ ' + nFresh + ' 新鲜  ·  ⚠ ' + nStale + ' 陈旧  ·  ✗ ' + nFail + ' 失败  '
+    + (nExpired ? '·  🔒 ' + nExpired + ' cookie 失效' : '');
+
+  // 表格
+  var rows = SYNC_STATE_META.map(function(m){
+    var s = sources[m.key] || {};
+    var lastTxt = s.last_success ? _formatRelativeTime(s.last_success) : '从未成功';
+    var lastBadge;
+    if (!s.last_success) lastBadge = _stateBadge('从未', 'never');
+    else {
+      var maxAgeH = m.cadence === 'weekly' ? 24 * 8 : 28;
+      var diffH = (Date.now() - new Date(s.last_success).getTime()) / 3600000;
+      lastBadge = (diffH < maxAgeH) ? _stateBadge(lastTxt, 'fresh') : _stateBadge(lastTxt, 'stale');
+    }
+
+    var failBadge = '';
+    if (s.last_failure && (!s.last_success || new Date(s.last_failure) > new Date(s.last_success))) {
+      failBadge = ' ' + _stateBadge('失败 · ' + (s.failure_kind || ''), 'failed');
+    }
+
+    var cookieBadge = '';
+    if (m.kind === 'playwright') {
+      if (s.cookie_status === 'expired') cookieBadge = ' ' + _stateBadge('🔒 cookie 失效', 'expired');
+      else if (s.cookie_status === 'ok') cookieBadge = ' ' + _stateBadge('✓ cookie ok', 'ok');
+    }
+
+    var cadenceTxt = m.cadence === 'weekly' ? '周更' : '日更';
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      + '<td style="padding:7px 6px;font-size:12px">' + m.label + '</td>'
+      + '<td style="padding:7px 6px;color:var(--muted);font-family:var(--mono);font-size:10px">' + cadenceTxt + '</td>'
+      + '<td style="padding:7px 6px">' + lastBadge + failBadge + cookieBadge + '</td>'
+      + '</tr>';
+  }).join('');
+
+  body.innerHTML = '<table style="width:100%;border-collapse:collapse">'
+    + '<thead><tr style="border-bottom:1px solid var(--border);text-align:left;color:var(--muted);font-family:var(--mono);font-size:10px">'
+    + '<th style="padding:6px">数据源</th><th style="padding:6px">节奏</th><th style="padding:6px">最后状态</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table>'
+    + '<div style="margin-top:10px;font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6">'
+    + '本地 launchd 自动跑（日更 02:00 / 周更日 03:00）+ dashboard 顶部"同步数据"按钮，两路共享 sync_state.json。'
+    + 'cookie 失效请去终端跑：<code style="background:var(--surface2);padding:1px 4px;border-radius:3px">python3 -m market_rank.scrape_X login</code>'
+    + '</div>';
+}
+
 function _renderOvSyncLog() {
   var meta = document.getElementById('ov-sync-log-meta');
   var body = document.getElementById('ov-sync-log-body');
@@ -6115,6 +6291,7 @@ function renderOverviewPage() {
   try { _renderOvTimeline(); }    catch(e) { console.error('ov L3A', e); }
   try { _renderOvPainOpp(); }     catch(e) { console.error('ov L3B', e); }
   try { refreshSyncLog(); }       catch(e) { console.error('ov syncLog', e); }
+  try { refreshSyncState(); }     catch(e) { console.error('ov syncState', e); }
 }
 
 

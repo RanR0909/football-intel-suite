@@ -31,6 +31,31 @@ try:
 except Exception:
     pass
 
+# sync_state 持久化（与 scripts/daily_sync.py 共享同一份 state）
+try:
+    from shared import sync_state as _sync_state  # type: ignore
+except Exception:
+    _sync_state = None  # 不致命；失败时只是不更新 state
+
+# 哪些 script_name 对应一个 sync_state 源（其余按钮不污染 state）
+SCRIPT_TO_STATE_NAME = {
+    "reddit_crawl": "reddit",
+    "twitter_crawl": "twitter",
+    "iap_pricing_crawl": "iap_pricing",
+    "google_news": "google_news",
+    "appstore_rank": "appstore_rank",
+    "androidrank": "androidrank",
+    "comment_fetch": "comment_fetch",
+    "comment_label": "comment_label",
+    "commercial_strategy": "commercial_strategy",
+    "strategy_monitor": "strategy_monitor",
+    "market_rank": "appmagic",          # market_rank/run_headless.py = scrape_appmagic + adapter
+    "fb_adlib": "fb_adlib",
+    "sensor_tower": "sensor_tower",
+}
+# 这些是 Playwright 源 — 检测 LoginRequired 时同步标 cookie_status
+PLAYWRIGHT_STATE_NAMES = {"appmagic", "fb_adlib", "sensor_tower"}
+
 # API Key 从环境变量获取
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
@@ -149,6 +174,39 @@ SCRIPTS = {
         "args": ["--sources", "google_news"],
         "cwd": str(_PROJECT_ROOT),
         "label": "Google 商业新闻抓取",
+    },
+    # ---- daily_sync 用到的额外抓取源（手动同步与自动同步任务图对齐） ----
+    "appstore_rank": {
+        "path": "-m",
+        "module": "async_crawler",
+        "args": ["--sources", "appstore_rank"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "App Store 体育榜",
+    },
+    "androidrank": {
+        "path": "-m",
+        "module": "async_crawler",
+        "args": ["--sources", "androidrank"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "Androidrank 历史",
+    },
+    "comment_fetch": {
+        "path": "-m",
+        "module": "competitor_comment.comment_fetch",
+        "cwd": str(_PROJECT_ROOT),
+        "label": "评论抓取（GP+iOS）",
+    },
+    "comment_label": {
+        "path": "-m",
+        "module": "competitor_comment.comment_label",
+        "cwd": str(_PROJECT_ROOT),
+        "label": "评论 AI 标签",
+    },
+    # 一键自动同步（前后端共用 daily_sync orchestrator；与 launchd 同一份代码）
+    "daily_sync": {
+        "path": str(_PROJECT_ROOT / "scripts" / "daily_sync.py"),
+        "cwd": str(_PROJECT_ROOT),
+        "label": "全量自动同步（与定时任务同入口）",
     },
     # 单竞品 3 日评论 AI 摘要（per-competitor）
     "review_3d": {
@@ -438,6 +496,16 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
             data = self._load_json_file("ranking_history.json")
             self._send_json(data)
 
+        elif path == "/api/sync_state":
+            # 各源最新 last_success / cookie_status（与 daily_sync / 手动同步共用）
+            try:
+                if _sync_state is not None:
+                    self._send_json(_sync_state.snapshot())
+                else:
+                    self._send_json({"version": 1, "sources": {}})
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 500)
+
         elif path == "/api/sync_log":
             # 同步抓取日志（最近 50 条）
             try:
@@ -677,6 +745,28 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
             "stderr_tail": stderr_tail,
             "cmd": " ".join(cmd[:6]) + (" ..." if len(cmd) > 6 else ""),
         })
+
+        # 同步写 sync_state（让手动同步 = 自动同步，state 共用）
+        # 注意：daily_sync 这个特殊 script 自身在子进程里写 state，外层不双写。
+        if _sync_state is not None and script_name != "daily_sync":
+            state_name = SCRIPT_TO_STATE_NAME.get(script_name)
+            if state_name:
+                try:
+                    if error_kind == "LOGIN_REQUIRED" and state_name in PLAYWRIGHT_STATE_NAMES:
+                        _sync_state.mark_cookie_expired(state_name)
+                        _sync_state.mark_failure(state_name, "login_required", stderr_tail or "")
+                    elif success:
+                        _sync_state.mark_success(state_name)
+                        if state_name in PLAYWRIGHT_STATE_NAMES:
+                            _sync_state.mark_cookie_ok(state_name)
+                    else:
+                        _sync_state.mark_failure(
+                            state_name,
+                            error_kind or "error",
+                            stderr_tail or "",
+                        )
+                except Exception as exc:
+                    print(f"[sync_state] {script_name} 写入失败: {exc}", file=sys.stderr)
 
 
 def main():
