@@ -4202,14 +4202,42 @@ function renderRankWatchlist() {
   rowsEl.innerHTML = entries.map(_renderWatchlistRow4Col).join('');
 }
 
+// 找该竞品在 12 国里的最佳排名（用于 worldwide 未上榜时退路降级显示）
+function _bestCountryRank(name) {
+  var bc = ((RANK_DATA || {}).by_country || {}).countries || {};
+  var best = null;
+  Object.keys(bc).forEach(function(code) {
+    var tracked = (bc[code] || {}).tracked_competitors || [];
+    tracked.forEach(function(t) {
+      if (t.competitor === name && t.rank != null) {
+        if (best === null || t.rank < best.rank) {
+          best = { code: code, rank: t.rank };
+        }
+      }
+    });
+  });
+  return best;
+}
+
 // 一级页简化行渲染（4 列：产品 / 全球排名 / 周变化 / 趋势）
 function _renderWatchlistRow4Col(row) {
   var name = row.name;
   var color = ((RANK_DATA || {}).competitors || {})[name];
   color = (color && color.color) || 'var(--accent)';
-  var rankCell = row.current != null
-    ? '<span style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--text)">#' + row.current + '</span>'
-    : '<span style="font-family:var(--mono);color:var(--muted)">未上榜</span>';
+  var rankCell;
+  if (row.current != null) {
+    rankCell = '<span style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--text)">#' + row.current + '</span>';
+  } else {
+    var best = _bestCountryRank(name);
+    if (best) {
+      rankCell = '<span style="font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.4">' +
+        '<span style="display:block">全球榜外</span>' +
+        '<span style="color:var(--accent2)">最佳 ' + best.code.toUpperCase() + ' #' + best.rank + '</span>' +
+      '</span>';
+    } else {
+      rankCell = '<span style="font-family:var(--mono);color:var(--muted)">未上榜</span>';
+    }
+  }
   var wow = formatRankDelta(row.delta_wow);
   var trend = renderRankTrendInline(name);
   return '<div class="rank-row-watchlist" onclick="showCompetitorDetail(\'' + name + '\')">' +
