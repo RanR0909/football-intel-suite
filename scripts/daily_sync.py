@@ -76,7 +76,7 @@ PHASE_1_FETCHERS = [
         [str(_PROJECT_ROOT / "strategy_monitor" / "run_headless.py")], 180, "http"),
     # Playwright - 三个手动登录源
     ("appmagic", "AppMagic 排名",
-        [str(_PROJECT_ROOT / "market_rank" / "run_headless.py")], 240, "playwright"),
+        ["-m", "market_rank.run_headless"], 240, "playwright"),
     ("fb_adlib", "Meta 广告库",
         ["-m", "market_rank.scrape_fb_adlib", "scrape"], 1200, "playwright"),
     ("sensor_tower", "Sensor Tower",
