@@ -188,18 +188,56 @@ async def cmd_login() -> None:
 
 # ---- 命令：scrape ---------------------------------------------------------
 
-async def cmd_scrape(headed: bool = False) -> Path:
+def _merge_results_to_json(new_records: list[dict], country_filter: str) -> int:
+    """合并 new_records 到 DATA_OUT；同 country 的旧记录会被覆盖。
+
+    用 fcntl 文件锁防 race（多个 per-country 进程并发跑时）。
+    返回最终 JSON 里的总 record 数。
+    """
+    import fcntl
+    DATA_OUT.parent.mkdir(parents=True, exist_ok=True)
+    DATA_OUT.touch(exist_ok=True)
+
+    with open(DATA_OUT, "r+", encoding="utf-8") as f:
+        # 排他锁，阻塞直到拿到（其他进程 release 才能进）
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            content = f.read().strip()
+            existing = json.loads(content) if content else []
+            if not isinstance(existing, list):
+                existing = []
+            # 删掉本次 country 的旧记录（按 (competitor, region) 唯一）
+            cf = country_filter.lower()
+            existing = [r for r in existing if (r.get("region") or "").lower() != cf]
+            # 加新记录
+            existing.extend(new_records)
+            f.seek(0)
+            f.truncate()
+            f.write(json.dumps(existing, ensure_ascii=False, indent=2))
+            return len(existing)
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+async def cmd_scrape(headed: bool = False, countries: list[str] | None = None) -> Path:
+    """抓 fb 广告库。
+
+    countries: 要抓的国家代码列表（如 ["US"]），缺省 = AD_COUNTRIES 全跑。
+    daily_sync 使用 per-country 调用（每次 ~3-5 min，远低于 timeout）。
+    """
     if not PROFILE_DIR.exists():
-        # 不强制 — 可以匿名抓，但提示用户跑 login 一次会更稳
         print(
             f"⚠ 未找到 {PROFILE_DIR}（建议先跑：python3 -m market_rank.scrape_fb_adlib login）",
             file=sys.stderr,
         )
         PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
+    target_countries = [c.upper() for c in (countries or AD_COUNTRIES)]
     competitors = list(get_comment_competitors().keys())
     results: list[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    print(f"[fb_adlib] 抓取国家：{target_countries}（{len(competitors)} 竞品 × {len(target_countries)} 国 = {len(competitors) * len(target_countries)} query）")
 
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(
@@ -211,7 +249,7 @@ async def cmd_scrape(headed: bool = False) -> Path:
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
             for app_name in competitors:
-                for country in AD_COUNTRIES:
+                for country in target_countries:
                     url = (
                         "https://www.facebook.com/ads/library/"
                         f"?active_status=active&ad_type=all&country={country}"
@@ -223,7 +261,6 @@ async def cmd_scrape(headed: bool = False) -> Path:
                     except Exception as e:
                         print(f"  ERROR: {e}", file=sys.stderr)
                         cards = []
-                    # 每条 ad 标注 country
                     for c in cards:
                         c["country"] = country.lower()
                     rec = {
@@ -237,20 +274,23 @@ async def cmd_scrape(headed: bool = False) -> Path:
                         },
                     }
                     results.append(rec)
-                    # 双写 MySQL ad_creatives
+                    # 双写 MySQL（dao_ads.upsert_ad_creatives 内置去重 + dedup）
                     n_db = dao_ads.upsert_ad_creatives(app_name, country.lower(), cards) if cards else 0
                     print(f"  -> {len(cards)} 条广告  DB+{n_db}")
-                    await asyncio.sleep(1.5)  # 节流
+                    await asyncio.sleep(1.5)
         finally:
             try:
                 await ctx.close()
             except Exception:
                 pass
 
-    DATA_OUT.parent.mkdir(parents=True, exist_ok=True)
-    DATA_OUT.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 合并到主 JSON 文件（带文件锁防 race）— 只覆盖本次涉及的国家
+    total_in_json = 0
+    for country in target_countries:
+        country_results = [r for r in results if (r.get("region") or "").lower() == country.lower()]
+        total_in_json = _merge_results_to_json(country_results, country)
     total_ads = sum((r.get("data") or {}).get("ad_count", 0) for r in results)
-    print(f"\n保存完成 -> {DATA_OUT}（{len(results)} record, 总 {total_ads} 条广告）")
+    print(f"\n保存完成 -> {DATA_OUT}（本次写 {len(results)} record，文件总 {total_in_json} record；本次共 {total_ads} 条广告）")
     return DATA_OUT
 
 
@@ -260,12 +300,17 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=["login", "scrape"], nargs="?", default="scrape")
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument(
+        "--country",
+        action="append",
+        help="指定单个国家（可多次传：--country US --country GB）；缺省 = 全部 5 国",
+    )
     args = ap.parse_args()
 
     if args.command == "login":
         asyncio.run(cmd_login())
     else:
-        asyncio.run(cmd_scrape(headed=args.headed))
+        asyncio.run(cmd_scrape(headed=args.headed, countries=args.country))
 
 
 if __name__ == "__main__":

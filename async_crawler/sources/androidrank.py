@@ -10,12 +10,18 @@ from competitors import get_comment_competitors
 from shared.dao import rank as dao_rank
 
 SLUG_MAP = {
-    "com.sofascore.results": "sofascore-live-score-football/com.sofascore.results",
-    "com.flashscore.app": "flashscore-live-scores/com.flashscore.app",
-    "com.onefootball.onefootball.google": "onefootball-soccer-scores/com.onefootball.onefootball.google",
-    "com.scores365.android": "365scores-live-scores-news/com.scores365.android",
-    "com.fotmob.fotmob": "fotmob-soccer-live-scores/com.fotmob.fotmob",
-    "com.livescore.livescores": "livescore-live-sports-scores/com.livescore.livescores",
+    # 截至 2026-04-29 通过 androidrank.org/search 验证的 slug（一律 underscore 形式）
+    # 更新方法：python3 一行搜：
+    #   curl 'https://www.androidrank.org/search?q=<app>' | grep 'application/'
+    "com.sofascore.results":           "sofascore_live_sports_scores/com.sofascore.results",
+    "eu.livesport.FlashScore_com":     "flashscore_live_scores_news/eu.livesport.FlashScore_com",
+    "de.motain.iliga":                 "onefootball_all_soccer_scores/de.motain.iliga",
+    "com.scores365":                   "365scores_live_scores_news/com.scores365",
+    "com.mobilefootie.wc2010":         "fotmob_soccer_live_scores/com.mobilefootie.wc2010",
+    "com.livescore":                   "livescore_live_sports_scores/com.livescore",
+    "com.onesports.score":             "aiscore_live_sports_scores/com.onesports.score",
+    "com.resultadosfutbol.mobile":     "besoccer_soccer_live_score/com.resultadosfutbol.mobile",
+    # 310Scores (com.scores.tfz) 不在 androidrank（app 太新）— 跳过
 }
 
 

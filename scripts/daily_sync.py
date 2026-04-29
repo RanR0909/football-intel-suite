@@ -77,8 +77,18 @@ PHASE_1_FETCHERS = [
     # Playwright - 三个手动登录源
     ("appmagic", "AppMagic 排名",
         ["-m", "market_rank.run_headless"], 240, "playwright"),
-    ("fb_adlib", "Meta 广告库",
-        ["-m", "market_rank.scrape_fb_adlib", "scrape"], 1200, "playwright"),
+    # fb_adlib 拆 per-country：原来全 5 国串行 1200s 仍超时，
+    # 现在每国一个独立任务（9 竞品 × 1 国 ≈ 200-300s），并行跑 → wall-time 约 5 min
+    ("fb_adlib_us", "Meta 广告 · 美国",
+        ["-m", "market_rank.scrape_fb_adlib", "scrape", "--country", "US"], 600, "playwright"),
+    ("fb_adlib_gb", "Meta 广告 · 英国",
+        ["-m", "market_rank.scrape_fb_adlib", "scrape", "--country", "GB"], 600, "playwright"),
+    ("fb_adlib_br", "Meta 广告 · 巴西",
+        ["-m", "market_rank.scrape_fb_adlib", "scrape", "--country", "BR"], 600, "playwright"),
+    ("fb_adlib_de", "Meta 广告 · 德国",
+        ["-m", "market_rank.scrape_fb_adlib", "scrape", "--country", "DE"], 600, "playwright"),
+    ("fb_adlib_jp", "Meta 广告 · 日本",
+        ["-m", "market_rank.scrape_fb_adlib", "scrape", "--country", "JP"], 600, "playwright"),
     ("sensor_tower", "Sensor Tower",
         ["-m", "market_rank.scrape_sensor_tower", "scrape"], 300, "playwright"),
 ]
