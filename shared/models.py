@@ -110,14 +110,17 @@ class MarketRankSnapshot(Base):
     __tablename__ = "market_rank_snapshots"
 
     id = Column(PK_BigInt, primary_key=True, autoincrement=True)
-    source = Column(Enum("appmagic", "appstore_rank", "sensor_tower", name="rank_source"),
+    source = Column(Enum("appmagic", "appstore_rank", "sensor_tower", "androidrank",
+                         name="rank_source"),
                     nullable=False)
     region_code = Column(String(8))   # NULL = worldwide
     competitor_id = Column(BigInteger, ForeignKey("competitors.id"))  # NULL = 非 tracked
     name = Column(String(128))
     rank_value = Column(Integer)
     delta = Column(Integer)
-    downloads = Column(String(32))
+    downloads = Column(String(32))             # 原始字符串 ("~10K" / "200K") 或解析后数值的字符串
+    downloads_num = Column(BigInteger)         # 解析后整数（便于 SQL 聚合）— sensor_tower 给 200000 这种
+    revenue_num = Column(BigInteger)           # 月收入估算（sensor_tower 专供，单位 USD）
     snapshot_date = Column(Date, nullable=False)
     fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

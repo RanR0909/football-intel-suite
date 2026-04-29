@@ -29,6 +29,16 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent
 OUTPUT_DIR = _PROJECT_ROOT / "appmagic_output"
 
+# 加载 .env.local + ~/.intelops-secrets
+import sys
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+try:
+    from shared.env_loader import load_all as _load_env_all
+    _load_env_all()
+except Exception:
+    pass
+
 COUNTRIES = [
     ("US", "United States"),
     ("NG", "Nigeria"),

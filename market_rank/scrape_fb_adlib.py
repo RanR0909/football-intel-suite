@@ -36,6 +36,13 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# 加载 .env.local + ~/.intelops-secrets
+try:
+    from shared.env_loader import load_all as _load_env_all
+    _load_env_all()
+except Exception:
+    pass
+
 from competitors import get_comment_competitors  # type: ignore
 from regions import load_regions  # type: ignore  # noqa: F401  (预留：region → AD_COUNTRIES 映射)
 from shared.dao import ads as dao_ads  # type: ignore

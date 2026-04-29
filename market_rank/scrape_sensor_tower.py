@@ -32,7 +32,15 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# 加载 .env.local + ~/.intelops-secrets — 让 MYSQL_DSN / REDIS_URL / cookie 都能读到
+try:
+    from shared.env_loader import load_all as _load_env_all
+    _load_env_all()
+except Exception:
+    pass
+
 from competitors import get_comment_competitors  # type: ignore
+from shared.dao import rank as dao_rank  # type: ignore
 
 PROFILE_DIR = Path.home() / ".sensortower-profile"
 DATA_OUT = _PROJECT_ROOT / "data" / "async_sensor_tower.json"
@@ -269,6 +277,31 @@ async def cmd_scrape(headed: bool = False) -> Path:
     DATA_OUT.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     ok = sum(1 for r in results if not (r.get("data") or {}).get("error"))
     print(f"\n保存完成 -> {DATA_OUT}（{len(results)} record，{ok} 条有数据）")
+
+    # 双写 MySQL: market_rank_snapshots
+    db_rows = []
+    for r in results:
+        d = r.get("data") or {}
+        if d.get("error"):
+            continue
+        # downloads / revenue 在 sensor_tower 是 number（200000 / 100000）
+        dl = d.get("downloads")
+        rv = d.get("revenue")
+        rk = d.get("category_rank")
+        db_rows.append({
+            "name": r.get("competitor"),
+            "competitor": r.get("competitor"),     # 都是 tracked
+            "region": r.get("region", "us").lower(),
+            "rank": int(rk) if rk else None,
+            "delta": None,
+            "downloads": f"{int(dl/1000)}K" if dl and dl >= 1000 else (str(int(dl)) if dl else None),
+            "downloads_num": int(dl) if dl else None,
+            "revenue_num": int(rv) if rv else None,
+        })
+    if db_rows:
+        n_db = dao_rank.bulk_insert_rank_snapshots("sensor_tower", db_rows)
+        if n_db:
+            print(f"  MySQL: 写入 {n_db} 条 rank_snapshot（含 downloads_num + revenue_num）")
     return DATA_OUT
 
 

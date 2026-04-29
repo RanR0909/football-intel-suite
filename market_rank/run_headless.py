@@ -21,6 +21,13 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPT_DIR))
 sys.path.insert(0, str(_SCRIPT_DIR.parent))
 
+# 加载 .env.local + ~/.intelops-secrets
+try:
+    from shared.env_loader import load_all as _load_env_all
+    _load_env_all()
+except Exception:
+    pass
+
 from market_rank.scrape_appmagic import cmd_scrape, LoginRequired
 from market_rank import appmagic_adapter
 

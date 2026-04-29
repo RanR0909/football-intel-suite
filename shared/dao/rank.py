@@ -27,17 +27,19 @@ def bulk_insert_rank_snapshots(
     """批量插入排名快照。
 
     rows 元素：{
-      "name": str,         # 应用名（competitor 也可能是 None）
-      "competitor": str,   # 已知 tracked competitor 的 name；非 tracked 传 None
-      "region": str,       # "us" / "gb" / None=worldwide
+      "name": str,            # 应用名（competitor 也可能是 None）
+      "competitor": str,      # 已知 tracked competitor 的 name；非 tracked 传 None
+      "region": str,          # "us" / "gb" / None=worldwide
       "rank": int,
       "delta": int,
-      "downloads": str,
+      "downloads": str,       # 原始字符串如 "200K"
+      "downloads_num": int,   # 可选；解析后整数（sensor_tower 用）
+      "revenue_num": int,     # 可选；月收入估算（sensor_tower 用，单位 USD）
     }
     """
     if not _db.is_mysql_enabled() or not rows:
         return 0
-    if source not in ("appmagic", "appstore_rank", "sensor_tower"):
+    if source not in ("appmagic", "appstore_rank", "sensor_tower", "androidrank"):
         log.warning(f"[rank] 未知 source: {source}")
         return 0
     try:
@@ -56,6 +58,8 @@ def bulk_insert_rank_snapshots(
                     "rank_value": r.get("rank"),
                     "delta": r.get("delta"),
                     "downloads": (r.get("downloads") or "")[:32] or None,
+                    "downloads_num": r.get("downloads_num"),
+                    "revenue_num": r.get("revenue_num"),
                     "snapshot_date": sd,
                     "fetched_at": now,
                 })
