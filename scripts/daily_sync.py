@@ -68,9 +68,9 @@ PHASE_1_FETCHERS = [
         ["-m", "async_crawler", "--sources", "twitter"], 120, "http"),
     ("google_news", "Google 商业新闻",
         ["-m", "async_crawler", "--sources", "google_news"], 180, "http"),
-    # 评论原始抓取（拆出来的快路径）
+    # 评论原始抓取（拆出来的快路径；9 竞品 × 12 区 GP 实际需 5-10 分钟）
     ("comment_fetch", "评论抓取（GP+iOS）",
-        ["-m", "competitor_comment.comment_fetch"], 300, "http"),
+        ["-m", "competitor_comment.comment_fetch"], 900, "http"),
     # 产品动态（含轻量 AI 解读 diff，沿用现状）
     ("strategy_monitor", "产品动态监测",
         [str(_PROJECT_ROOT / "strategy_monitor" / "run_headless.py")], 180, "http"),
@@ -78,7 +78,7 @@ PHASE_1_FETCHERS = [
     ("appmagic", "AppMagic 排名",
         [str(_PROJECT_ROOT / "market_rank" / "run_headless.py")], 240, "playwright"),
     ("fb_adlib", "Meta 广告库",
-        ["-m", "market_rank.scrape_fb_adlib", "scrape"], 600, "playwright"),
+        ["-m", "market_rank.scrape_fb_adlib", "scrape"], 1200, "playwright"),
     ("sensor_tower", "Sensor Tower",
         ["-m", "market_rank.scrape_sensor_tower", "scrape"], 300, "playwright"),
 ]
@@ -204,6 +204,8 @@ def _post_process(result: dict, source_kind: str) -> None:
 
 
 def _append_sync_log(entry: dict) -> None:
+    """三路写入：JSON（rolling 50） + MySQL（长期）+ Redis（最近 50 LIST 镜像）。"""
+    # 1. JSON
     try:
         entries = []
         if SYNC_LOG_PATH.exists():
@@ -218,7 +220,13 @@ def _append_sync_log(entry: dict) -> None:
         SYNC_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         SYNC_LOG_PATH.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as exc:
-        print(f"[sync_log] 写入失败: {exc}", file=sys.stderr)
+        print(f"[sync_log] JSON 写入失败: {exc}", file=sys.stderr)
+    # 2 + 3. MySQL + Redis（dao 内部各自降级；MYSQL_DSN/REDIS_URL 未配置就 no-op）
+    try:
+        from shared.dao import sync_log as _dao_log
+        _dao_log.append_sync_log(entry)
+    except Exception as exc:
+        print(f"[sync_log] dao 写入失败: {exc}", file=sys.stderr)
 
 
 # ---- 通知 ----------------------------------------------------------------
@@ -340,12 +348,16 @@ def run_phase_0_retry(dry_run: bool) -> tuple[int, int]:
     return (ok, fail)
 
 
-def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, int, list[str]]:
-    """并行跑所有抓取源；返回 (ok, fail, expired_cookies)。"""
+def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, int, list[str], list[dict]]:
+    """并行跑所有抓取源；返回 (ok, fail, expired_cookies, failures_detail)。
+
+    failures_detail = [{"name", "kind", "duration_sec"}, ...] 给飞书卡片用。
+    """
     print("\n" + "=" * 70)
     print(f"Phase 1/3 — 抓取源（{len(PHASE_1_FETCHERS)} 个并行）")
     print("=" * 70)
     expired: list[str] = []
+    failures: list[dict] = []
     skipped: list[str] = []
     pending = []
     for name, label, args, to, kind in PHASE_1_FETCHERS:
@@ -358,7 +370,7 @@ def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, 
     if dry_run:
         for name, label, args, to, kind in pending:
             print(f"[dry-run] {name} ({label}) timeout={to}s kind={kind}")
-        return (len(pending), 0, [])
+        return (len(pending), 0, [], [])
 
     ok = fail = 0
     futures = {}
@@ -378,20 +390,26 @@ def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, 
                 ok += 1
             else:
                 fail += 1
+                failures.append({
+                    "name": name,
+                    "kind": ekind or "error",
+                    "duration_sec": result.get("duration_sec", 0),
+                })
                 if result.get("kind") == "login_required":
                     expired.append(name)
     if skipped:
         print(f"[phase1] {len(skipped)} 个跳过：{skipped}")
     print(f"[phase1] 完成：ok={ok} fail={fail}")
-    return (ok, fail, expired)
+    return (ok, fail, expired, failures)
 
 
-def run_phase_2(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, int]:
-    """串行跑 AI 重活；失败不阻塞后续。"""
+def run_phase_2(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, int, list[dict]]:
+    """串行跑 AI 重活；失败不阻塞后续。返回 (ok, fail, failures_detail)。"""
     print("\n" + "=" * 70)
     print(f"Phase 2/3 — AI 分析（{len(PHASE_2_AI)} 个串行）")
     print("=" * 70)
     ok = fail = 0
+    failures: list[dict] = []
     for name, label, args, to in PHASE_2_AI:
         if _should_skip(name, force, max_age_hours):
             print(f"[skip] {name}")
@@ -409,8 +427,13 @@ def run_phase_2(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, 
             ok += 1
         else:
             fail += 1
+            failures.append({
+                "name": name,
+                "kind": result.get("kind") or "error",
+                "duration_sec": result.get("duration_sec", 0),
+            })
     print(f"[phase2] 完成：ok={ok} fail={fail}")
-    return (ok, fail)
+    return (ok, fail, failures)
 
 
 def run_phase_3(dry_run: bool) -> bool:
@@ -475,14 +498,18 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Phase 0：重试队列里到期的失败任务（不一定每次都有）
     p0_ok, p0_fail = run_phase_0_retry(args.dry_run)
-    p1_ok, p1_fail, expired = run_phase_1(args.force, args.max_age_hours, args.dry_run)
-    p2_ok, p2_fail = run_phase_2(args.force, args.max_age_hours, args.dry_run)
+    p1_ok, p1_fail, expired, p1_failures = run_phase_1(args.force, args.max_age_hours, args.dry_run)
+    p2_ok, p2_fail, p2_failures = run_phase_2(args.force, args.max_age_hours, args.dry_run)
     p3_ok = run_phase_3(args.dry_run)
 
     total = time.monotonic() - t0
     total_fail = p0_fail + p1_fail + p2_fail + (0 if p3_ok else 1)
     total_ok = p0_ok + p1_ok + p2_ok + (1 if p3_ok else 0)
     queue_size = len(retry_queue.snapshot().get("items") or [])
+    all_failures = p1_failures + p2_failures
+    if not p3_ok:
+        all_failures.append({"name": "generate_dashboard", "kind": "error", "duration_sec": 0})
+
     print("\n" + "=" * 70)
     print(f"=== daily_sync 完成 — 总耗时 {total/60:.1f} min ===")
     print(f"  Phase 0 (retry): ok={p0_ok} fail={p0_fail}")
@@ -490,6 +517,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"  Phase 2 (AI):    ok={p2_ok} fail={p2_fail}")
     print(f"  Phase 3 (agg):   {'ok' if p3_ok else 'fail'}")
     print(f"  retry_queue 当前条目: {queue_size}")
+    if all_failures:
+        print("  失败明细:")
+        for f in all_failures:
+            print(f"    ✗ {f['name']}  kind={f['kind']}  {f['duration_sec']}s")
     print("=" * 70)
 
     # 飞书结束卡片：颜色按失败数 — 0 绿 / 1-2 橙 / 3+ 红
@@ -500,23 +531,37 @@ def main(argv: Optional[list[str]] = None) -> int:
             color = "orange"
         else:
             color = "red"
+        # 失败明细字段（仅在有失败时加）
+        fail_field = None
+        if all_failures:
+            lines = []
+            for f in all_failures[:10]:   # 最多显示 10 条避免卡片太长
+                lines.append(f"• **{f['name']}** — {f['kind']} ({f['duration_sec']:.0f}s)")
+            if len(all_failures) > 10:
+                lines.append(f"... 还有 {len(all_failures) - 10} 个")
+            fail_field = {"label": "✗ 失败明细", "value": "\n".join(lines)}
+
+        fields = [
+            {"label": "总览",
+             "value": f"✓ {total_ok} 成功  /  ✗ {total_fail} 失败  ·  ⏱ {total/60:.1f} min"},
+            {"label": "Phase 0 · 重试队列",
+             "value": f"✓ {p0_ok} / ✗ {p0_fail}"},
+            {"label": "Phase 1 · 抓取（10 源并行）",
+             "value": f"✓ {p1_ok} / ✗ {p1_fail}"},
+            {"label": "Phase 2 · AI 分析（串行）",
+             "value": f"✓ {p2_ok} / ✗ {p2_fail}"},
+            {"label": "Phase 3 · 聚合 + 看板",
+             "value": "✓" if p3_ok else "✗ 失败"},
+            {"label": "重试队列剩余",
+             "value": f"{queue_size} 项" + ("（下次同步重试）" if queue_size else "")},
+        ]
+        if fail_field:
+            fields.append(fail_field)
+
         try:
             feishu_notify.send_card(
                 "📊 每日抓取完成",
-                fields=[
-                    {"label": "总览",
-                     "value": f"✓ {total_ok} 成功  /  ✗ {total_fail} 失败  ·  ⏱ {total/60:.1f} min"},
-                    {"label": "Phase 0 · 重试队列",
-                     "value": f"✓ {p0_ok} / ✗ {p0_fail}"},
-                    {"label": "Phase 1 · 抓取（10 源并行）",
-                     "value": f"✓ {p1_ok} / ✗ {p1_fail}"},
-                    {"label": "Phase 2 · AI 分析（串行）",
-                     "value": f"✓ {p2_ok} / ✗ {p2_fail}"},
-                    {"label": "Phase 3 · 聚合 + 看板",
-                     "value": "✓" if p3_ok else "✗ 失败"},
-                    {"label": "重试队列剩余",
-                     "value": f"{queue_size} 项" + ("（下次同步重试）" if queue_size else "")},
-                ],
+                fields=fields,
                 color=color,
                 footer=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             )

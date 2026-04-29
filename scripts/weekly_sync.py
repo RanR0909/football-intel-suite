@@ -119,6 +119,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             p0_fail += 1
 
     ok = fail = 0
+    failures: list[dict] = []
     for name, label, sub_args, to, kind in tasks:
         if _should_skip(name, args.force, args.max_age_hours):
             print(f"[skip] {name}")
@@ -137,6 +138,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             ok += 1
         else:
             fail += 1
+            failures.append({
+                "name": name,
+                "kind": ekind or "error",
+                "duration_sec": result.get("duration_sec", 0),
+            })
 
     total = time.monotonic() - t0
     queue_size = len(retry_queue.snapshot().get("items") or [])
@@ -147,6 +153,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"  Phase 0 (retry): ok={p0_ok}  fail={p0_fail}")
     print(f"  Phase 1 (周更):  ok={ok}     fail={fail}")
     print(f"  retry_queue 当前条目: {queue_size}")
+    if failures:
+        print("  失败明细:")
+        for f in failures:
+            print(f"    ✗ {f['name']}  kind={f['kind']}  {f['duration_sec']}s")
     print("=" * 70)
 
     # 飞书结束卡片
@@ -157,17 +167,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             color = "orange"
         else:
             color = "red"
+        # 失败明细字段（仅在有失败时加）
+        fail_field = None
+        if failures:
+            lines = []
+            for f in failures[:10]:
+                lines.append(f"• **{f['name']}** — {f['kind']} ({f['duration_sec']:.0f}s)")
+            if len(failures) > 10:
+                lines.append(f"... 还有 {len(failures) - 10} 个")
+            fail_field = {"label": "✗ 失败明细", "value": "\n".join(lines)}
+        fields = [
+            {"label": "总览",
+             "value": f"✓ {total_ok} 成功  /  ✗ {total_fail} 失败  ·  ⏱ {total/60:.1f} min"},
+            {"label": "Phase 0 · 重试队列", "value": f"✓ {p0_ok} / ✗ {p0_fail}"},
+            {"label": "Phase 1 · 周更任务（含 9 个竞品深度）",
+             "value": f"✓ {ok} / ✗ {fail}"},
+            {"label": "队列剩余", "value": f"{queue_size} 项"},
+        ]
+        if fail_field:
+            fields.append(fail_field)
         try:
             feishu_notify.send_card(
                 "📅 周更完成",
-                fields=[
-                    {"label": "总览",
-                     "value": f"✓ {total_ok} 成功  /  ✗ {total_fail} 失败  ·  ⏱ {total/60:.1f} min"},
-                    {"label": "Phase 0 · 重试队列", "value": f"✓ {p0_ok} / ✗ {p0_fail}"},
-                    {"label": "Phase 1 · 周更任务（含 9 个竞品深度）",
-                     "value": f"✓ {ok} / ✗ {fail}"},
-                    {"label": "队列剩余", "value": f"{queue_size} 项"},
-                ],
+                fields=fields,
                 color=color,
                 footer=_dt.now().strftime("%Y-%m-%d %H:%M:%S"),
             )
