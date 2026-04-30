@@ -9,7 +9,7 @@
 ## 0. 一句话架构
 
 ```
-launchd 定时触发 sync 脚本 → 13 数据源并行抓取 → 落 MySQL/JSON/Redis →
+launchd 定时触发 sync 脚本 → 12 数据源并行抓取 → 落 MySQL/JSON/Redis →
 4 个 AI 任务（haiku 4.5）做结构化处理 → alert_engine 出 7 类预警 →
 聚合 dashboard_data.json → 前端读 + 飞书通知
 ```
@@ -44,9 +44,9 @@ launchd 定时触发 sync 脚本 → 13 数据源并行抓取 → 落 MySQL/JSON
 
 ---
 
-## 2. 数据源（13 个）
+## 2. 数据源（12 个 = 8 HTTP + 4 Playwright）
 
-### 2.1 HTTP 抓取（9 个）
+### 2.1 HTTP 抓取（8 个，aiohttp + retry）
 
 | 源 | 抓什么 | 周期 | 实现 |
 |---|---|---|---|
@@ -58,16 +58,15 @@ launchd 定时触发 sync 脚本 → 13 数据源并行抓取 → 落 MySQL/JSON
 | `iap_pricing` | App Store IAP 价格（12 区）| 周日 03:00 | `async_crawler/sources/iap_pricing.py` — apps.apple.com HTML |
 | `google_news` | 商业新闻 RSS（business 关键词命中）| 周日 03:00 | `async_crawler/sources/google_news.py` — Google News RSS |
 | `strategy_monitor` | 版本号 / 描述变化 | 日 02:00 | `strategy_monitor/changelog_*.py` — iTunes Lookup |
-| `similarweb_traffic` | 网站流量 / 设备 / 排名 | 周日 03:00 | `market_rank/scrape_similarweb.py` — Playwright + similarweb.com |
 
-### 2.2 Playwright 持久 profile（4 个）
+### 2.2 Playwright 持久 profile（4 个，需一次性人工登录）
 
 | 源 | 抓什么 | profile 路径 | 备注 |
 |---|---|---|---|
 | `appmagic` | 全球 + 12 国排名 | `~/.appmagic-profile` | 免费账号即可 |
-| `fb_adlib` | Meta 广告库（5 国 × 9 竞品 = 45 query 拆任务并跑）| `~/.meta-adlib-profile` | per-country 拆并发 |
+| `fb_adlib` | Meta 广告库（5 国 × 10 app = 50 query 拆任务并跑）| `~/.meta-adlib-profile` | per-country 拆并发 |
 | `sensor_tower` | 月下载估算 / 收入 / 排名 | `~/.sensortower-profile` | 免费账号 |
-| `similarweb_traffic` | 网站 metric（与上面同条目）| `~/.similarweb-profile` | 用系统 Chrome（`channel="chrome"`）过 CloudFront |
+| `similarweb_traffic` | 网站流量 / 设备 / 停留 / 排名 | `~/.similarweb-profile` | 用系统 Chrome（`channel="chrome"`）过 CloudFront |
 
 ### 2.3 共有约束
 
@@ -239,10 +238,11 @@ Phase 0 · 重试队列
    └─ 拉 retry_queue 中 due_at <= now 的任务，逐个 _run_one
       指数退避：[5min, 30min, 2h, 6h, 12h]，max_attempts=5
 
-Phase 1 · 13 个抓取（并行 MAX_CONCURRENT=4）
-   ├─ HTTP (8): appstore_rank / androidrank / comment_fetch / reddit /
-   │           twitter / strategy_monitor + 5×fb_adlib_{country}
-   └─ Playwright (3): appmagic / sensor_tower / fb_adlib（已拆 5 个国家）
+Phase 1 · 抓取（并行 MAX_CONCURRENT=4，逻辑上 8 + 4 = 12 源；
+              fb_adlib 实际拆成 5 个 per-country 子任务，故 sync_log 里通常显示 13 条）
+   ├─ HTTP (6): appstore_rank / androidrank / comment_fetch / reddit /
+   │           twitter / strategy_monitor   （周更才跑 iap_pricing / google_news / similarweb_traffic）
+   └─ Playwright: appmagic / sensor_tower + fb_adlib_{us,gb,br,mx,ng}
 
 Phase 2 · AI 串行
    ├─ 2.1 discover_peers       ── 扫 appstore_rank top 100 unknown app（30 天缓存）
@@ -339,7 +339,7 @@ competitors lookup（人工守门）
 1. `python3 -m ai_tasks.discover_peers list` → 看候选清单
 2. 觉得某个值得跟踪 → 手工编辑 `data/competitors.json` 加一条
 3. 直接 `INSERT INTO competitors (name, gp_package, ios_app_id, bundle_id) VALUES (...)`
-4. 第二天 daily_sync 自动开始抓那个 app 的所有 13 个数据源
+4. 第二天 daily_sync 自动开始抓那个 app 的所有 12 个数据源
 
 ---
 
