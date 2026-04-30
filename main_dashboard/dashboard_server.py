@@ -520,11 +520,12 @@ class APIHandler(BaseHTTPRequestHandler):
             wheres.append("c.name = :competitor")
             params["competitor"] = competitor
         if country:
-            wheres.append("a.region = :country")
+            wheres.append("a.region_code = :country")
             params["country"] = country
         sql = (
-            "SELECT a.id, c.name as competitor, a.region, a.ad_id, "
-            "a.body_text, a.media_url, a.fetched_at "
+            "SELECT a.id, c.name as competitor, a.region_code as region, a.ad_id, "
+            "a.text as body_text, a.media_url, a.start_date, a.platform, a.page_name, "
+            "a.fetched_at "
             "FROM ad_creatives a JOIN competitors c ON c.id = a.competitor_id "
             f"WHERE {' AND '.join(wheres)} "
             "ORDER BY a.fetched_at DESC LIMIT :limit"
@@ -613,8 +614,12 @@ class APIHandler(BaseHTTPRequestHandler):
 
         # 排除已在 competitors 的
         wheres.append(
+            # COLLATE 显式归一：competitors.ios_app_id 是 utf8mb4_0900_ai_ci，
+            # app_classifications.app_id 是 utf8mb4_unicode_ci，直接 = 会触发
+            # "Illegal mix of collations" 错。
             "NOT EXISTS (SELECT 1 FROM competitors c "
-            "WHERE c.ios_app_id = a.app_id AND a.platform = 'ios')"
+            "WHERE c.ios_app_id COLLATE utf8mb4_unicode_ci = a.app_id "
+            "AND a.platform = 'ios')"
         )
 
         sql = (
