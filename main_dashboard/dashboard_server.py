@@ -197,6 +197,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 return self.api_ads()
             if path == "/api/website":
                 return self.api_website()
+            if path == "/api/community":
+                return self.api_community()
 
             # === System ===
             if path == "/api/candidates":
@@ -557,6 +559,31 @@ class APIHandler(BaseHTTPRequestHandler):
                 except Exception:
                     r[key] = []
         return self._send_json({"website": rows, "count": len(rows)})
+
+    def api_community(self):
+        """GET /api/community?source=reddit|twitter&competitor=&limit= — Reddit / Twitter 帖子"""
+        q = self._qs()
+        source = q.get("source", "")
+        competitor = q.get("competitor", "")
+        limit = min(int(q.get("limit") or 50), 500)
+        wheres = ["1=1"]
+        params = {"limit": limit}
+        if source:
+            wheres.append("p.source = :source")
+            params["source"] = source
+        if competitor:
+            wheres.append("c.name = :competitor")
+            params["competitor"] = competitor
+        sql = (
+            "SELECT p.id, c.name as competitor, p.source, p.post_id, p.subreddit, "
+            "p.title, p.selftext, p.score, p.num_comments, p.url, "
+            "p.created_utc, p.fetched_at "
+            "FROM community_posts p JOIN competitors c ON c.id = p.competitor_id "
+            f"WHERE {' AND '.join(wheres)} "
+            "ORDER BY p.score DESC, p.created_utc DESC LIMIT :limit"
+        )
+        rows = _query(sql, **params)
+        return self._send_json({"posts": rows, "count": len(rows)})
 
     def api_candidates(self):
         """GET /api/candidates?topic=&conf_min=&limit= — 候选 app（不含已 in competitors 的）"""

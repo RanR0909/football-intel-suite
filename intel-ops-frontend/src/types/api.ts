@@ -180,6 +180,27 @@ export interface WebsiteResponse {
   count: number
 }
 
+// ===== /api/community =====
+export interface CommunityPost {
+  id: number
+  competitor: string
+  source: "reddit" | "twitter"
+  post_id: string
+  subreddit: string | null
+  title: string | null
+  selftext: string | null
+  score: number | null
+  num_comments: number | null
+  url: string | null
+  created_utc: string | null
+  fetched_at: string
+}
+
+export interface CommunityResponse {
+  posts: CommunityPost[]
+  count: number
+}
+
 // ===== /api/candidates =====
 export type Topic = "football" | "basketball" | "tennis" | "F1" |
   "cricket" | "multi_sport" | "non_sport"
