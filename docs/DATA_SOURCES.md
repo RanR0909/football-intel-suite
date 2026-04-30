@@ -395,33 +395,52 @@ python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 
 
 **存储**：`app_classifications` 表（`UNIQUE(app_id, platform)`），重复分类 UPSERT 同一行
 
-**自动发现新 peer**（`ai_tasks.discover_peers` 管道，已挂 daily_sync Phase 2）：
+**自动发现 peer 候选**（`ai_tasks.discover_peers` 管道，已挂 daily_sync Phase 2）：
+
+⚠️ **严格分离** — `app_classifications`（候选池） 和 `competitors`（跟踪池）**完全独立**：
+- candidate **永远不会** 自动写入 `competitors` 表 / `competitors.json`
+- 候选只用于人工浏览决定要不要手工 curate
+- 没有 `--auto-promote` 选项
 
 ```
 appstore_rank top 100 →
-  过滤 competitor_id IS NULL（未在 competitors.json）→
+  过滤 competitor_id IS NULL（不在 competitors.json）→
   iTunes Lookup 取 description / publisher →
   classify_app（30 天缓存命中 = 不调 AI）→
   candidate filter: is_relevant=true + topic ∈ {football, multi_sport} + conf ≥ 0.85 →
-  默认仅写 app_classifications 表（人工审核 SELECT * WHERE is_relevant=1 AND ...）
-  --auto-promote 时把 candidate 直接 INSERT 到 competitors lookup + competitors.json
-                  （加 is_discovered=true 标记，便于后续回审）
+  全部入 app_classifications 表
+  candidate 列表只在脚本输出 + 通过 list 子命令查询
 ```
 
 **实测**（2026-04-30 跑 US sports top 100）：
-- 97 个未知 app；20 个抽样 → 9 个 peer candidate（multi_sport）：
-  - bet365 / DraftKings / FanDuel / PrizePicks / Fanatics（5 个博彩 / 预测 app）
-  - ESPN（综合新闻 + 视频 + 数据）
-  - MLB 等 league 官方 app
+- 97 个未知 app；20 个抽样 → 9 个 peer candidate（全 multi_sport）：
+
+| Candidate | Topic | Categories | Conf |
+|---|---|---|---|
+| ESPN: Live Sports & Scores | multi_sport | score / news / video / analytics | 0.98 |
+| FanDuel Sportsbook & Casino | multi_sport | betting | 0.97 |
+| DraftKings Sportsbook & Casino | multi_sport | betting | 0.97 |
+| bet365 - Sportsbook & Casino | multi_sport | betting / video / score | 0.97 |
+| Fanatics Sportsbook & Casino | multi_sport | betting | 0.95 |
+| Betr Picks & Sportsbook | multi_sport | betting / prediction | 0.93 |
+| PrizePicks - Sports Picks | multi_sport | betting / prediction | 0.93 |
+| FanDuel Predicts | multi_sport | prediction / betting | 0.90 |
+| MLB | multi_sport | video / news / score | 0.90 |
 
 CLI：
 ```bash
-python3 -m ai_tasks.discover_peers                         # 默认（dry-classify，只入 app_classifications）
-python3 -m ai_tasks.discover_peers --limit 20              # 限制 20 条
-python3 -m ai_tasks.discover_peers --auto-promote          # 高置信 peer 入 competitors lookup
-python3 -m ai_tasks.discover_peers --topic football        # 只看 football peer
-python3 -m ai_tasks.discover_peers --min-confidence 0.9    # 提高门槛
+# 抓 + 分类 + 列候选（默认）
+python3 -m ai_tasks.discover_peers                       # scan 模式（默认）
+python3 -m ai_tasks.discover_peers --limit 20            # 限制处理 20 个
+python3 -m ai_tasks.discover_peers --topic football      # 只看 football 候选
+python3 -m ai_tasks.discover_peers --min-confidence 0.9  # 提高门槛
+
+# 不抓只列（查 app_classifications 表里现有候选）
+python3 -m ai_tasks.discover_peers list
+python3 -m ai_tasks.discover_peers list --include-already-tracked   # 含已跟踪的（debug）
 ```
+
+**人工 curation 流程**：你看到 candidate 觉得值得跟踪，就**手动**编辑 `data/competitors.json` 加上对应条目，重跑 `alembic upgrade head` （0009 的 seed 模式只对新 name 生效）或直接 INSERT 到 MySQL `competitors` 表 — 该 app 下次 daily_sync 会被所有数据源照常抓。
 
 ---
 
