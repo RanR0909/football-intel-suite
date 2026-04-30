@@ -1,11 +1,26 @@
-"""X (Twitter) 社媒舆情抓取器。
+"""X (Twitter) 社媒舆情抓取器 — 经 fapi.uk / utools 转发（取代官方 X API v2）。
 
-使用 X API v2 search/recent 端点。读取环境变量 X_BEARER_TOKEN（OAuth 2.0 Bearer Token）。
-未配置 token 时整体跳过，不影响其他爬虫运行。
+背景
+----
+X 官方 API v2 的 free tier 配额已不足以支撑 9 竞品 × 多关键词的扫描，
+改走第三方 fapi.uk（utools）服务。该服务通过用户自带 Twitter cookie
+（auth_token）模拟登录抓取，**违反 X ToS，存在账号封禁风险**：
 
-下游：
-- data/raw/twitter_posts.json — 与 reddit_posts.json 同结构，aggregator 多源融合
-- data_pipeline.aggregator._fill_community 自动按 _platform 字段拆 platform_breakdown
+  ⚠️  强烈建议使用一次性"小号"的 auth_token，**不要用主号 / 工作号**。
+  ⚠️  cookie 通常 30 天内失效，需要定期更新。
+  ⚠️  若服务返回 401 / 风控错误，本爬虫会静默跳过并触发飞书告警。
+
+环境变量
+--------
+- ``UTOOLS_AUTH_TOKEN`` — 必填，X 网页 cookie 中 ``auth_token`` 的值。
+  获取：浏览器登录 X → DevTools → Application → Cookies → 复制 ``auth_token``。
+  未配置时整体跳过，不影响其他爬虫。
+
+下游
+----
+- ``data/raw/twitter_posts.json``         — 与 reddit_posts.json 同结构
+- ``community_posts`` (MySQL) via dao_community
+- aggregator._fill_community 自动按 platform 字段拆 platform_breakdown
 """
 
 from __future__ import annotations
@@ -14,130 +29,277 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from async_crawler.base import BaseCrawler
-from async_crawler import db
 from competitors import get_comment_competitors
 from shared.dao import community as dao_community
+
+try:
+    from shared import feishu_notify  # 可选；缺失时不影响核心流程
+except Exception:  # pragma: no cover
+    feishu_notify = None  # type: ignore
 
 
 _RAW_OUTPUT = Path(__file__).resolve().parent.parent.parent / "data" / "raw" / "twitter_posts.json"
 
-X_API_BASE = "https://api.twitter.com/2/tweets/search/recent"
-X_TWEET_FIELDS = "created_at,public_metrics,author_id,lang"
-X_USER_FIELDS = "username"
+FAPI_ENDPOINT = "https://fapi.uk/api/base/apitools/search"
 
 
 class TwitterCrawler(BaseCrawler):
     source_name = "twitter"
-    rate_limit = 1.0                          # X API v2 严格速率
+    rate_limit = 2.0           # 走第三方代理，节流稍宽以降低风控
     max_retries = 2
 
-    SEARCH_TWEETS_PER_COMP = 100              # X free tier 月配额有限，按 month 控量
-    KEYWORD_TEMPLATES = ["{name}", "@{name}", "{name} app"]
-    DEFAULT_LANG_FILTER = ["en", "es", "pt"]   # 限定主流英语 / 西语 / 葡语，过滤噪声
+    POSTS_PER_QUERY = 30       # 单次查询 ≤ 30 条，避免触发风控
+    PRODUCT = "Latest"         # Latest = 最新；Top = 热门
+    DEFAULT_LANGS = {"en", "es", "pt", "zh", "ja", None, ""}  # 不强制过滤，宽松保留
 
     @property
-    def _bearer_token(self) -> str:
-        return os.environ.get("X_BEARER_TOKEN", "").strip()
+    def _auth_token(self) -> str:
+        return os.environ.get("UTOOLS_AUTH_TOKEN", "").strip()
 
     async def crawl(self, database) -> list[dict]:
-        if not self._bearer_token:
-            self.log.warning("X_BEARER_TOKEN 未配置，跳过 Twitter 抓取")
+        token = self._auth_token
+        if not token:
+            self.log.warning("UTOOLS_AUTH_TOKEN 未配置，跳过 Twitter 抓取")
             return []
 
         competitors = get_comment_competitors()
         results: list[dict] = []
         total_db = 0
+        cookie_dead = False
+        debug_dumped = False
+
         for app_name in competitors:
-            posts = await self._crawl_competitor(app_name)
+            posts, status = await self._crawl_competitor(app_name, token, debug=not debug_dumped)
+            if status == "auth_failed":
+                cookie_dead = True
+                self.log.error("auth_token 已失效或被风控，停止后续竞品抓取")
+                break
+            if status == "schema_unknown":
+                debug_dumped = True  # 已打印一次 raw，不再 dump
             rec = self.standardize(app_name, {
                 "competitor": app_name,
                 "posts": posts,
+                "status": status,
             })
             results.append(rec)
             if posts:
                 total_db += dao_community.upsert_community_posts(app_name, "twitter", posts)
 
+        if cookie_dead:
+            self._notify_cookie_dead()
+
         if results:
             await database.save(self.source_name, results)
             self._write_raw_snapshot(results)
+
+        total_posts = sum(len(r["data"].get("posts", [])) for r in results)
         self.log.info(
-            f"twitter: 抓取 {len(results)} 个竞品，共 "
-            f"{sum(len(r['data'].get('posts', [])) for r in results)} 条推文；MySQL upsert {total_db} 条"
+            f"twitter: 抓取 {len(results)} 个竞品，共 {total_posts} 条推文；"
+            f"MySQL upsert {total_db} 条"
         )
         return results
 
-    async def _crawl_competitor(self, app_name: str) -> list[dict]:
-        seen: set[str] = set()
-        out: list[dict] = []
-        # X API v2 single query：组合多个 keyword + 排除转推
-        # 例：("SofaScore" OR @SofaScore OR "SofaScore app") -is:retweet lang:en
-        terms = " OR ".join('"' + t.format(name=app_name) + '"' for t in self.KEYWORD_TEMPLATES)
-        lang_filter = " OR ".join("lang:" + lg for lg in self.DEFAULT_LANG_FILTER)
-        query = f"({terms}) -is:retweet ({lang_filter})"
-        url = (
-            f"{X_API_BASE}?query={quote(query)}"
-            f"&max_results={self.SEARCH_TWEETS_PER_COMP}"
-            f"&tweet.fields={X_TWEET_FIELDS}"
-            f"&expansions=author_id&user.fields={X_USER_FIELDS}"
-        )
+    # ---- 单竞品 -------------------------------------------------------------
+
+    async def _crawl_competitor(
+        self, app_name: str, token: str, *, debug: bool
+    ) -> tuple[list[dict], str]:
+        """返回 (posts, status)。status ∈ {ok, empty, auth_failed, schema_unknown, error}"""
+        # fapi.uk 用单 words 字段；包双引号锁定 app 名
+        words = f'"{app_name}"'
+        params = {
+            "words": words,
+            "count": self.POSTS_PER_QUERY,
+            "product": self.PRODUCT,
+            "resFormat": "json",
+            "auth_token": token,
+        }
+        url = f"{FAPI_ENDPOINT}?{urlencode(params)}"
 
         try:
             data = await self.fetch_json(url, headers={
-                "Authorization": "Bearer " + self._bearer_token,
-                "User-Agent": "FootballIntelBot/1.0",
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
             })
         except Exception as e:
-            self.log.error(f"[{app_name}] X 搜索失败: {e}")
-            return []
+            msg = str(e).lower()
+            if "401" in msg or "403" in msg or "auth" in msg:
+                return [], "auth_failed"
+            self.log.error(f"[{app_name}] fapi 请求失败: {e}")
+            return [], "error"
 
-        # X 响应结构：{data: [tweets], includes: {users: [...]}}
-        tweets = data.get("data") or []
-        users_by_id = {u["id"]: u for u in (data.get("includes", {}) or {}).get("users", [])}
+        # fapi.uk 常见返回：业务码字段 code/status，2xx/0/200 表示成功
+        biz_code = data.get("code") if isinstance(data, dict) else None
+        if biz_code not in (None, 0, 200, "0", "200", "success"):
+            err_msg = (data.get("msg") or data.get("message") or "").lower()
+            if "auth" in err_msg or "token" in err_msg or "login" in err_msg or "expir" in err_msg:
+                self.log.error(f"[{app_name}] auth_token 失效: {data}")
+                return [], "auth_failed"
+            self.log.warning(f"[{app_name}] fapi 业务错误 code={biz_code} data={data}")
+            return [], "error"
 
+        tweets = self._extract_tweets(data)
+        if tweets is None:
+            if debug:
+                # schema 未知：打印整个 response 便于第一次跑时人工对齐字段
+                snippet = json.dumps(data, ensure_ascii=False)[:2000]
+                self.log.warning(f"[{app_name}] 无法识别 fapi 响应 schema，原始片段:\n{snippet}")
+            return [], "schema_unknown"
+
+        seen: set[str] = set()
+        out: list[dict] = []
         for t in tweets:
-            tid = t.get("id")
+            normalized = self._normalize_tweet(t)
+            if not normalized:
+                continue
+            tid = normalized["post_id"]
             if not tid or tid in seen:
                 continue
             seen.add(tid)
+            out.append(normalized)
 
-            author_obj = users_by_id.get(t.get("author_id")) or {}
-            metrics = t.get("public_metrics", {}) or {}
-            created_at_str = t.get("created_at") or ""
+        return out, ("ok" if out else "empty")
+
+    # ---- 解析 ---------------------------------------------------------------
+
+    @staticmethod
+    def _extract_tweets(data) -> list | None:
+        """fapi.uk schema 不稳定 — 尝试多种常见路径找推文 list。
+
+        若全部失败返回 None（表示需要 dump raw 给开发者对齐 schema）。
+        """
+        if not isinstance(data, dict):
+            return None
+        candidates = [
+            data.get("data"),
+            data.get("data", {}).get("data") if isinstance(data.get("data"), dict) else None,
+            data.get("data", {}).get("tweets") if isinstance(data.get("data"), dict) else None,
+            data.get("data", {}).get("list") if isinstance(data.get("data"), dict) else None,
+            data.get("tweets"),
+            data.get("list"),
+            data.get("results"),
+        ]
+        for c in candidates:
+            if isinstance(c, list):
+                return c
+        return None
+
+    @staticmethod
+    def _normalize_tweet(t) -> dict | None:
+        """尝试把 fapi 返回的 tweet 对象映射成 community_posts schema。
+
+        fapi.uk 据观察返回的字段名不固定（可能是 X 简化结构，也可能是
+        graphql legacy 结构），这里做最大努力的兼容映射。
+        """
+        if not isinstance(t, dict):
+            return None
+
+        legacy = t.get("legacy") if isinstance(t.get("legacy"), dict) else {}
+
+        tid = (
+            t.get("id_str") or t.get("id")
+            or t.get("rest_id") or t.get("tweet_id")
+            or legacy.get("id_str") or ""
+        )
+        tid = str(tid) if tid else ""
+        if not tid:
+            return None
+
+        text = (
+            t.get("full_text") or t.get("text") or t.get("content")
+            or legacy.get("full_text") or legacy.get("text") or ""
+        )
+        text = (text or "")[:1000]
+
+        # 作者：可能在 user / author / core / 顶层 / legacy
+        author = ""
+        for blk in (
+            t.get("user"),
+            t.get("author"),
+            (t.get("core") or {}).get("user_results", {}).get("result"),
+        ):
+            if isinstance(blk, dict):
+                author = (
+                    blk.get("screen_name")
+                    or blk.get("username")
+                    or (blk.get("legacy") or {}).get("screen_name")
+                    or ""
+                )
+                if author:
+                    break
+
+        # 计数 — 优先 public_metrics，依次 t.* 顶层 / legacy.*
+        metrics = t.get("public_metrics") or {}
+
+        def _pick(*names) -> int:
+            for src in (metrics, t, legacy):
+                for n in names:
+                    v = src.get(n)
+                    if v:
+                        try:
+                            return int(v)
+                        except (ValueError, TypeError):
+                            pass
+            return 0
+
+        likes = _pick("like_count", "favorite_count", "favoriteCount")
+        replies = _pick("reply_count", "replyCount")
+        retweets = _pick("retweet_count", "retweetCount")
+
+        # 时间：created_at 可能是 RFC822 / ISO / 时间戳
+        created_raw = (
+            t.get("created_at") or t.get("createdAt") or t.get("date")
+            or legacy.get("created_at") or ""
+        )
+        created_utc = 0.0
+        if created_raw:
             try:
-                created_utc = datetime.fromisoformat(created_at_str.replace("Z", "+00:00")).timestamp() if created_at_str else 0
-            except ValueError:
-                created_utc = 0
+                if isinstance(created_raw, (int, float)):
+                    created_utc = float(created_raw)
+                elif "T" in created_raw and ("Z" in created_raw or "+" in created_raw):
+                    created_utc = datetime.fromisoformat(
+                        created_raw.replace("Z", "+00:00")
+                    ).timestamp()
+                else:
+                    dt = parsedate_to_datetime(created_raw)
+                    if dt:
+                        created_utc = dt.timestamp()
+            except Exception:
+                created_utc = 0.0
 
-            out.append({
-                "post_id": tid,
-                "platform": "twitter",
-                "author": author_obj.get("username", ""),
-                "subreddit": None,                                  # X 无 sub-channel 概念
-                "title": "",                                         # X 没有 title，仅 text
-                "selftext": "",                                      # 兼容 schema
-                "text": (t.get("text") or "")[:1000],                # 主文本
-                "url": (
-                    f"https://twitter.com/{author_obj.get('username')}/status/{tid}"
-                    if author_obj.get("username") else None
-                ),
-                "score": int(metrics.get("like_count", 0) or 0),
-                "num_comments": int(metrics.get("reply_count", 0) or 0),
-                "shares_count": int(metrics.get("retweet_count", 0) or 0),
-                "upvote_ratio": None,
-                "created_utc": created_utc,
-                "lang": t.get("lang"),
-                "comments": [],
-            })
-        return out
+        url = (
+            t.get("url")
+            or (f"https://twitter.com/{author}/status/{tid}" if author else None)
+        )
+
+        return {
+            "post_id": tid,
+            "platform": "twitter",
+            "author": author or "",
+            "subreddit": None,
+            "title": "",
+            "selftext": "",
+            "text": text,
+            "url": url,
+            "score": likes,
+            "num_comments": replies,
+            "shares_count": retweets,
+            "upvote_ratio": None,
+            "created_utc": created_utc,
+            "lang": t.get("lang") or legacy.get("lang"),
+            "comments": [],
+        }
+
+    # ---- 输出 + 告警 --------------------------------------------------------
 
     def _write_raw_snapshot(self, results: list[dict]):
-        """合并写入 data/raw/twitter_posts.json，按 (source, competitor) 覆盖。"""
         _RAW_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
         existing: dict[str, dict] = {}
         if _RAW_OUTPUT.exists():
@@ -155,6 +317,23 @@ class TwitterCrawler(BaseCrawler):
             encoding="utf-8",
         )
         self.log.info(f"raw snapshot 已写入 {_RAW_OUTPUT}")
+
+    @staticmethod
+    def _notify_cookie_dead():
+        if feishu_notify is None:
+            return
+        try:
+            feishu_notify.send_card(
+                "🚨 Twitter cookie 失效",
+                fields=[
+                    {"label": "症状", "value": "fapi.uk 返回 auth 错误，UTOOLS_AUTH_TOKEN 已失效"},
+                    {"label": "处理", "value": "重新登录小号 → DevTools 复制 auth_token → 更新 .env.local → 重启 launchd"},
+                ],
+                color="red",
+                footer=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        except Exception:
+            pass
 
 
 async def crawl(session, database) -> list[dict]:

@@ -127,6 +127,15 @@ def get_comment_competitors() -> dict[str, dict]:
     }
 
 
+def get_website_competitors() -> dict[str, str]:
+    """{name: domain} — 仅返回带 website 字段的竞品（给 similarweb 抓取用）。"""
+    return {
+        name: entry["website"].strip().lower().lstrip("www.")
+        for name, entry in load_competitors().items()
+        if entry.get("website")
+    }
+
+
 def get_strategy_monitor_apps() -> dict[str, int]:
     return {
         name: int(entry["ios"])

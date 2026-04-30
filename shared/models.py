@@ -152,6 +152,55 @@ class CommunityPost(Base):
     )
 
 
+class WebsiteTraffic(Base):
+    """Similarweb 公开页快照（每周一次，monthly_visits 等数据 Similarweb 月级更新）。
+
+    一行 = (competitor, snapshot_month) 的官网流量整体画像。设计：
+    - 6 个流量来源百分比（direct/search/social/referral/mail/display）单独列
+    - 设备占比（desktop/mobile）单独列
+    - 数值 + 原始字符串双写："30.5M" → 30500000；"00:05:23" → 323
+    - 长尾详情（top countries / keywords）存 JSON
+    """
+    __tablename__ = "website_traffic"
+
+    id = Column(PK_BigInt, primary_key=True, autoincrement=True)
+    competitor_id = Column(BigInteger, ForeignKey("competitors.id"), nullable=False)
+    domain = Column(String(128), nullable=False)
+    snapshot_month = Column(Date, nullable=False)   # 数据所属月份（每月 1 号）
+
+    # 核心 4 指标
+    monthly_visits = Column(String(32))             # "30.5M"
+    monthly_visits_num = Column(BigInteger)         # 30500000
+    avg_visit_duration = Column(String(16))         # "00:05:23"
+    avg_visit_duration_sec = Column(Integer)        # 323
+    pages_per_visit = Column(Float)                 # 5.43
+    bounce_rate = Column(Float)                     # 0.325（小数 0–1）
+
+    # 设备
+    desktop_share = Column(Float)
+    mobile_share = Column(Float)
+
+    # 6 个流量来源（小数 0–1）
+    direct_share = Column(Float)
+    search_share = Column(Float)
+    social_share = Column(Float)
+    referral_share = Column(Float)
+    mail_share = Column(Float)
+    display_share = Column(Float)
+
+    # 长尾详情（非索引）
+    top_countries_json = Column(Text)               # [{country, share}, ...]
+    top_keywords_json = Column(Text)                # [{kw, share}, ...]（免费层可能空）
+    raw_text = Column(Text)                         # main innerText 前 4000 字（调试）
+
+    fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("competitor_id", "snapshot_month", name="uniq_traffic_comp_month"),
+        Index("idx_traffic_comp_month", "competitor_id", "snapshot_month"),
+    )
+
+
 class SyncLog(Base):
     __tablename__ = "sync_log"
 
@@ -177,5 +226,6 @@ class SyncLog(Base):
 ALL_TABLES = [
     "competitors", "regions",
     "reviews", "ad_creatives", "iap_items",
-    "market_rank_snapshots", "community_posts", "sync_log",
+    "market_rank_snapshots", "community_posts",
+    "website_traffic", "sync_log",
 ]

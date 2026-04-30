@@ -1,6 +1,6 @@
 # 数据源
 
-> 9 个 竞品 × 12 个区域，14 个数据源 / 任务。
+> 9 个 竞品 × 12 个区域，15 个数据源 / 任务。
 
 ---
 
@@ -97,22 +97,31 @@ iOS 当前完全 0（Apple 主动反爬，详见 [config/README.md](../config/RE
 
 ---
 
-### 6. `twitter` — X (Twitter) 搜索（每日，⚪ 缺 key 跳过）
+### 6. `twitter` — X (Twitter) 搜索（每日，经 fapi.uk / utools 转发）
 
-**源**：X API v2 `https://api.twitter.com/2/tweets/search/recent`（需要 `X_BEARER_TOKEN`）
+**源**：第三方代理 `https://fapi.uk/api/base/apitools/search`（[文档](https://utools.readme.io/reference/search-2)）
+鉴权：`UTOOLS_AUTH_TOKEN` —— 用户自带的 X 网页 cookie `auth_token` 值（不是官方 API key）。
 
-预定字段：
+⚠️ **风险提示**：fapi.uk 通过用户 cookie 模拟登录抓取，违反 X ToS，存在小号被封禁的风险。
+- 强烈建议配一个**一次性小号**专用 cookie，不要用主号 / 工作号
+- cookie 通常 30 天内失效；爬虫检测到 401 会立刻停抓并发飞书告警
+- 切回官方 API 的旧实现可在 `git log async_crawler/sources/twitter.py` 中找到
+
+每竞品一次查询（`words="<App>" product=Latest count=30`），输出字段：
 
 | 字段 | 含义 | 例 |
 |---|---|---|
 | post_id | 推文 ID | "1812345678901234567" |
 | text | 推文文本 | "FotMob just dropped AI predictions ..." |
-| created_at | 发布时间 | "2026-04-28T12:34:56Z" |
-| public_metrics | 点赞 / 转发 / 回复 / 引用 数 | `{like_count: 42, retweet_count: 8, reply_count: 3, quote_count: 1}` |
-| author_id | 发推用户 ID | "12345" |
+| author | 发推用户名 | "fotmob_official" |
+| score | 点赞数 | 42 |
+| num_comments | 回复数 | 3 |
+| shares_count | 转推数 | 8 |
+| created_utc | 发布时间（UTC 时间戳）| 1714291296.0 |
 | lang | 语言 | "en" |
+| url | 推文链接 | https://twitter.com/fotmob_official/status/1812... |
 
-X 免费层只有 100 reads/月，远不够，所以默认跳过。
+入库 `community_posts`（dedupe by `(source='twitter', post_id)`），与 reddit 同表。
 
 ---
 
@@ -245,6 +254,41 @@ X 免费层只有 100 reads/月，远不够，所以默认跳过。
 
 ---
 
+### 13. `similarweb_traffic` — Similarweb 网站流量（每周，免费公开页）
+
+**源**：`similarweb.com/website/<domain>/`（不登录即可看核心字段）
+**登录态**：`~/.similarweb-profile` —— 一次性人工过 Cloudflare challenge，profile 持久化后续 headless 运行
+**首次配置**：
+```bash
+python3 -m market_rank.scrape_similarweb login
+# 浏览器弹出 → 完成 CF 验证 → 看到 sofascore.com 概览页流量数据 → 关窗口
+```
+
+每竞品 1 个 page，9 个（每周日 03:00 跑），数据按"月"对齐（snapshot_month = 当月 1 号）：
+
+| 字段 | 含义 | 例 |
+|---|---|---|
+| `monthly_visits` / `monthly_visits_num` | 月访问量（原始字符串 + 解析数值）| `"30.5M"` / `30500000` |
+| `avg_visit_duration` / `avg_visit_duration_sec` | 平均停留时长 | `"00:05:23"` / `323` |
+| `pages_per_visit` | 平均访问页数 | `4.32` |
+| `bounce_rate` | 跳出率（小数 0–1）| `0.3345` |
+| `desktop_share` / `mobile_share` | 设备分布 | `0.55` / `0.45` |
+| **6 大流量来源**（小数 0–1） | | |
+| `direct_share` | 直接访问 | `0.6510` |
+| `search_share` | 搜索引擎 | `0.2050` |
+| `social_share` | 社交媒体 | `0.0420` |
+| `referral_share` | 站外引荐 | `0.0380` |
+| `mail_share` | 邮件 | `0.0120` |
+| `display_share` | 展示广告 | `0.0520` |
+| `top_countries` (JSON) | Top 5 国家 | `[{country:"United States", share:0.2345}, ...]` |
+| `top_keywords` (JSON) | Top 5 关键词（免费层可能空）| `[{kw:"sofascore", share:0.352}, ...]` |
+| `raw_text` | main innerText 前 8000 字（调试用）| 整段页面文案 |
+
+入库 `website_traffic` 表，`UNIQUE (competitor_id, snapshot_month)`，月内重复抓 UPSERT 同一行。
+免费层一般够用；如果哪天 Similarweb 把更多字段挪到登录后，再注册个免费账号即可（不收费）。
+
+---
+
 ##  AI 分析（5 个，不直接抓数据）
 
 ### 13. `commercial_strategy` — 商业策略画像（每日）
@@ -306,20 +350,20 @@ dashboard 上的"按需"AI（用户点按钮才跑）：
 ## 数据流
 
 ```
-14 个源 → 抓
+15 个源 → 抓
    ├─ HTTP 抓取（9）：appstore_rank / androidrank / comment_fetch / reddit /
-   │                  twitter[⚪] / iap_pricing / google_news /
+   │                  twitter (fapi.uk) / iap_pricing / google_news /
    │                  strategy_monitor
-   ├─ Playwright（3）：appmagic / fb_adlib / sensor_tower
+   ├─ Playwright（4）：appmagic / fb_adlib / sensor_tower / similarweb_traffic
    └─ AI 分析（5）：comment_label / commercial_strategy / weekly_review /
                    competitor_detail × 9 / commercial_weekly
 
 抓取频次：
-   日更（02:00）：appstore_rank / androidrank / reddit / twitter[空] /
+   日更（02:00）：appstore_rank / androidrank / reddit / twitter (fapi.uk) /
                   comment_fetch / strategy_monitor / appmagic / fb_adlib(×5 国) /
                   sensor_tower + comment_label + commercial_strategy
-   周更（周日 03:00）：iap_pricing / google_news / weekly_review /
-                       commercial_weekly + competitor_detail × 9
+   周更（周日 03:00）：iap_pricing / google_news / similarweb_traffic /
+                       weekly_review / commercial_weekly + competitor_detail × 9
    按需：3 个 AI 任务用户在 dashboard 点按钮触发
 
 抓取触发链：
@@ -341,7 +385,8 @@ dashboard 上的"按需"AI（用户点按钮才跑）：
 |---|---|---|
 | `CLAUDE_API_KEY` | flashapi 中转 | ✅ 已配 |
 | `ANTHROPIC_API_KEY` | Claude 官方 fallback | ❌ 未配 |
-| `X_BEARER_TOKEN` | X (Twitter) 抓取 | ❌ 未配（Free 层 100 reads/月不够用） |
+| `UTOOLS_AUTH_TOKEN` | X (Twitter) 抓取（经 fapi.uk 第三方代理）| ⏳ 待配 — 小号 cookie，30 天失效，⚠️ 违反 X ToS |
+| ~~`X_BEARER_TOKEN`~~ | ~~X 官方 API v2~~ | ⚪ **已弃用**（Free 层 100 reads/月不够，2026-04-30 迁 fapi.uk） |
 | ~~`GOOGLE_API_KEY` + `GOOGLE_CSE_ID`~~ | ~~Google CSE~~ | ⚪ **不再需要**（迁到 RSS 模式，2026-04-30） |
 | `MYSQL_DSN` | MySQL 主存储 | ✅ 已配（本地） |
 | `REDIS_URL` | Redis 缓存 | ✅ 已配（本地） |

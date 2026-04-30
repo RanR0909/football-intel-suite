@@ -73,6 +73,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             ["-m", "async_crawler", "--sources", "iap_pricing"], 600, "http"),
         ("google_news", "Google 商业新闻（RSS 周更）",
             ["-m", "async_crawler", "--sources", "google_news"], 600, "http"),
+        ("similarweb_traffic", "Similarweb 网站流量（周更）",
+            ["-m", "market_rank.scrape_similarweb", "scrape"], 900, "http"),
         ("weekly_review", "评论周报（AI）",
             [str(PR / "competitor_comment" / "weekly_review.py")], 1500, "ai"),
         ("commercial_weekly", "商业周报（AI）",
