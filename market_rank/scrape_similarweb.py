@@ -177,77 +177,11 @@ EXTRACT_JS = r"""
     out.avg_visit_duration_sec = parseDuration(durRaw);
   }
 
-  // ---- 5. Device distribution (Desktop / Mobile Web) ----------
-  // "Device distribution\n...Desktop\n59.48%\nMobile Web\n40.52%"
-  const devIdx = text.indexOf('Device distribution');
-  if (devIdx >= 0) {
-    const devBlock = text.slice(devIdx, devIdx + 600);
-    const md = devBlock.match(/Desktop\s*\n?\s*([\d.]+)\s*%/);
-    const mm = devBlock.match(/Mobile(?:\s*Web)?\s*\n?\s*([\d.]+)\s*%/);
-    if (md) out.desktop_share = parsePct(md[1]);
-    if (mm) out.mobile_share = parsePct(mm[1]);
-  }
+  // (注意：device split / 6 大流量来源 / top_keywords 仅 Premium Trial 期间可见，
+  //  trial 过期后 Similarweb 把它们 gated 掉，所以 schema 不收这些字段，
+  //  避免长期出现 null 列。如需恢复可参考 git log + migration 0006/0007/0008。)
 
-  // ---- 6. Marketing Channels — 10 channels chart -------------
-  // Similarweb 新版 chart 渲染顺序：
-  //   labels: Direct / Search-Organic / Search-Paid / Referrals / Display
-  //           / Social-Organic / Social-Paid / [Gen AI] / Email / Affiliates
-  //   axis:   0% / 25% / 50% / 75%
-  //   values: <Direct%> <Search-Organic%> ... 同顺序排列
-  // 锚点 = chart axis 行。Similarweb 有 3 种 axis 渲染：
-  //   - "0% / 25% / 50% / 75%"          (sofascore — 当数据有突出 100%-级值时不显)
-  //   - "0% / 25% / 50% / 75% / 100%"   (flashscore — Direct 占 75%+)
-  //   - "0% / 50% / 100%"               (fotmob — Direct 占 70%+)
-  // 我们要 match 整个 axis 块然后从其 *末尾* 之后开始抓 channel 值
-  const axisMatch = text.match(
-    /(?:0%\s*\n\s*25%\s*\n\s*50%\s*\n\s*75%(?:\s*\n\s*100%)?|0%\s*\n\s*50%\s*\n\s*100%)\s*\n([\s\S]+)/
-  );
-  if (axisMatch) {
-    // 取 axis 后 → 第一个 section 边界。Similarweb chart 末尾固定是 "See full overview" 链接。
-    let after = axisMatch[1];
-    const stops = ['See full overview', 'See more', 'Marketing Channels overview'];
-    let stopAt = after.length;
-    for (const s of stops) {
-      const i = after.indexOf(s);
-      if (i > 0 && i < stopAt) stopAt = i;
-    }
-    after = after.slice(0, Math.min(stopAt, 600));
-    const pcts = [];
-    const re = /(<?\s*[\d.]+)\s*%/g;
-    let m;
-    while ((m = re.exec(after)) && pcts.length < 10) {
-      pcts.push(parsePct(m[1]));
-    }
-    // 标签顺序：Direct / Search-Organic / Search-Paid / Referrals / Display / Social-Organic / Social-Paid /
-    //            [Gen AI] / [Email] / [Affiliates]
-    // 后 3 个是否存在 → 看 chart label 区域有没有出现这些 label
-    const hasGenAI      = /Gen AI\s*\n/.test(text);
-    const hasEmail      = /Email\s*\n/.test(text);
-    const hasAffiliates = /Affiliates\s*\n/.test(text);
-
-    if (pcts.length >= 7) {
-      out.direct_share   = pcts[0];
-      out.search_share   = (pcts[1] || 0) + (pcts[2] || 0);   // organic + paid
-      out.referral_share = pcts[3];
-      out.display_share  = pcts[4];
-      out.social_share   = (pcts[5] || 0) + (pcts[6] || 0);   // organic + paid
-
-      // 后续 channel 位置自适应（哪个不存在就跳）
-      let pos = 7;
-      if (hasGenAI && pos < pcts.length) {
-        out.genai_share = pcts[pos++];
-      }
-      if (hasEmail && pos < pcts.length) {
-        out.mail_share = pcts[pos++];
-      }
-      if (hasAffiliates && pos < pcts.length) {
-        out.affiliate_share = pcts[pos++];
-      }
-    }
-    out._channel_pcts_raw = pcts;  // 调试用
-  }
-
-  // ---- 7. Ranks (Global / Country / Category) ----------------
+  // ---- 5. Ranks (Global / Country / Category) ----------------
   // anonymous + trial 都有，但布局不同：
   //   anonymous: "Global Rank\n#635\n10\n\nCountry Rank\n#298\n1\n\nBrazil\n\nCategory Rank\n#4"
   //   trial:     "Global rank\n#635\nCountry rank\nBrazil\n#298\nIndustry rank\n.../Sports\n#9"
@@ -273,7 +207,7 @@ EXTRACT_JS = r"""
   const catRm = text.match(/(?:Category|Industry)\s+[Rr]ank\s*\n+(?:[^#\n]*\n+)?\s*#\s*(\d[\d,]*)/);
   if (catRm) out.category_rank = parseInt(catRm[1].replace(/,/g, ''));
 
-  // ---- 8. Top Countries -------------------------------------
+  // ---- 6. Top Countries -------------------------------------
   // 三种布局：
   //   (a) anonymous list: "Top Countries\nBrazil\n14.89%\n6.62%\nUnited States\n10.04%\n..."
   //   (b) trial columnar: "Top Countries\n...\nCountry\nTurkey\nThailand\n...\nTraffic Share\n9.82%\n8.39%\n..."
@@ -315,7 +249,7 @@ EXTRACT_JS = r"""
     if (countries.length) out.top_countries = countries;
   }
 
-  // ---- 9. Demographics — 年龄 / 性别（anonymous 也有）-------
+  // ---- 7. Demographics — 年龄 / 性别（anonymous 也有）-------
   // "Age Distribution\n22.44%\n30.16%\n20.78%\n13.09%\n8.69%\n4.84%\n
   //  18 - 24\n25 - 34\n35 - 44\n45 - 54\n55 - 64\n65+"
   // OR "Gender Distribution\nFemale\n23.59%\nMale\n76.41%"
@@ -324,7 +258,7 @@ EXTRACT_JS = r"""
   if (fm) out.female_share = parsePct(fm[1]);
   if (mm2) out.male_share = parsePct(mm2[1]);
 
-  // ---- 10. Similar sites（anonymous 顶部 5–10 个）-----------
+  // ---- 8. Similar sites（anonymous 顶部 5–10 个）-----------
   const ssIdx = text.indexOf('Competitors & Similar Sites');
   if (ssIdx >= 0) {
     let ssBlock = text.slice(ssIdx, ssIdx + 3000);
@@ -338,49 +272,6 @@ EXTRACT_JS = r"""
       similar.push({ domain: sm[1].toLowerCase(), affinity: parsePct(sm[2]) });
     }
     if (similar.length) out.similar_sites = similar;
-  }
-
-  // ---- 8. Top Keywords（在 Search 区域，可能没有）-----------
-  // 实际渲染：5 个 keyword 一段 + 5 个 % 一段（不是交叉），格式：
-  //   "Top organic non-branded search terms\n
-  //    real madridAds\nbrazil vs franceAds\nchampions leagueAds\nrezultatiAds\nXAds\n
-  //    1.98%\n0.63%\n..."
-  const kwIdx = text.indexOf('Top organic non-branded search terms');
-  if (kwIdx >= 0) {
-    let kb = text.slice(kwIdx);
-    // 截到下一个 section 边界
-    const stopMarkers = ['See more search terms', 'Paid Search', 'See full overview', 'Referrals'];
-    let stopAt = kb.length;
-    for (const m of stopMarkers) {
-      const i = kb.indexOf(m);
-      if (i > 0 && i < stopAt) stopAt = i;
-    }
-    kb = kb.slice(0, stopAt);
-    // 跳过 header — 找到 "All traffic\n" 之后才开始
-    const startMarker = 'All traffic';
-    const startIdx = kb.indexOf(startMarker);
-    if (startIdx > 0) kb = kb.slice(startIdx + startMarker.length);
-
-    // 先抓所有 "<kw>Ads"（kw 必须以小写字母 / 数字开头，避免吃 "Top" 这种）
-    const kwRe = /(?:^|\n)\s*([a-z0-9][\w\s.'-]{1,60}?)Ads\s*(?=\n)/gi;
-    const kwList = [];
-    let km;
-    while ((km = kwRe.exec(kb)) && kwList.length < 10) {
-      const kw = km[1].trim();
-      if (kw.length >= 2) kwList.push(kw);
-    }
-    // 再抓所有 % 值
-    const pctRe = /([\d.]+)\s*%/g;
-    const pctList = [];
-    let pm;
-    while ((pm = pctRe.exec(kb)) && pctList.length < kwList.length + 5) {
-      pctList.push(parsePct(pm[1]));
-    }
-    const pairs = [];
-    for (let i = 0; i < kwList.length && i < pctList.length; i++) {
-      pairs.push({ kw: kwList[i], share: pctList[i] });
-    }
-    if (pairs.length) out.top_keywords = pairs;
   }
 
   return out;
@@ -498,7 +389,8 @@ async def _fetch_domain(page, domain: str, anonymous: bool = False) -> dict:
         return data
     print(
         f"  -> visits={data.get('monthly_visits')}  dur={data.get('avg_visit_duration')}"
-        f"  bounce={data.get('bounce_rate')}  desktop/mobile={data.get('desktop_share')}/{data.get('mobile_share')}"
+        f"  bounce={data.get('bounce_rate')}  ranks=G#{data.get('global_rank')}"
+        f"/C#{data.get('country_rank')}/cat#{data.get('category_rank')}"
     )
     return data
 
@@ -688,29 +580,28 @@ def _md_section(app_name: str, domain: str, data: dict) -> str:
         f" ({data.get('avg_visit_duration_sec') or '—'}s)",
         f"- **Pages/Visit**: {data.get('pages_per_visit') or '—'}",
         f"- **Bounce Rate**: {_fmt_pct(data.get('bounce_rate'))}",
-        f"- **Devices**: Desktop {_fmt_pct(data.get('desktop_share'))}"
-        f" · Mobile {_fmt_pct(data.get('mobile_share'))}",
-        "",
-        "**6 Traffic Sources**:",
-        f"  - Direct: {_fmt_pct(data.get('direct_share'))}",
-        f"  - Search: {_fmt_pct(data.get('search_share'))}",
-        f"  - Social: {_fmt_pct(data.get('social_share'))}",
-        f"  - Referral: {_fmt_pct(data.get('referral_share'))}",
-        f"  - Mail: {_fmt_pct(data.get('mail_share'))}",
-        f"  - Display: {_fmt_pct(data.get('display_share'))}",
+        f"- **Ranks**: Global #{data.get('global_rank') or '—'}"
+        f" · Country #{data.get('country_rank') or '—'} ({data.get('country_rank_country') or '—'})"
+        f" · Category #{data.get('category_rank') or '—'}",
         "",
     ]
+    if data.get("male_share") is not None or data.get("female_share") is not None:
+        lines.append(
+            f"- **Demographics**: Male {_fmt_pct(data.get('male_share'))}"
+            f" · Female {_fmt_pct(data.get('female_share'))}"
+        )
+        lines.append("")
     cs = data.get("top_countries") or []
     if cs:
         lines.append("**Top Countries**:")
         for c in cs[:5]:
             lines.append(f"  - {c.get('country')} — {_fmt_pct(c.get('share'))}")
         lines.append("")
-    kws = data.get("top_keywords") or []
-    if kws:
-        lines.append("**Top Keywords**:")
-        for k in kws[:5]:
-            lines.append(f"  - {k.get('kw')} — {_fmt_pct(k.get('share'))}")
+    ss = data.get("similar_sites") or []
+    if ss:
+        lines.append("**Similar Sites**:")
+        for s in ss[:10]:
+            lines.append(f"  - {s.get('domain')} — affinity {_fmt_pct(s.get('affinity'))}")
         lines.append("")
     return "\n".join(lines)
 

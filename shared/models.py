@@ -176,32 +176,19 @@ class WebsiteTraffic(Base):
     pages_per_visit = Column(Float)                 # 5.43
     bounce_rate = Column(Float)                     # 0.325（小数 0–1）
 
-    # 设备
-    desktop_share = Column(Float)
-    mobile_share = Column(Float)
-
-    # 6 个流量来源（小数 0–1）
-    direct_share = Column(Float)
-    search_share = Column(Float)
-    social_share = Column(Float)
-    referral_share = Column(Float)
-    mail_share = Column(Float)
-    display_share = Column(Float)
-
-    # 排名（anonymous 也有，长期稳定字段）
+    # 排名（anonymous 也有，长期稳定）
     global_rank = Column(Integer)
     country_rank = Column(Integer)
     country_rank_country = Column(String(64))       # e.g. "Brazil"
     category_rank = Column(Integer)
 
-    # 性别画像（anonymous 也有）
+    # 性别画像（anonymous 显示，trial 不显示在概览页）
     male_share = Column(Float)
     female_share = Column(Float)
 
     # 长尾详情（非索引）
     top_countries_json = Column(Text)               # [{country, share}, ...]
-    top_keywords_json = Column(Text)                # [{kw, share}, ...]（免费层可能空）
-    similar_sites_json = Column(Text)               # [{domain, affinity}, ...]（anonymous 也有）
+    similar_sites_json = Column(Text)               # [{domain, affinity}, ...]
     raw_text = Column(Text)                         # main innerText 前 4000 字（调试）
 
     fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
