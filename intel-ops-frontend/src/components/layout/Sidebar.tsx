@@ -4,7 +4,7 @@ import {
   TrendingUp, DollarSign, Tag, Globe,
   GitBranch, MessageSquare, Hash, Newspaper, Megaphone,
   Search, AlertTriangle, ScrollText,
-  PanelLeftClose, PanelLeftOpen, Sun, Moon,
+  PanelLeftClose, PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useGlobalStore } from "@/stores/globalStore"
@@ -23,7 +23,7 @@ interface NavGroup {
 }
 
 export default function Sidebar() {
-  const { sidebarCollapsed, toggleSidebar, theme, setTheme } = useGlobalStore()
+  const { sidebarCollapsed, toggleSidebar } = useGlobalStore()
   const { data: status } = useStatus()
 
   const groups: NavGroup[] = [
@@ -105,7 +105,7 @@ export default function Sidebar() {
                       cn(
                         "flex items-center gap-2 px-2 h-8 rounded text-sm transition-colors duration-150",
                         isActive
-                          ? "bg-brand-50 text-brand-700 font-medium dark:bg-brand-900/20 dark:text-brand-300"
+                          ? "bg-brand-50 text-brand-700 font-medium"
                           : "text-foreground/80 hover:bg-muted/50"
                       )
                     }
@@ -128,18 +128,6 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
-
-      {!sidebarCollapsed && (
-        <div className="absolute bottom-0 left-0 w-56 px-2 py-2 border-t border-border-soft">
-          <button
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="w-full flex items-center gap-2 px-2 h-8 rounded text-sm text-muted-foreground hover:bg-muted/50"
-          >
-            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            <span>{theme === "dark" ? "亮色" : "暗色"}模式</span>
-          </button>
-        </div>
-      )}
     </aside>
   )
 }
