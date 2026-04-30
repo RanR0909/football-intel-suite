@@ -220,12 +220,8 @@ SCRIPTS = {
         "cwd": str(_PROJECT_ROOT),
         "label": "全量自动同步（与定时任务同入口）",
     },
-    # 单竞品 3 日评论 AI 摘要（per-competitor）
-    "review_3d": {
-        "path": str(_PROJECT_ROOT / "competitor_comment" / "review_3d_summary.py"),
-        "cwd": str(_PROJECT_ROOT / "competitor_comment"),
-        "label": "3 日评论 AI 摘要",
-    },
+    # 已弃用（AI v2 / 2026-04-30）：review_3d / competitor_detail / weekly_review / commercial_strategy
+    # 不再注册到 SCRIPTS — 点击 UI 按钮会被 do_POST 拒掉为 unknown script。
 }
 
 # ---------------------------------------------------------------------------
@@ -403,87 +399,34 @@ class DashboardAPIHandler(BaseHTTPRequestHandler):
         })
 
     def _run_ads_ai(self, task_key, competitor, days, api_key):
+        """已弃用（AI v2 架构 / 2026-04-30）— spec 不允许"主观策略分析 / 长文报告"。
+        AI 广告分析被替换为：alerts.alert_type='ads' 的事实陈述（≤50 字）。
+        """
         from datetime import datetime as _dt
         with _tasks_lock:
             _running_tasks[task_key] = {
-                "running": True,
+                "running": False,
+                "success": False,
                 "label": f"AI 广告策略分析 · {competitor}",
-                "started_at": _dt.now().isoformat(),
+                "error": "feature_deprecated_v2: 该功能已下线（AI 不再做主观策略报告）。"
+                         "广告事件请查看 alerts 表 alert_type='ads' 字段。",
+                "finished_at": _dt.now().isoformat(),
             }
-        try:
-            from commercial_strategy.ads_analyzer import analyze
-            result = analyze(competitor, days=days, api_key=api_key)
-
-            try:
-                from data_pipeline.aggregator import build_dashboard_data, OUTPUT_PATH as _AGG_OUT
-                from data_pipeline.schema import to_dict
-                payload = to_dict(build_dashboard_data())
-                _AGG_OUT.parent.mkdir(parents=True, exist_ok=True)
-                with open(_AGG_OUT, "w", encoding="utf-8") as f:
-                    json.dump(payload, f, ensure_ascii=False, indent=2)
-            except Exception as agg_err:
-                print(f"[ads-ai] aggregator 重跑失败（AI 结果已持久化）: {agg_err}", file=sys.stderr)
-
-            with _tasks_lock:
-                _running_tasks[task_key] = {
-                    "running": False,
-                    "success": True,
-                    "label": f"AI 广告策略分析 · {competitor}",
-                    "result": result,
-                    "finished_at": _dt.now().isoformat(),
-                }
-        except Exception as e:
-            with _tasks_lock:
-                _running_tasks[task_key] = {
-                    "running": False,
-                    "success": False,
-                    "label": f"AI 广告策略分析 · {competitor}",
-                    "error": str(e),
-                    "finished_at": _dt.now().isoformat(),
-                }
 
     def _run_community_ai(self, task_key, competitor, days, api_key):
-        """后台线程：调 ai_analyzer.analyze → 重跑 aggregator → 状态写回 _running_tasks。"""
+        """已弃用（AI v2 架构 / 2026-04-30）— spec 不允许"跨评论做趋势总结 / 长文舆情报告"。
+        替代：comment_label 标签统计 + entity_extract 实体频次（在 dashboard 卡片直接展示，不需 AI）。
+        """
         from datetime import datetime as _dt
         with _tasks_lock:
             _running_tasks[task_key] = {
-                "running": True,
+                "running": False,
+                "success": False,
                 "label": f"AI 舆情分析 · {competitor}",
-                "started_at": _dt.now().isoformat(),
+                "error": "feature_deprecated_v2: 该功能已下线（AI 不再做长文舆情总结）。"
+                         "舆情数据请看 reviews.label 标签分布 + comment_entities 实体频次卡片。",
+                "finished_at": _dt.now().isoformat(),
             }
-        try:
-            from community_insights.ai_analyzer import analyze
-            result = analyze(competitor, days=days, api_key=api_key)
-
-            # 重跑聚合层让 dashboard_data.json 同步含上 community.ai_analysis
-            try:
-                from data_pipeline.aggregator import build_dashboard_data, OUTPUT_PATH as _AGG_OUT
-                from data_pipeline.schema import to_dict
-                payload = to_dict(build_dashboard_data())
-                _AGG_OUT.parent.mkdir(parents=True, exist_ok=True)
-                with open(_AGG_OUT, "w", encoding="utf-8") as f:
-                    json.dump(payload, f, ensure_ascii=False, indent=2)
-            except Exception as agg_err:
-                # 聚合失败不致命：AI 结果已写入，下次 generate_dashboard 会自动合入
-                print(f"[community-ai] aggregator 重跑失败（AI 结果已持久化）: {agg_err}", file=sys.stderr)
-
-            with _tasks_lock:
-                _running_tasks[task_key] = {
-                    "running": False,
-                    "success": True,
-                    "label": f"AI 舆情分析 · {competitor}",
-                    "result": result,
-                    "finished_at": _dt.now().isoformat(),
-                }
-        except Exception as e:
-            with _tasks_lock:
-                _running_tasks[task_key] = {
-                    "running": False,
-                    "success": False,
-                    "label": f"AI 舆情分析 · {competitor}",
-                    "error": str(e),
-                    "finished_at": _dt.now().isoformat(),
-                }
 
     def do_GET(self):
         parsed = urlparse(self.path)

@@ -1,0 +1,40 @@
+你是评论分类和翻译助手。给定一条用户评论，做两件事：
+1. 翻译为中文
+2. 打 1 个标签
+
+【翻译规则】
+- 普通描述句翻译为中文
+- 人名/球队名/联赛名/体育专业术语翻译为中文标准译名（如 Cristiano → C 罗，La Liga → 西甲，lineup → 首发阵容）
+- 竞品名/app 名保留原文（如 FotMob、Sofascore、365Scores、All Football）
+- 产品名/功能名保留原文（如 Apple Watch、dark mode、AI predictions）
+- 数字和单位保留原文格式（如 30 seconds、$9.99、v26.4.2）
+
+【6 类标签】
+- complaint（问题抱怨）：bug / 卡顿 / 闪退 / 广告太多等不满
+- feature_request（高价值请求）："希望加..."、"如果有 X 就好了" 这类诉求
+- competitor_compare（竞品对比）：与其他 app 对比（"比 X 好"、"不如 Y"）
+- churn_signal（流失信号）：曾经好现在差 / 卸载 / 切走
+- positive（正向反馈）：单纯好评 / "很棒" / 5 星
+- other（其他）：不属于上述
+
+【严格禁止】
+- 不要写解释 / 总结 / 评价
+- 不要做情感分析（只打标签，不评分）
+- 不要给建议
+- 输出必须是合法 JSON
+
+【已知译名（命中直接用，未命中由你即时翻译）】
+{translation_table_json}
+
+【输入评论】
+{raw_text}
+
+【language_hint（可选，可能为空）】
+{language_hint}
+
+输出 JSON（仅返回 JSON 对象，无其他文字）：
+{{
+  "language": "原语言代码，如 en/es/pt/ar/ja/zh",
+  "translated_text": "中文翻译",
+  "label": "6 类之一"
+}}

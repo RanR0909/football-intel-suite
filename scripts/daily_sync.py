@@ -94,11 +94,11 @@ PHASE_1_FETCHERS = [
 ]
 
 # Phase 2：AI 重活（串行；失败不阻塞下一个）
+# 2026-04-30 重构：按 AI_tasks_spec_v1_1.md 砍到 3 个任务（comment_label / entity_extract / alert_title）
+# 全部走统一管道 ai_tasks.run_pipeline；旧的 commercial_strategy AI 部分已移除（保留 IAP 抓取在 weekly_sync）
 PHASE_2_AI = [
-    ("comment_label", "评论 AI 标签",
-        ["-m", "competitor_comment.comment_label"], 1500),
-    ("commercial_strategy", "商业策略分析",
-        [str(_PROJECT_ROOT / "commercial_strategy" / "run_headless.py")], 600),
+    ("ai_pipeline", "AI 管道（label + 实体抽取 + 7 类预警）",
+        ["-m", "ai_tasks.run_pipeline", "--limit", "300"], 1800),
 ]
 
 # Phase 3：聚合

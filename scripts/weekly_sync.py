@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """weekly_sync.py — 每周日 03:00 自动跑（launchd 触发，紧跟在 02:00 daily_sync 后）。
 
-只跑"周更"任务，不重复抓数据（daily_sync 已经把抓取做完）：
-  1. weekly_review        — 7 天评论 AI 周报
-  2. competitor_detail × 9 — 每竞品深度分析（串行）
-  3. commercial_weekly    — 商业周报
-  4. iap_pricing          — 价格 7 天才变一次，作为周更刷新
-  5. generate_dashboard   — 重新聚合（覆盖 daily 的 dashboard_data）
+2026-04-30 重构（AI_tasks_spec_v1_1.md）：所有"AI 长文报告"任务都已移除（weekly_review /
+competitor_detail × 9 / commercial_weekly），原则是 AI 不写长文不做主观判断。
+
+只跑"非 AI 周更"任务（数据更新 + 聚合 + 网站流量）：
+  1. iap_pricing          — 价格 7 天才变一次，作为周更刷新
+  2. google_news          — Google News RSS 周更
+  3. similarweb_traffic   — 网站流量 / 设备 / 排名
+  4. generate_dashboard   — 重新聚合（覆盖 daily 的 dashboard_data）
 
 CLI:
   python3 scripts/weekly_sync.py            # 正常跑
@@ -43,7 +45,6 @@ from shared import sync_state  # noqa: E402
 from shared import retry_queue  # noqa: E402
 from shared import feishu_notify  # noqa: E402
 from datetime import datetime as _dt  # noqa: E402
-from competitors import get_comment_competitors  # noqa: E402
 
 WEEKLY_MAX_AGE_HOURS = 6 * 24  # 6 天内已成功的不重跑
 
@@ -65,9 +66,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"=== weekly_sync 开始 {datetime.now().isoformat(timespec='seconds')} ===")
     print(f"force={args.force}  max-age={args.max_age_hours}h  dry-run={args.dry_run}")
 
-    competitors = list(get_comment_competitors().keys())
-
-    # ---- 任务序列（全串行，AI 任务不并发避 Claude 限流） ----
+    # ---- 任务序列（AI 报告类全部废弃；只剩 3 个数据更新 + 1 个聚合） ----
     tasks = [
         ("iap_pricing", "IAP 定价（周更）",
             ["-m", "async_crawler", "--sources", "iap_pricing"], 600, "http"),
@@ -75,22 +74,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             ["-m", "async_crawler", "--sources", "google_news"], 600, "http"),
         ("similarweb_traffic", "Similarweb 网站流量（周更）",
             ["-m", "market_rank.scrape_similarweb", "scrape"], 900, "http"),
-        ("weekly_review", "评论周报（AI）",
-            [str(PR / "competitor_comment" / "weekly_review.py")], 1500, "ai"),
-        ("commercial_weekly", "商业周报（AI）",
-            [str(PR / "commercial_strategy" / "run_headless.py"), "--weekly"], 900, "ai"),
+        ("generate_dashboard_weekly", "看板重生成",
+            [str(PR / "main_dashboard" / "generate_dashboard.py")], 120, "aggregate"),
     ]
-    # 9 个竞品深度
-    for name in competitors:
-        tasks.append((
-            f"competitor_detail_{name}", f"竞品深度 · {name}",
-            [str(PR / "competitor_comment" / "competitor_detail.py"), name], 300, "ai",
-        ))
-    # 最后聚合
-    tasks.append((
-        "generate_dashboard_weekly", "看板重生成",
-        [str(PR / "main_dashboard" / "generate_dashboard.py")], 120, "aggregate",
-    ))
 
     # 周更任务 registry —— 与 daily 合并供 retry queue lookup 使用
     weekly_registry = {n: {"label": l, "args": a, "timeout": t, "kind": k}

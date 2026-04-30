@@ -104,14 +104,23 @@ def _resolve_endpoint_for_fallback(endpoint_name: str) -> dict:
 # ─────────────────────────── Prompt 构造 ───────────────────────────
 
 def _build_prompt(spec: dict, context: dict) -> str:
-    """支持 inline template 或 module+function 引用。"""
+    """支持三种 prompt spec：
+       - {"template": "..."}                              内联模板
+       - {"file": "ai_tasks/prompts/x.txt"}              从文件读取（相对项目根）
+       - {"module": "...", "function": "..."}            动态构造
+    """
     if "template" in spec:
         return spec["template"].format(**(context or {}))
+    if "file" in spec:
+        p = _PROJECT_ROOT / spec["file"]
+        if not p.exists():
+            raise FileNotFoundError(f"prompt 文件不存在: {p}")
+        return p.read_text(encoding="utf-8").format(**(context or {}))
     if "module" in spec and "function" in spec:
         mod = importlib.import_module(spec["module"])
         fn = getattr(mod, spec["function"])
         return fn(**(context or {}))
-    raise ValueError("prompt spec 必须含 'template' 或 ('module' + 'function')")
+    raise ValueError("prompt spec 必须含 'template' / 'file' / ('module'+'function')")
 
 
 # ─────────────────────────── Provider 适配 ───────────────────────────

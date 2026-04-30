@@ -1,6 +1,6 @@
 # 数据源
 
-> 9 个 竞品 + 1 个 baseline（AllFootball，自家产品 / 数据分析对照基准） × 12 个区域，15 个数据源 / 任务。
+> 9 个 竞品 + 1 个 baseline（AllFootball，自家产品 / 数据分析对照基准） × 12 个区域，13 个数据源 + 3 个 AI 任务。
 >
 > **关于 baseline**：`AllFootball` 在 `data/competitors.json` 标 `is_baseline: true`。所有 14 个数据源会
 > 自动一并抓取它（与 9 竞品同流程同 schema）；下游 dashboard / 报表后续可用 `get_competitor_only()`
@@ -302,82 +302,120 @@ python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 
 
 ---
 
-##  AI 分析（5 个，不直接抓数据）
+## AI 分析（v2 架构 · 3 个任务，仅做结构化工作）
 
-### 13. `commercial_strategy` — 商业策略画像（每日）
+> **2026-04-30 重构**：按 `AI_tasks_spec_v1_1.md` 全部重做。
+> 总原则：**AI 只做结构化工作**（分类 / 抽取 / 归一 / 翻译 / 短事实陈述），不做主观判断 / 不写长文 / 不提建议 / 不做情感分析。
+> 全部走 Claude Haiku 4.5。月成本估 ~$47。
 
-**输入**：`data/raw/iap_pricing.json` + `data/strategy_monitor.json` + Apple App Store 元数据
-**模型**：Claude haiku 4.5
-**输出**：
+### 13. `comment_label` — 单条评论翻译 + 6 类标签（实时 / daily 触发）
 
-| 字段 | 含义 | 例 |
-|---|---|---|
-| monetization_tags | 5 类标签（可多选）| `["Subscription Heavy", "Ad-Driven"]` |
-| ai_intent | 30 字内一句话商业意图 | "OneFootball 试水订阅制，对标 Apple News+" |
-| iap_items | IAP 列表带分类 | `[{name, price_usd, currency, category, price_by_region}]` |
-| price_alerts | 价格涨跌 ≥10% 事件 | `[{name: "VIP", direction: "up", prev: "$5", curr: "$7"}]` |
-| iap_changes | 新增 / 移除的 IAP 项 | `[{name, type: "新增"}]` |
-| rpd_index | 简易付费率（rank ÷ IAP 数量）| 0.123 |
-| rank | 当前 App Store 排名 | 74 |
-| betting_signals | 关键词检测（odds/bet/wager）| true / false |
-| description_keywords | App 描述高频词 | `["live", "scores", "match"]` |
-| seller_url | 开发商网站 | "https://sofascore.com" |
+**输入**：`{comment_id, raw_text, language_hint?}`
+**输出**：`{language, translated_text, label}`
+
+6 类标签：`complaint` / `feature_request` / `competitor_compare` / `churn_signal` / `positive` / `other`
+
+翻译策略：人名 / 球队名 / 联赛名 / 体育术语用 `ai_tasks/translation_table.json`（180 条核心条目）映射；竞品名 / app 名 / 产品名保留原文。
+
+存储：写回 `reviews` 表的 `label` / `language` / `translated_text` / `labeled_at`。
 
 ---
 
-### 14. weekly 任务组（4 个，周日 03:00 跑）
+### 14. `entity_extract` — 9 类实体抽取 + canonical_id 归一（紧跟 13 后）
 
-#### 14a. `weekly_review` — 7 天评论周报
+**输入**：`{comment_id, translated_text, raw_text, label}`
+**输出**：`{entities: [{type, raw_value, canonical_id, is_new_alias, is_new_canonical}]}`
 
-跨 9 竞品 + 12 区，~3000 字 markdown：
-- 本周核心发现（趋势 / 痛点 / 高价值请求 / 流失信号）
-- 各竞品分析摘要（评分趋势 / Top 抱怨 / Top 请求 / 竞品对比）
-- 本地化专题（每地区分别看）
-- 跨竞品功能对比
+9 类实体：`competitor` / `feature` / `league` / `player` / `device` / `bug` / `localization` / `payment` / `language`
 
-#### 14b. `competitor_detail × 9` — 单竞品深度报告
+归一逻辑：先查 `entity_aliases` 表，命中即用；未命中则 AI 判断是新别名还是新 canonical（命名 `{type}_{slug}`，`reviewed=false` 等人工审核）。
 
-每个竞品独立报告，~2000 字 markdown：
-- 用户抱怨 Top 3
-- 高价值功能请求 Top 3
-- 竞品对比提及（用户拿它和谁比）
-- 忠实用户流失信号
-- 3 条可执行产品建议
+存储：
+- `entity_aliases` 表（新 canonical / 新别名）
+- `comment_entities` 表（评论 ↔ 实体多对多）
 
-#### 14c. `commercial_weekly` — 商业策略周报
+---
 
-7 天 IAP 价格变动 + 变现模式演变：
-- 价格调整趋势（涨/降/新增）
-- 变现模式演变（订阅化 / 广告化 / 博彩导流）
-- 2-3 条商业建议
+### 15. `alert_title` — 7 类预警事件文案生成（每日 02:30 alert_engine 调用）
 
-#### 14d. `review_3d` / `ads_strategy` / `community_insights`
+**架构**：规则层（Python，扫 fact 表）+ AI 文案层（生成 ≤50 字事实陈述）。AI 只负责后者。
 
-dashboard 上的"按需"AI（用户点按钮才跑）：
-- review_3d：单竞品 3 天评论摘要（Top 痛点 / 代表原话 / 话题标签）
-- ads_strategy：单竞品 Meta 广告投放策略解读（受众画像 / 卖点 / 风险）
-- community_insights：单竞品 Reddit 舆情解读（话题分布 / 痛点 / 机会）
+**7 类预警**：
+
+| alert_type | 触发条件 | metadata 字段 |
+|---|---|---|
+| `ranking` | 24h 内 rank 变动 ≥ 5 名 | region, source, old_rank, new_rank, change |
+| `commercial` | IAP 价格变动 ≥ ±10% 影响 ≥ 5 区 | iap_name, old_price_usd, new_price_usd, change_pct, regions_count |
+| `news` | Google News business 关键词命中 | headline, source, keyword_matched, link |
+| `release` | 7 天内首次出现的新 version | version, first_seen, obs_count |
+| `rating` | 4 天评分均值下跌 ≥ 0.3 星 | region, old_rating, new_rating, days |
+| `churn` | 7 天 churn_signal 占比上升 ≥ 50% | old_pct, new_pct, period_days |
+| `ads` | 7 天广告投放量变化 ≥ ±50% | count_old, count_new, period_days |
+
+**输出 title 风格**（≤50 字事实陈述）：
+- ✅ "Sofascore 美国体育榜 #14 → #6 · 24h 内 ↑ 8 名"
+- ✅ "365Scores VIP 月订阅 $4.99 → $6.99 · +40% · 9 区同步"
+- ❌ "Sofascore 强势上涨，威胁 AF 在美区的地位"（含解读）
+- ❌ "365Scores 涨价过猛，可能引发用户流失"（含推测）
+
+存储：`alerts` 表
+
+---
+
+### 已删除（v2 不允许的功能）
+
+按 spec 严格禁令"AI 不写长文 / 不做主观判断 / 不做情感分析"：
+
+| 已删除 | 原因 |
+|---|---|
+| `weekly_review` (3000 字周报) | 长文报告 |
+| `competitor_detail × 9` (2000 字 / 竞品) | 长文报告 |
+| `commercial_weekly` (商业建议) | 给建议 |
+| `commercial_monetize_tag` / `commercial_intent` | 主观判断 |
+| `ads_strategy` (受众画像 / 卖点 / 风险解读) | 主观策略 |
+| `community_insights` (话题分布 / 机会解读) | 跨评论趋势总结 |
+| `review_3d` (3 天痛点摘要) | 长文摘要 |
+| `strategy_monitor_analysis` | 主观判断 |
+| `comment_translate` (独立翻译) | 已合入 `comment_label` |
+
+---
+
+### 错误处理 / 约束
+
+| 错误 | 处置 |
+|---|---|
+| 模型超时 | 重试 1 次，仍失败 → `failed_ai_jobs` 死信 |
+| JSON 解析失败 | 重试 1 次，仍失败 → `failed_ai_jobs` |
+| label 不在 6 类 | 默认归 `other` |
+| entity type 不在 9 类 | 丢弃该实体 |
+| alert title > 50 字 | 截断（不重新调用） |
+
+成本估算（haiku 4.5）：
+
+| 任务 | 月调用 | 月成本 |
+|---|---|---|
+| comment_label | ~38,000 | ~$30 |
+| entity_extract | ~38,000 | ~$15 |
+| alert_title | ~600 | ~$2 |
+| **合计** | | **~$47** |
 
 ---
 
 ## 数据流
 
 ```
-15 个源 → 抓
+13 个源 + 3 个 AI 任务 → 抓 / 算
    ├─ HTTP 抓取（9）：appstore_rank / androidrank / comment_fetch / reddit /
-   │                  twitter (fapi.uk) / iap_pricing / google_news /
-   │                  strategy_monitor
+   │                  twitter (fapi.uk) / iap_pricing / google_news / strategy_monitor
    ├─ Playwright（4）：appmagic / fb_adlib / sensor_tower / similarweb_traffic
-   └─ AI 分析（5）：comment_label / commercial_strategy / weekly_review /
-                   competitor_detail × 9 / commercial_weekly
+   └─ AI v2（3）：comment_label / entity_extract / alert_title  (haiku 4.5 only)
 
 抓取频次：
    日更（02:00）：appstore_rank / androidrank / reddit / twitter (fapi.uk) /
-                  comment_fetch / strategy_monitor / appmagic / fb_adlib(×5 国) /
-                  sensor_tower + comment_label + commercial_strategy
-   周更（周日 03:00）：iap_pricing / google_news / similarweb_traffic /
-                       weekly_review / commercial_weekly + competitor_detail × 9
-   按需：3 个 AI 任务用户在 dashboard 点按钮触发
+                  comment_fetch / strategy_monitor / appmagic / fb_adlib(×5 国) / sensor_tower
+   日更 AI 管道（02:30）：ai_tasks.run_pipeline = comment_label + entity_extract + alert_engine
+   周更（周日 03:00）：iap_pricing / google_news / similarweb_traffic + 看板重生成
+   按需：（dashboard 已下线 review_3d / ads_strategy / community_insights 三个按钮）
 
 抓取触发链：
    launchd / dashboard "同步" 按钮
