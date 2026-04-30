@@ -1604,18 +1604,13 @@ def generate():
 # ===========================================================================
 
 if __name__ == "__main__":
-    # 可选：先同步数据
+    # 可选：先同步数据（v2：调 daily_sync 主入口而不是已弃用的散装脚本）
     if "--sync" in sys.argv:
-        print("[INFO] 正在同步数据...")
-        scripts = {
-            "competitor_comment": str(_PROJECT_ROOT / "competitor_comment" / "auto_report.py"),
-            "strategy_monitor": str(_PROJECT_ROOT / "strategy_monitor" / "run_headless.py"),
-            "market_rank": str(_PROJECT_ROOT / "market_rank" / "run_headless.py"),
-        }
-        for name, path in scripts.items():
-            if os.path.exists(path):
-                print(f"  运行 {name}...")
-                subprocess.run([sys.executable, path], capture_output=True, timeout=300, cwd=os.path.dirname(path))
+        print("[INFO] 正在调 daily_sync 同步数据...")
+        daily_sync = _PROJECT_ROOT / "scripts" / "daily_sync.py"
+        if daily_sync.exists():
+            subprocess.run([sys.executable, str(daily_sync)],
+                           capture_output=True, timeout=3600, cwd=str(_PROJECT_ROOT))
         # 数据源已刷新，重新跑聚合层并刷新派生视图
         _dashboard_data = _ensure_dashboard_data()
         strategy_data = _adapt_strategy(_dashboard_data)

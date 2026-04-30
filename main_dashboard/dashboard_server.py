@@ -75,51 +75,31 @@ CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 # 脚本配置
 # ---------------------------------------------------------------------------
 SCRIPTS = {
-    "daily_report": {
-        "path": str(_PROJECT_ROOT / "competitor_comment" / "auto_report.py"),
+    # 评论抓取（不带 AI；AI 走 ai_pipeline）
+    "comment_fetch": {
+        "path": str(_PROJECT_ROOT / "competitor_comment" / "comment_fetch.py"),
         "cwd": str(_PROJECT_ROOT / "competitor_comment"),
-        "label": "滚动评论监测",
+        "label": "评论抓取（GP + iOS 12 区）",
     },
-    "weekly_review": {
-        "path": str(_PROJECT_ROOT / "competitor_comment" / "weekly_review.py"),
-        "cwd": str(_PROJECT_ROOT / "competitor_comment"),
-        "label": "周报生成",
+    # AI v2 主管道（comment_label + entity_extract + 7 类预警）
+    "ai_pipeline": {
+        "path": "-m",
+        "module": "ai_tasks.run_pipeline",
+        "args": ["--limit", "300"],
+        "cwd": str(_PROJECT_ROOT),
+        "label": "AI 管道（label + 实体抽取 + 7 类预警）",
     },
-    "strategy_monitor": {
-        "path": str(_PROJECT_ROOT / "strategy_monitor" / "run_headless.py"),
-        "cwd": str(_PROJECT_ROOT / "strategy_monitor"),
-        "label": "产品动态同步",
-    },
-    "market_rank": {
-        "path": str(_PROJECT_ROOT / "market_rank" / "run_headless.py"),
-        "cwd": str(_PROJECT_ROOT / "market_rank"),
-        "label": "排名数据同步",
-    },
-    "competitor_detail": {
-        "path": str(_PROJECT_ROOT / "competitor_comment" / "competitor_detail.py"),
-        "cwd": str(_PROJECT_ROOT / "competitor_comment"),
-        "label": "深度分析",
+    # AI v2 候选发现
+    "discover_peers": {
+        "path": "-m",
+        "module": "ai_tasks.discover_peers",
+        "cwd": str(_PROJECT_ROOT),
+        "label": "AI 候选发现（基于 appstore_rank top 100）",
     },
     "generate_dashboard": {
         "path": str(_PROJECT_ROOT / "main_dashboard" / "generate_dashboard.py"),
         "cwd": str(_PROJECT_ROOT / "main_dashboard"),
         "label": "看板生成",
-    },
-    "all_competitor_details": {
-        "path": str(_PROJECT_ROOT / "competitor_comment" / "run_all_details.py"),
-        "cwd": str(_PROJECT_ROOT / "competitor_comment"),
-        "label": "全竞品深度分析",
-    },
-    "commercial_strategy": {
-        "path": str(_PROJECT_ROOT / "commercial_strategy" / "run_headless.py"),
-        "cwd": str(_PROJECT_ROOT / "commercial_strategy"),
-        "label": "商业策略分析",
-    },
-    "commercial_weekly": {
-        "path": str(_PROJECT_ROOT / "commercial_strategy" / "run_headless.py"),
-        "args": ["--weekly"],
-        "cwd": str(_PROJECT_ROOT / "commercial_strategy"),
-        "label": "商业策略周报",
     },
     # AppMagic 登录（一次性手动）— 弹浏览器，登录完关窗口
     "appmagic_login": {
