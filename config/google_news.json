@@ -1,0 +1,36 @@
+{
+  "_doc": "Google News RSS 抓取配置（参考 /Users/ranr/Desktop/score-app-tracker）。免费、无 API key。每周一跑（在 weekly_sync 里）。",
+  "settings": {
+    "num_results": 10,
+    "when": "7d",
+    "request_delay_sec": 1,
+    "hl": "en-US",
+    "gl": "US",
+    "ceid": "US:en",
+    "business_keywords": "(funding OR acquires OR acquisition OR raises OR partnership OR sponsorship OR deal OR investment OR launches OR CEO OR layoffs OR IPO OR valuation OR revenue OR rebrand OR expansion)",
+    "block_sources": [
+      "x.com", "twitter.com",
+      "instagram.com", "facebook.com",
+      "tiktok.com", "TikTok",
+      "reddit.com", "Reddit",
+      "YouTube", "youtube.com",
+      "threads.com",
+      "Apple",
+      "Indeed", "Startup Jobs", "LinkedIn", "Built In", "BeBee",
+      "Google Play", "play.google.com",
+      "MLSNEXTPro.com",
+      "s3.amazonaws.com", "amazonaws.com"
+    ]
+  },
+  "apps": [
+    { "name": "OneFootball", "query": "\"OneFootball\"",                              "exclude_sites": ["onefootball.com"] },
+    { "name": "Fotmob",      "query": "\"FotMob\"",                                    "exclude_sites": ["fotmob.com"] },
+    { "name": "SofaScore",   "query": "\"Sofascore\"",                                 "exclude_sites": ["sofascore.com"] },
+    { "name": "FlashScore",  "query": "\"Flashscore\"",                                "exclude_sites": ["flashscore.com", "flashscore.co.uk"] },
+    { "name": "AiScore",     "query": "\"AiScore\"",                                   "exclude_sites": ["aiscore.com"] },
+    { "name": "BeSoccer",    "query": "\"BeSoccer\"",                                  "exclude_sites": ["besoccer.com"] },
+    { "name": "LiveScore",   "query": "\"LiveScore\" (app OR company OR business)",    "exclude_sites": ["livescore.com"] },
+    { "name": "365Scores",   "query": "\"365Scores\"",                                 "exclude_sites": ["365scores.com"] },
+    { "name": "310Scores",   "query": "(\"310Scores\" OR \"310 Scores\")",             "exclude_sites": [] }
+  ]
+}

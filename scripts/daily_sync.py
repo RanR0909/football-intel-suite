@@ -66,8 +66,8 @@ PHASE_1_FETCHERS = [
         ["-m", "async_crawler", "--sources", "reddit"], 240, "http"),
     ("twitter", "X (Twitter)",
         ["-m", "async_crawler", "--sources", "twitter"], 120, "http"),
-    ("google_news", "Google 商业新闻",
-        ["-m", "async_crawler", "--sources", "google_news"], 180, "http"),
+    # google_news 已迁到 weekly_sync（RSS 模式 + 周更，无需 API key）
+    # ("google_news", "Google 商业新闻", ...) — 见 weekly_sync.py
     # 评论原始抓取（拆出来的快路径；9 竞品 × 12 区 GP 实际需 5-10 分钟）
     ("comment_fetch", "评论抓取（GP+iOS）",
         ["-m", "competitor_comment.comment_fetch"], 900, "http"),

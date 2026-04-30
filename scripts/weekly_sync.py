@@ -71,6 +71,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     tasks = [
         ("iap_pricing", "IAP 定价（周更）",
             ["-m", "async_crawler", "--sources", "iap_pricing"], 600, "http"),
+        ("google_news", "Google 商业新闻（RSS 周更）",
+            ["-m", "async_crawler", "--sources", "google_news"], 600, "http"),
         ("weekly_review", "评论周报（AI）",
             [str(PR / "competitor_comment" / "weekly_review.py")], 1500, "ai"),
         ("commercial_weekly", "商业周报（AI）",
