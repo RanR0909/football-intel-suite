@@ -21,7 +21,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -78,11 +78,19 @@ log = logging.getLogger("dashboard_server")
 
 
 def _row_to_dict(row) -> dict:
-    """SQLAlchemy Row → plain dict（datetime → ISO 字符串）"""
+    """SQLAlchemy Row → plain dict。
+
+    JSON-safe：
+      - datetime / date → ISO 字符串
+      - Decimal         → float（SQLAlchemy DECIMAL 列）
+    """
     out = {}
     for k, v in row._mapping.items():
-        if isinstance(v, datetime):
+        # datetime 是 date 的子类 → 一个 isinstance 同时覆盖两者
+        if isinstance(v, (datetime, date)):
             out[k] = v.isoformat()
+        elif v is not None and v.__class__.__name__ == "Decimal":
+            out[k] = float(v)
         else:
             out[k] = v
     return out
