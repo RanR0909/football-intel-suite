@@ -221,6 +221,44 @@ export const handlers = [
     })
   }),
 
+  // ========= failed-ai-jobs =========
+  http.get("/api/failed-ai-jobs", () => {
+    return HttpResponse.json({
+      jobs: [
+        { id: 1, task_name: "comment_label", payload: { review_id: 999, raw_text: "App is bad" },
+          error_msg: "JSON decode error: Expecting value: line 1 column 1 (char 0)",
+          error_kind: "json_parse", attempts: 2,
+          first_failed_at: NOW_HOUR_3, last_attempt_at: NOW_MIN_30, resolved_at: null },
+        { id: 2, task_name: "entity_extract", payload: { review_id: 1024 },
+          error_msg: "HTTPError 503 from flashapi.top",
+          error_kind: "http", attempts: 3,
+          first_failed_at: NOW_HOUR_3, last_attempt_at: NOW_MIN_30, resolved_at: null },
+      ],
+      count: 2,
+    })
+  }),
+  http.post("/api/failed-ai-jobs/:id/retry", () => HttpResponse.json({ ok: true, note: "重置标记，待 ai_pipeline 下次重跑" })),
+
+  // ========= sync-log =========
+  http.get("/api/sync-log", () => {
+    return HttpResponse.json({
+      logs: [
+        { id: 1, script: "appstore_rank", label: "App Store 体育榜", competitor: null,
+          started_at: NOW_MIN_5, finished_at: NOW_MIN_5, duration_sec: 12.3,
+          success: true, error_kind: null,
+          stdout_tail: "wrote 100 rank rows to MySQL", stderr_tail: null,
+          cmd: "python3 -m async_crawler --sources appstore_rank" },
+        { id: 2, script: "twitter", label: "X (Twitter)", competitor: null,
+          started_at: NOW_MIN_30, finished_at: NOW_MIN_30, duration_sec: 0.8,
+          success: false, error_kind: "auth_failed",
+          stdout_tail: null,
+          stderr_tail: "fapi.uk returned 'You have made too many requests'",
+          cmd: "python3 -m async_crawler --sources twitter" },
+      ],
+      count: 2,
+    })
+  }),
+
   // ========= candidates =========
   http.get("/api/candidates", () => {
     return HttpResponse.json({
