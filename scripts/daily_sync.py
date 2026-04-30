@@ -97,6 +97,11 @@ PHASE_1_FETCHERS = [
 # 2026-04-30 重构：按 AI_tasks_spec_v1_1.md 砍到 3 个任务（comment_label / entity_extract / alert_title）
 # 全部走统一管道 ai_tasks.run_pipeline；旧的 commercial_strategy AI 部分已移除（保留 IAP 抓取在 weekly_sync）
 PHASE_2_AI = [
+    # 自动发现 peer：appstore_rank top 100 → 未跟踪 app → app_classifier → app_classifications 表
+    # 默认仅分类，不自动 promote 到 competitors（要 promote 自己加 --auto-promote 跑一次）
+    ("discover_peers", "AI 自动发现新 peer（基于 appstore_rank top 100）",
+        ["-m", "ai_tasks.discover_peers", "--limit", "120"], 900),
+    # 主 AI 管道：评论 label + entity_extract + 7 类预警
     ("ai_pipeline", "AI 管道（label + 实体抽取 + 7 类预警）",
         ["-m", "ai_tasks.run_pipeline", "--limit", "300"], 1800),
 ]

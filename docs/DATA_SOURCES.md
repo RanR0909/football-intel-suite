@@ -395,6 +395,34 @@ python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 
 
 **存储**：`app_classifications` 表（`UNIQUE(app_id, platform)`），重复分类 UPSERT 同一行
 
+**自动发现新 peer**（`ai_tasks.discover_peers` 管道，已挂 daily_sync Phase 2）：
+
+```
+appstore_rank top 100 →
+  过滤 competitor_id IS NULL（未在 competitors.json）→
+  iTunes Lookup 取 description / publisher →
+  classify_app（30 天缓存命中 = 不调 AI）→
+  candidate filter: is_relevant=true + topic ∈ {football, multi_sport} + conf ≥ 0.85 →
+  默认仅写 app_classifications 表（人工审核 SELECT * WHERE is_relevant=1 AND ...）
+  --auto-promote 时把 candidate 直接 INSERT 到 competitors lookup + competitors.json
+                  （加 is_discovered=true 标记，便于后续回审）
+```
+
+**实测**（2026-04-30 跑 US sports top 100）：
+- 97 个未知 app；20 个抽样 → 9 个 peer candidate（multi_sport）：
+  - bet365 / DraftKings / FanDuel / PrizePicks / Fanatics（5 个博彩 / 预测 app）
+  - ESPN（综合新闻 + 视频 + 数据）
+  - MLB 等 league 官方 app
+
+CLI：
+```bash
+python3 -m ai_tasks.discover_peers                         # 默认（dry-classify，只入 app_classifications）
+python3 -m ai_tasks.discover_peers --limit 20              # 限制 20 条
+python3 -m ai_tasks.discover_peers --auto-promote          # 高置信 peer 入 competitors lookup
+python3 -m ai_tasks.discover_peers --topic football        # 只看 football peer
+python3 -m ai_tasks.discover_peers --min-confidence 0.9    # 提高门槛
+```
+
 ---
 
 ### 已删除（v2 不允许的功能）
@@ -449,7 +477,9 @@ python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 
 抓取频次：
    日更（02:00）：appstore_rank / androidrank / reddit / twitter (fapi.uk) /
                   comment_fetch / strategy_monitor / appmagic / fb_adlib(×5 国) / sensor_tower
-   日更 AI 管道（02:30）：ai_tasks.run_pipeline = comment_label + entity_extract + alert_engine
+   日更 AI 管道（02:30）：
+     1. ai_tasks.discover_peers     — 用 app_classifier 扫 appstore_rank 未知 app（30 天缓存）
+     2. ai_tasks.run_pipeline       — comment_label + entity_extract + alert_engine
    周更（周日 03:00）：iap_pricing / google_news / similarweb_traffic + 看板重生成
    按需：（dashboard 已下线 review_3d / ads_strategy / community_insights 三个按钮）
 
