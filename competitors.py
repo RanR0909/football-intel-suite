@@ -128,11 +128,33 @@ def get_comment_competitors() -> dict[str, dict]:
 
 
 def get_website_competitors() -> dict[str, str]:
-    """{name: domain} — 仅返回带 website 字段的竞品（给 similarweb 抓取用）。"""
+    """{name: domain} — 仅返回带 website 字段的 app（给 similarweb 抓取用）。
+
+    注意：包含 baseline app（AF），下游 scraper 一并抓取；
+    报表 / dashboard 需要"仅竞品"时用 get_competitor_only() 过滤。
+    """
     return {
         name: entry["website"].strip().lower().lstrip("www.")
         for name, entry in load_competitors().items()
         if entry.get("website")
+    }
+
+
+def get_baseline_apps() -> dict[str, dict]:
+    """{name: entry} — 标了 is_baseline=true 的 app（数据分析 baseline，非竞品）。"""
+    return {
+        name: entry
+        for name, entry in load_competitors().items()
+        if entry.get("is_baseline")
+    }
+
+
+def get_competitor_only() -> dict[str, dict]:
+    """{name: entry} — 排除 baseline app，仅竞品（dashboard / 报表用）。"""
+    return {
+        name: entry
+        for name, entry in load_competitors().items()
+        if not entry.get("is_baseline")
     }
 
 

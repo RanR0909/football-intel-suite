@@ -119,7 +119,7 @@ class TwitterCrawler(BaseCrawler):
             "count": self.POSTS_PER_QUERY,
             "product": self.PRODUCT,
             "resFormat": "json",
-            "auth_token": token,
+            "apiKey": token,
         }
         url = f"{FAPI_ENDPOINT}?{urlencode(params)}"
 
@@ -135,15 +135,29 @@ class TwitterCrawler(BaseCrawler):
             self.log.error(f"[{app_name}] fapi 请求失败: {e}")
             return [], "error"
 
-        # fapi.uk 常见返回：业务码字段 code/status，2xx/0/200 表示成功
-        biz_code = data.get("code") if isinstance(data, dict) else None
-        if biz_code not in (None, 0, 200, "0", "200", "success"):
-            err_msg = (data.get("msg") or data.get("message") or "").lower()
-            if "auth" in err_msg or "token" in err_msg or "login" in err_msg or "expir" in err_msg:
-                self.log.error(f"[{app_name}] auth_token 失效: {data}")
-                return [], "auth_failed"
-            self.log.warning(f"[{app_name}] fapi 业务错误 code={biz_code} data={data}")
-            return [], "error"
+        # fapi.uk 业务错误约定（实测）：
+        #   - code=0 不一定成功；具体看 msg / data 字段
+        #   - 鉴权失败时 data="apiKey cannot be empty" / "invalid apiKey"，code 还是 0
+        if isinstance(data, dict):
+            err_msg = str(data.get("msg") or data.get("message") or "").lower()
+            data_field = data.get("data")
+            # 业务错误：data 是字符串而不是 list/dict
+            if isinstance(data_field, str):
+                err_msg = (err_msg + " " + data_field.lower()).strip()
+            if any(kw in err_msg for kw in (
+                "apikey", "api key", "invalid", "auth", "token", "login",
+                "expir", "unauthorized", "forbidden", "exceed", "limit",
+            )):
+                self.log.error(f"[{app_name}] fapi 鉴权 / 限流错误: {data}")
+                # 鉴权类一律按 auth_failed 处理（让上层停抓 + 飞书告警）
+                if any(kw in err_msg for kw in ("apikey", "api key", "auth", "token",
+                                                "expir", "unauthorized", "invalid")):
+                    return [], "auth_failed"
+                return [], "error"
+            biz_code = data.get("code")
+            if biz_code not in (None, 0, 200, "0", "200", "success"):
+                self.log.warning(f"[{app_name}] fapi 业务错误 code={biz_code} data={data}")
+                return [], "error"
 
         tweets = self._extract_tweets(data)
         if tweets is None:

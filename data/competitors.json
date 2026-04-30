@@ -61,5 +61,14 @@
     "app_id": "6449077229",
     "bundle_id": "com.scores.tfz",
     "website": "310scores.com"
+  },
+  "AllFootball": {
+    "gp": "com.allfootball.news",
+    "ios": 1171012600,
+    "app_id": "1171012600",
+    "bundle_id": "com.allfootballapp.news",
+    "website": "allfootballapp.com",
+    "is_baseline": true,
+    "_doc": "自家产品 / 数据分析 baseline，不算竞品。所有 14 个数据源会自动抓它，is_baseline 字段用于 dashboard / 报表后续分流展示。"
   }
 }

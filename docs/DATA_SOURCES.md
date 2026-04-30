@@ -1,6 +1,10 @@
 # 数据源
 
-> 9 个 竞品 × 12 个区域，15 个数据源 / 任务。
+> 9 个 竞品 + 1 个 baseline（AllFootball，自家产品 / 数据分析对照基准） × 12 个区域，15 个数据源 / 任务。
+>
+> **关于 baseline**：`AllFootball` 在 `data/competitors.json` 标 `is_baseline: true`。所有 14 个数据源会
+> 自动一并抓取它（与 9 竞品同流程同 schema）；下游 dashboard / 报表后续可用 `get_competitor_only()`
+> vs `get_baseline_apps()` helper 区分展示。
 
 ---
 

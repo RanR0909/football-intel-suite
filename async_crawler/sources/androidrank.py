@@ -21,7 +21,9 @@ SLUG_MAP = {
     "com.livescore":                   "livescore_live_sports_scores/com.livescore",
     "com.onesports.score":             "aiscore_live_sports_scores/com.onesports.score",
     "com.resultadosfutbol.mobile":     "besoccer_soccer_live_score/com.resultadosfutbol.mobile",
-    # 310Scores (com.scores.tfz) 不在 androidrank（app 太新）— 跳过
+    # 不在 androidrank.org 索引里的 app（每周 404，scraper 会正常 skip + log warning）：
+    #   - 310Scores  (com.scores.tfz)        — app 太新
+    #   - AllFootball (com.allfootball.news) — 区域市场，androidrank 未收录
 }
 
 
