@@ -70,6 +70,17 @@
       "prompt": {
         "file": "ai_tasks/prompts/alert_title.txt"
       }
+    },
+    "app_classifier": {
+      "_doc": "任务 4 — App Store/GP metadata → is_relevant + topic(8 选 1) + categories(8 多选)",
+      "model": "haiku_4_5",
+      "output_format": "json",
+      "json_strip_markdown": true,
+      "max_tokens": 512,
+      "temperature": 0.0,
+      "prompt": {
+        "file": "ai_tasks/prompts/app_classifier.txt"
+      }
     }
   }
 }

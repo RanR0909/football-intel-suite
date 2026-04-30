@@ -298,6 +298,42 @@ class FailedAiJob(Base):
     )
 
 
+class AppClassification(Base):
+    """App 元数据分类（AI v2 / app_classifier 任务）。
+
+    输入：从 App Store / GP 拿到的 metadata（name + publisher + description + category + matched_keywords）
+    输出：is_relevant + topic（8 选 1）+ categories（8 多选）+ confidence + rejection_reason
+
+    用途：从 appstore_rank top 100 / 关键词搜索结果发现新 peer，决定是否入 competitors 跟踪。
+    """
+    __tablename__ = "app_classifications"
+
+    id = Column(PK_BigInt, primary_key=True, autoincrement=True)
+    app_id = Column(String(32), nullable=False)                  # iOS trackId 或 GP 包名
+    platform = Column(Enum("gp", "ios", name="app_class_platform"), nullable=False)
+    bundle_id = Column(String(128))
+    name = Column(String(255))
+    publisher = Column(String(255))
+    category = Column(String(64))                                 # 输入的 store 分类（"Sports" / "Games"）
+    description_excerpt = Column(Text)                            # 实际送 AI 的 description 片段（≤ 1500 char）
+    matched_keywords = Column(Text)                               # JSON list 输入
+
+    # AI 输出
+    is_relevant = Column(Boolean)
+    topic = Column(String(16))                                    # football / basketball / tennis / F1 / cricket / multi_sport / non_sport
+    categories = Column(Text)                                     # JSON list — news / score / prediction / tipster / betting / analytics / community / video
+    confidence = Column(Float)
+    rejection_reason = Column(String(255))
+
+    classified_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("app_id", "platform", name="uniq_app_class"),
+        Index("idx_app_class_topic_relevant", "topic", "is_relevant"),
+        Index("idx_app_class_classified_at", "classified_at"),
+    )
+
+
 # ─────────────────────────── 已有表 ───────────────────────────
 
 
@@ -330,5 +366,6 @@ ALL_TABLES = [
     "website_traffic",
     # AI v2
     "entity_aliases", "comment_entities", "alerts", "failed_ai_jobs",
+    "app_classifications",
     "sync_log",
 ]

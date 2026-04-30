@@ -1,6 +1,6 @@
 # 数据源
 
-> 9 个 竞品 + 1 个 baseline（AllFootball，自家产品 / 数据分析对照基准） × 12 个区域，13 个数据源 + 3 个 AI 任务。
+> 9 个 竞品 + 1 个 baseline（AllFootball，自家产品 / 数据分析对照基准） × 12 个区域，13 个数据源 + 4 个 AI 任务。
 >
 > **关于 baseline**：`AllFootball` 在 `data/competitors.json` 标 `is_baseline: true`。所有 14 个数据源会
 > 自动一并抓取它（与 9 竞品同流程同 schema）；下游 dashboard / 报表后续可用 `get_competitor_only()`
@@ -302,11 +302,11 @@ python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 
 
 ---
 
-## AI 分析（v2 架构 · 3 个任务，仅做结构化工作）
+## AI 分析（v2 架构 · 4 个任务，仅做结构化工作）
 
-> **2026-04-30 重构**：按 `AI_tasks_spec_v1_1.md` 全部重做。
+> **2026-04-30 重构**：按 `AI_tasks_spec_v1_1.md` + `app_classifier_prompt.txt` 全部重做。
 > 总原则：**AI 只做结构化工作**（分类 / 抽取 / 归一 / 翻译 / 短事实陈述），不做主观判断 / 不写长文 / 不提建议 / 不做情感分析。
-> 全部走 Claude Haiku 4.5。月成本估 ~$47。
+> 全部走 Claude Haiku 4.5。月成本估 ~$50。
 
 ### 13. `comment_label` — 单条评论翻译 + 6 类标签（实时 / daily 触发）
 
@@ -362,6 +362,41 @@ python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 
 
 ---
 
+### 16. `app_classifier` — App Store / GP metadata → 结构化分类（按需触发）
+
+**输入**：`{app_id, platform, name, publisher, description, category, matched_keywords}`
+**输出**：`{is_relevant, topic, categories, confidence, rejection_reason}`
+
+**Topic（8 选 1）**：`football` / `basketball` / `tennis` / `F1` / `cricket` / `multi_sport` / `non_sport`
+**Categories（8 多选）**：`news` / `score` / `prediction` / `tipster` / `betting` / `analytics` / `community` / `video`
+
+**用途**：
+- appstore_rank 抓 top 100 后扫描所有 `competitor_id IS NULL` 的未跟踪 app，自动判断是否是 peer
+- 关键词搜索（"football"/"soccer"/"live scores"）发现的新 app 入库前先分类
+- 人工提交 bundle_id / iOS app id 让 AI 帮忙判断
+
+**Decision rules（从 prompt 来）**：
+- 足球管理游戏（Football Manager / FIFA Mobile）→ `non_sport`, `is_relevant=false`
+- 球类休闲游戏（Soccer Stars 等）→ `non_sport`, `is_relevant=false`
+- 私人记分工具（Tennis Score Pad）→ `non_sport`, `is_relevant=false`
+- 体育直播 app（ESPN+ / DAZN）→ `is_relevant=true`，含 `video`
+- 博彩 app（Bet365）→ `is_relevant=true`，含 `betting`
+- 体育新闻聚合（All Football）→ `is_relevant=true`，含 `news`
+
+**缓存**：`(app_id, platform)` 30 天内已分类的不重新调 AI（`is_already_classified` 短路）
+
+**实测样例**（4/4 与 spec 例子完美对齐）：
+| 输入 | 输出 |
+|---|---|
+| All Football - Soccer scores | `is_relevant=true, topic=football, categories=[score,news,analytics,video]` |
+| Football Manager 2026 Mobile | `is_relevant=false, topic=non_sport, reason="足球管理类游戏"` |
+| Bet365 Sports Betting | `is_relevant=true, topic=multi_sport, categories=[betting,score]` |
+| Tennis Score Pad | `is_relevant=false, topic=non_sport, reason="私人记分工具,非内容向 app"` |
+
+**存储**：`app_classifications` 表（`UNIQUE(app_id, platform)`），重复分类 UPSERT 同一行
+
+---
+
 ### 已删除（v2 不允许的功能）
 
 按 spec 严格禁令"AI 不写长文 / 不做主观判断 / 不做情感分析"：
@@ -397,7 +432,8 @@ python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 
 | comment_label | ~38,000 | ~$30 |
 | entity_extract | ~38,000 | ~$15 |
 | alert_title | ~600 | ~$2 |
-| **合计** | | **~$47** |
+| app_classifier | ~3,000（top 100 × 30 天 ÷ 30 天缓存命中率 70%） | ~$3 |
+| **合计** | | **~$50** |
 
 ---
 
@@ -408,7 +444,7 @@ python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 
    ├─ HTTP 抓取（9）：appstore_rank / androidrank / comment_fetch / reddit /
    │                  twitter (fapi.uk) / iap_pricing / google_news / strategy_monitor
    ├─ Playwright（4）：appmagic / fb_adlib / sensor_tower / similarweb_traffic
-   └─ AI v2（3）：comment_label / entity_extract / alert_title  (haiku 4.5 only)
+   └─ AI v2（4）：comment_label / entity_extract / alert_title / app_classifier  (haiku 4.5 only)
 
 抓取频次：
    日更（02:00）：appstore_rank / androidrank / reddit / twitter (fapi.uk) /
