@@ -188,9 +188,20 @@ class WebsiteTraffic(Base):
     mail_share = Column(Float)
     display_share = Column(Float)
 
+    # 排名（anonymous 也有，长期稳定字段）
+    global_rank = Column(Integer)
+    country_rank = Column(Integer)
+    country_rank_country = Column(String(64))       # e.g. "Brazil"
+    category_rank = Column(Integer)
+
+    # 性别画像（anonymous 也有）
+    male_share = Column(Float)
+    female_share = Column(Float)
+
     # 长尾详情（非索引）
     top_countries_json = Column(Text)               # [{country, share}, ...]
     top_keywords_json = Column(Text)                # [{kw, share}, ...]（免费层可能空）
+    similar_sites_json = Column(Text)               # [{domain, affinity}, ...]（anonymous 也有）
     raw_text = Column(Text)                         # main innerText 前 4000 字（调试）
 
     fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)

@@ -65,6 +65,7 @@ PAGE_TIMEOUT_SEC = 90   # Similarweb SPA 慢，charts 要 60s+
 EXTRACT_JS = r"""
 () => {
   const main = document.querySelector('main') || document.body;
+  if (!main) return { error: 'no_main_or_body' };
   const text = main.innerText || '';
   const out = {
     raw_text: text.slice(0, 8000),
@@ -122,12 +123,27 @@ EXTRACT_JS = r"""
     return m ? m[0] : null;
   }
 
-  // ---- 1. Monthly visits（在 Engagement overview 区块）---------
-  // "Monthly visits\n80.71M\nMonthly Unique Visitors\n..."
-  // 必须 K/M/B 后缀避免误匹配
-  const visitsRaw = extractAfter('Monthly visits', [
+  // ---- 1. Monthly visits ---------------------------------------
+  // 两种渲染：
+  //   trial：     "Monthly visits\n80.71M"           （在 Engagement overview）
+  //   anonymous： "Total Visits\n\n85M"              （单值，不带 "Last 3 Months"）
+  //   trial 也有："Total Visits\nLast 3 Months\n242.1M"  ← 3 月累加，不要这个
+  // 优先用 "Monthly visits"；缺则 fallback 到 "Total Visits" 但只在没有 "Last 3 Months" 时
+  let visitsRaw = extractAfter('Monthly visits', [
     'Monthly Unique', 'Visit Duration', 'Pages /', 'Bounce Rate',
   ], /[\d.]+\s*[KMB]/i);
+  if (!visitsRaw) {
+    // anonymous 模式 — "Total Visits" 是月值，且后面紧跟数字，没有 "Last 3 Months"
+    const tvIdx = text.indexOf('Total Visits');
+    if (tvIdx >= 0) {
+      const block = text.slice(tvIdx, tvIdx + 200);
+      // 排除 "Total Visits Last 3 Months" — 那是 trial 的 3 月累加值
+      if (!/Total Visits\s*\n\s*Last 3 Months/i.test(block)) {
+        const m = block.match(/Total Visits\s*\n\s*\n?\s*([\d.]+\s*[KMB])/i);
+        if (m) visitsRaw = m[1];
+      }
+    }
+  }
   if (visitsRaw) {
     out.monthly_visits = visitsRaw.trim();
     out.monthly_visits_num = parseVisits(visitsRaw);
@@ -136,14 +152,20 @@ EXTRACT_JS = r"""
   // ---- 2. Bounce Rate -----------------------------------------
   const brRaw = extractAfter('Bounce Rate', [
     'See trends', 'Visits over time', 'Marketing Channels', 'Geography',
+    'Pages per Visit', 'Avg Visit Duration',
   ], /[\d.]+\s*%/);
   if (brRaw) out.bounce_rate = parsePct(brRaw);
 
   // ---- 3. Pages / Visit ---------------------------------------
-  // 注意 Similarweb 的 label 是 "Pages / Visit"（两个空格 + 斜杠）
-  const ppvRaw = extractAfter('Pages / Visit', [
+  // anonymous label = "Pages per Visit"；trial label = "Pages / Visit"
+  let ppvRaw = extractAfter('Pages / Visit', [
     'Bounce Rate', 'See trends', 'Marketing Channels',
   ], /[\d.]+/);
+  if (!ppvRaw) {
+    ppvRaw = extractAfter('Pages per Visit', [
+      'Avg Visit Duration', 'Bounce Rate', 'See trends', 'Marketing Channels',
+    ], /[\d.]+/);
+  }
   if (ppvRaw) out.pages_per_visit = parseFloat(ppvRaw);
 
   // ---- 4. Visit Duration --------------------------------------
@@ -225,19 +247,97 @@ EXTRACT_JS = r"""
     out._channel_pcts_raw = pcts;  // 调试用
   }
 
-  // ---- 7. Top Countries（country rank 区块）-------------------
-  // "Country rank\nBrazil\n#298\n..." 单一国家；如需 top 5 要去 Geography tab
-  // 这里先抓"Country rank"下唯一的国家名 + Geography 区域下的 list
-  const cRankIdx = text.indexOf('Country rank');
-  if (cRankIdx >= 0) {
-    const rb = text.slice(cRankIdx, cRankIdx + 400);
-    const m = rb.match(/Country rank\s*\n\s*([A-Z][A-Za-z .'-]{2,40})\s*\n\s*#\s*(\d+)/);
-    if (m) {
-      out.top_countries = [{
-        country: m[1].trim(),
-        rank: parseInt(m[2]),
-      }];
+  // ---- 7. Ranks (Global / Country / Category) ----------------
+  // anonymous + trial 都有，但布局不同：
+  //   anonymous: "Global Rank\n#635\n10\n\nCountry Rank\n#298\n1\n\nBrazil\n\nCategory Rank\n#4"
+  //   trial:     "Global rank\n#635\nCountry rank\nBrazil\n#298\nIndustry rank\n.../Sports\n#9"
+  // 双向匹配（label + 数字，两种顺序）
+  const grm = text.match(/Global\s+[Rr]ank\s*\n+\s*#\s*(\d[\d,]*)/);
+  if (grm) out.global_rank = parseInt(grm[1].replace(/,/g, ''));
+
+  // anonymous 顺序：#rank → country
+  let crm = text.match(/Country\s+[Rr]ank\s*\n+\s*#\s*(\d[\d,]*)\s*\n+\s*\d?\s*\n*\s*([A-Z][A-Za-z .'-]{2,40})/);
+  if (!crm) {
+    // trial 顺序：country → #rank
+    crm = text.match(/Country\s+[Rr]ank\s*\n+\s*([A-Z][A-Za-z .'-]{2,40})\s*\n+\s*#\s*(\d[\d,]*)/);
+    if (crm) {
+      out.country_rank = parseInt(crm[2].replace(/,/g, ''));
+      out.country_rank_country = crm[1].trim();
     }
+  } else {
+    out.country_rank = parseInt(crm[1].replace(/,/g, ''));
+    out.country_rank_country = crm[2].trim();
+  }
+
+  // Category Rank or Industry rank (trial 用 Industry rank)
+  const catRm = text.match(/(?:Category|Industry)\s+[Rr]ank\s*\n+(?:[^#\n]*\n+)?\s*#\s*(\d[\d,]*)/);
+  if (catRm) out.category_rank = parseInt(catRm[1].replace(/,/g, ''));
+
+  // ---- 8. Top Countries -------------------------------------
+  // 三种布局：
+  //   (a) anonymous list: "Top Countries\nBrazil\n14.89%\n6.62%\nUnited States\n10.04%\n..."
+  //   (b) trial columnar: "Top Countries\n...\nCountry\nTurkey\nThailand\n...\nTraffic Share\n9.82%\n8.39%\n..."
+  // 先试 (a)，再 fallback 到 (b)
+  const tcIdx = text.indexOf('Top Countries');
+  if (tcIdx >= 0) {
+    let tcBlock = text.slice(tcIdx, tcIdx + 2000);
+    for (const stop of ['See all countries', 'See more countries', 'Demographics', 'Audience',
+                         'Marketing Channels', 'Outgoing']) {
+      const i = tcBlock.indexOf(stop);
+      if (i > 0) { tcBlock = tcBlock.slice(0, i); break; }
+    }
+
+    // 布局 (a)：name \n pct% 交替
+    const cre = /\n\s*([A-Z][A-Za-z .'-]{2,40})\s*\n\s*([\d.]+)\s*%/g;
+    const countries_a = [];
+    let cm;
+    while ((cm = cre.exec(tcBlock)) && countries_a.length < 5) {
+      const name = cm[1].trim();
+      if (/^(Others|Top Countries|Country|Share|Change|Traffic Share|All traffic)$/i.test(name)) continue;
+      countries_a.push({ country: name, share: parsePct(cm[2]) });
+    }
+
+    // 布局 (b)：先 N 个 name，然后 "Traffic Share"，然后 N 个 %
+    const colMatch = tcBlock.match(
+      /Country\s*\n([\s\S]+?)\nTraffic Share\s*\n([\s\S]+?)(?:\nChange|\n$)/
+    );
+    let countries_b = [];
+    if (colMatch) {
+      const names = colMatch[1].split('\n').map(s => s.trim()).filter(s => s && !/^(Others)$/i.test(s));
+      const pcts = colMatch[2].match(/[\d.]+\s*%/g) || [];
+      for (let i = 0; i < Math.min(names.length, pcts.length, 5); i++) {
+        countries_b.push({ country: names[i], share: parsePct(pcts[i]) });
+      }
+    }
+
+    // 选 captures 多的那个
+    const countries = countries_b.length > countries_a.length ? countries_b : countries_a;
+    if (countries.length) out.top_countries = countries;
+  }
+
+  // ---- 9. Demographics — 年龄 / 性别（anonymous 也有）-------
+  // "Age Distribution\n22.44%\n30.16%\n20.78%\n13.09%\n8.69%\n4.84%\n
+  //  18 - 24\n25 - 34\n35 - 44\n45 - 54\n55 - 64\n65+"
+  // OR "Gender Distribution\nFemale\n23.59%\nMale\n76.41%"
+  const fm = text.match(/Female\s*\n\s*([\d.]+)\s*%/);
+  const mm2 = text.match(/Male\s*\n\s*([\d.]+)\s*%/);
+  if (fm) out.female_share = parsePct(fm[1]);
+  if (mm2) out.male_share = parsePct(mm2[1]);
+
+  // ---- 10. Similar sites（anonymous 顶部 5–10 个）-----------
+  const ssIdx = text.indexOf('Competitors & Similar Sites');
+  if (ssIdx >= 0) {
+    let ssBlock = text.slice(ssIdx, ssIdx + 3000);
+    const stopAt = ssBlock.indexOf('See all competitors');
+    if (stopAt > 0) ssBlock = ssBlock.slice(0, stopAt);
+    // 抓 "<domain>.com\n<pct>%\nSports > ..." pattern
+    const sre = /\n([a-z0-9][\w-]+(?:\.[a-z]{2,})+)\s*\n\s*([\d.]+)\s*%/gi;
+    const similar = [];
+    let sm;
+    while ((sm = sre.exec(ssBlock)) && similar.length < 10) {
+      similar.push({ domain: sm[1].toLowerCase(), affinity: parsePct(sm[2]) });
+    }
+    if (similar.length) out.similar_sites = similar;
   }
 
   // ---- 8. Top Keywords（在 Search 区域，可能没有）-----------
@@ -336,28 +436,39 @@ async def _dismiss_banners(page) -> None:
             continue
 
 
+_SAFE_BODY_TEXT_JS = (
+    "() => { const e = document.querySelector('main') || document.body; "
+    "return e ? (e.innerText || '') : ''; }"
+)
+
+
 async def _wait_overview_ready(page, timeout_s: int = PAGE_TIMEOUT_SEC) -> None:
     """等到核心 label 在页面文本里出现 — 比 body_len 阈值更可靠。"""
-    REQUIRED_MARKERS = ["Total Visits", "Bounce Rate"]   # 任一出现即认为渲染开始
+    REQUIRED_MARKERS = ["Total Visits", "Bounce Rate", "Monthly visits"]
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout_s
     banner_dismissed = False
     while loop.time() < deadline:
-        if await _detect_cloudflare(page):
-            raise CloudflareBlocked("Similarweb 被 Cloudflare 拦截")
-        if not banner_dismissed:
-            await _dismiss_banners(page)
-            banner_dismissed = True
-        body_text = await page.evaluate(
-            "() => (document.querySelector('main') || document.body).innerText || ''"
-        )
+        try:
+            if await _detect_cloudflare(page):
+                raise CloudflareBlocked("Similarweb 被 Cloudflare 拦截")
+            if not banner_dismissed:
+                await _dismiss_banners(page)
+                banner_dismissed = True
+            body_text = await page.evaluate(_SAFE_BODY_TEXT_JS)
+        except CloudflareBlocked:
+            raise
+        except Exception:
+            # 页面正在导航 / DOM 未稳定 → 重试
+            body_text = ""
         if any(m in body_text for m in REQUIRED_MARKERS) and len(body_text) > 1500:
             return
         await asyncio.sleep(1.0)
     # 超时 — 记录调试信息
-    body_text = await page.evaluate(
-        "() => (document.querySelector('main') || document.body).innerText || ''"
-    )
+    try:
+        body_text = await page.evaluate(_SAFE_BODY_TEXT_JS)
+    except Exception:
+        body_text = ""
     cur_url = page.url or ""
     title = (await page.title()) or ""
     snippet = body_text[:1500].replace("\n", " | ")
@@ -371,14 +482,20 @@ async def _wait_overview_ready(page, timeout_s: int = PAGE_TIMEOUT_SEC) -> None:
     raise TimeoutError(f"Similarweb 概览页未在 {timeout_s}s 内加载完成")
 
 
-async def _fetch_domain(page, domain: str) -> dict:
+async def _fetch_domain(page, domain: str, anonymous: bool = False) -> dict:
     url = f"https://www.similarweb.com/website/{domain}/"
     print(f"[{domain}] {url}")
     await page.goto(url, wait_until="domcontentloaded")
-    await _wait_overview_ready(page)
+    # anonymous 第一次访问 CF 挑战要给充裕时间人工过
+    timeout_s = 240 if anonymous else PAGE_TIMEOUT_SEC
+    if anonymous:
+        print(f"  [anonymous] 等最多 {timeout_s}s 让你手动过 CF challenge…")
+    await _wait_overview_ready(page, timeout_s=timeout_s)
     # SPA 异步刷数据，多等几秒
     await asyncio.sleep(3)
     data = await page.evaluate(EXTRACT_JS)
+    if data.get("error"):
+        return data
     print(
         f"  -> visits={data.get('monthly_visits')}  dur={data.get('avg_visit_duration')}"
         f"  bounce={data.get('bounce_rate')}  desktop/mobile={data.get('desktop_share')}/{data.get('mobile_share')}"
@@ -430,8 +547,13 @@ async def cmd_login() -> None:
 # ---- 命令：scrape ---------------------------------------------------------
 
 
-async def cmd_scrape(headed: bool = False, only_domain: str | None = None) -> Path:
-    if not PROFILE_DIR.exists():
+async def cmd_scrape(
+    headed: bool = False,
+    only_domain: str | None = None,
+    anonymous: bool = False,
+) -> Path:
+    """正常 scrape 走 PROFILE_DIR；anonymous 走全新无痕 context（用于测真免费字段集）。"""
+    if not anonymous and not PROFILE_DIR.exists():
         raise CloudflareBlocked(
             f"找不到 {PROFILE_DIR}。请先跑：\n"
             f"  python3 -m market_rank.scrape_similarweb login"
@@ -451,11 +573,14 @@ async def cmd_scrape(headed: bool = False, only_domain: str | None = None) -> Pa
     results: list[dict] = []
     md_sections: list[str] = [f"# Website Traffic — Similarweb · {today.isoformat()}\n"]
 
+    if anonymous:
+        print("🕵️  ANONYMOUS 模式：不带任何账号 / 历史 cookie，验证真免费字段集")
+        print("    （会强制 headed 模式让你手过 CF；本次结果不写 MySQL）")
+
     async with async_playwright() as p:
-        ctx = await p.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
-            channel="chrome",                       # 系统 Chrome 而非 Chromium — 过 CloudFront 指纹
-            headless=not headed,
+        # 通用 launch 参数
+        common_args = dict(
+            channel="chrome",
             viewport={"width": 1400, "height": 900},
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -467,11 +592,28 @@ async def cmd_scrape(headed: bool = False, only_domain: str | None = None) -> Pa
                 "--disable-features=IsolateOrigins,site-per-process",
             ],
         )
+        if anonymous:
+            # 全新无 profile context（不会带账号 cookie）
+            browser = await p.chromium.launch(headless=False, **{
+                k: v for k, v in common_args.items()
+                if k in ("channel", "args")
+            })
+            ctx = await browser.new_context(
+                viewport=common_args["viewport"],
+                user_agent=common_args["user_agent"],
+                locale=common_args["locale"],
+            )
+        else:
+            ctx = await p.chromium.launch_persistent_context(
+                str(PROFILE_DIR),
+                headless=not headed,
+                **common_args,
+            )
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
             for app_name, domain in websites.items():
                 try:
-                    data = await _fetch_domain(page, domain)
+                    data = await _fetch_domain(page, domain, anonymous=anonymous)
                 except CloudflareBlocked:
                     print(f"  ⚠️  CF 拦截，停止抓取（请重新跑 login）", file=sys.stderr)
                     raise
@@ -489,8 +631,8 @@ async def cmd_scrape(headed: bool = False, only_domain: str | None = None) -> Pa
                 }
                 results.append(rec)
 
-                # 写 MySQL
-                if not data.get("error"):
+                # 写 MySQL（anonymous 模式跳过，避免污染正常数据）
+                if not anonymous and not data.get("error"):
                     n = dao_traffic.upsert_website_traffic(
                         app_name, domain, snapshot_month, data,
                     )
@@ -505,19 +647,21 @@ async def cmd_scrape(headed: bool = False, only_domain: str | None = None) -> Pa
             except Exception:
                 pass
 
-    # 写 JSON 主输出
-    DATA_OUT.parent.mkdir(parents=True, exist_ok=True)
-    DATA_OUT.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 写 JSON 主输出（anonymous 走单独的 _anon 文件以免覆盖正常数据）
+    out_path = DATA_OUT if not anonymous else DATA_OUT.with_name("async_similarweb_anon.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     ok = sum(1 for r in results if not (r.get("data") or {}).get("error"))
-    print(f"\n保存完成 -> {DATA_OUT}（{len(results)} record，{ok} 条有数据）")
+    print(f"\n保存完成 -> {out_path}（{len(results)} record，{ok} 条有数据）")
 
-    # 写 markdown 快照
+    # 写 markdown 快照（anonymous 用单独文件名）
     RAW_OUT_DIR.mkdir(parents=True, exist_ok=True)
-    md_path = RAW_OUT_DIR / f"similarweb_{today.isoformat()}.md"
+    md_suffix = "_anon" if anonymous else ""
+    md_path = RAW_OUT_DIR / f"similarweb{md_suffix}_{today.isoformat()}.md"
     md_path.write_text("\n".join(md_sections), encoding="utf-8")
     print(f"markdown 快照 -> {md_path}")
 
-    return DATA_OUT
+    return out_path
 
 
 # ---- markdown ------------------------------------------------------------
@@ -579,13 +723,19 @@ def main() -> None:
     ap.add_argument("command", choices=["login", "scrape"], nargs="?", default="scrape")
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--domain", help="仅抓指定域名（smoke test 用）")
+    ap.add_argument("--anonymous", action="store_true",
+                    help="不带任何账号 / cookie，验证真免费字段集（结果不入 MySQL）")
     args = ap.parse_args()
 
     if args.command == "login":
         asyncio.run(cmd_login())
     else:
         try:
-            asyncio.run(cmd_scrape(headed=args.headed, only_domain=args.domain))
+            asyncio.run(cmd_scrape(
+                headed=args.headed,
+                only_domain=args.domain,
+                anonymous=args.anonymous,
+            ))
         except CloudflareBlocked as e:
             print(f"❌ {e}", file=sys.stderr)
             sys.exit(2)

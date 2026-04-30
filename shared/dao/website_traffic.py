@@ -70,8 +70,18 @@ def upsert_website_traffic(
                 "referral_share": _to_float(payload.get("referral_share")),
                 "mail_share": _to_float(payload.get("mail_share")),
                 "display_share": _to_float(payload.get("display_share")),
+                # 排名（anonymous 也有）
+                "global_rank": _to_int(payload.get("global_rank")),
+                "country_rank": _to_int(payload.get("country_rank")),
+                "country_rank_country": _trim(payload.get("country_rank_country"), 64),
+                "category_rank": _to_int(payload.get("category_rank")),
+                # 性别（anonymous 也有）
+                "male_share": _to_float(payload.get("male_share")),
+                "female_share": _to_float(payload.get("female_share")),
+                # 长尾
                 "top_countries_json": _to_json(payload.get("top_countries")),
                 "top_keywords_json": _to_json(payload.get("top_keywords")),
+                "similar_sites_json": _to_json(payload.get("similar_sites")),
                 "raw_text": (payload.get("raw_text") or "")[:8000] or None,
                 "fetched_at": now,
             }
@@ -127,8 +137,15 @@ def latest_for_competitor(competitor_name: str) -> dict | None:
                 "referral_share": row.referral_share,
                 "mail_share": row.mail_share,
                 "display_share": row.display_share,
+                "global_rank": row.global_rank,
+                "country_rank": row.country_rank,
+                "country_rank_country": row.country_rank_country,
+                "category_rank": row.category_rank,
+                "male_share": row.male_share,
+                "female_share": row.female_share,
                 "top_countries": json.loads(row.top_countries_json) if row.top_countries_json else [],
                 "top_keywords": json.loads(row.top_keywords_json) if row.top_keywords_json else [],
+                "similar_sites": json.loads(row.similar_sites_json) if row.similar_sites_json else [],
                 "fetched_at": row.fetched_at.isoformat() if row.fetched_at else None,
             }
     except Exception as e:

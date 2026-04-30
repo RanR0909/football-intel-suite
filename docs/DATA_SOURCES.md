@@ -264,28 +264,50 @@ python3 -m market_rank.scrape_similarweb login
 # 浏览器弹出 → 完成 CF 验证 → 看到 sofascore.com 概览页流量数据 → 关窗口
 ```
 
-每竞品 1 个 page，9 个（每周日 03:00 跑），数据按"月"对齐（snapshot_month = 当月 1 号）：
+每竞品 1 个 page，9 个（每周日 03:00 跑），数据按"月"对齐（snapshot_month = 当月 1 号）。
 
-| 字段 | 含义 | 例 |
-|---|---|---|
-| `monthly_visits` / `monthly_visits_num` | 月访问量（原始字符串 + 解析数值）| `"30.5M"` / `30500000` |
-| `avg_visit_duration` / `avg_visit_duration_sec` | 平均停留时长 | `"00:05:23"` / `323` |
-| `pages_per_visit` | 平均访问页数 | `4.32` |
-| `bounce_rate` | 跳出率（小数 0–1）| `0.3345` |
-| `desktop_share` / `mobile_share` | 设备分布 | `0.55` / `0.45` |
-| **6 大流量来源**（小数 0–1） | | |
-| `direct_share` | 直接访问 | `0.6510` |
-| `search_share` | 搜索引擎 | `0.2050` |
-| `social_share` | 社交媒体 | `0.0420` |
-| `referral_share` | 站外引荐 | `0.0380` |
-| `mail_share` | 邮件 | `0.0120` |
-| `display_share` | 展示广告 | `0.0520` |
-| `top_countries` (JSON) | Top 5 国家 | `[{country:"United States", share:0.2345}, ...]` |
-| `top_keywords` (JSON) | Top 5 关键词（免费层可能空）| `[{kw:"sofascore", share:0.352}, ...]` |
-| `raw_text` | main innerText 前 8000 字（调试用）| 整段页面文案 |
+⚠️ **Tier 说明**：Similarweb 三档可见数据
+- **Anonymous（不登录）**：完全免费 / 永久可用 — 8 个稳定字段
+- **Free account（注册账号 + trial 过期）**：anonymous + 关键词 / 部分历史
+- **Premium Trial（新账号 8 天）**：全开（含设备 + 6 渠道分布 + similar_sites）
+
+字段一览（按 tier 标稳定性，**永远 NULL-safe** — 缺失自动 null）：
+
+| 字段 | Anonymous | Trial | 长期稳定 | 例 |
+|---|:-:|:-:|:-:|---|
+| `monthly_visits` / `_num` | ✅ | ✅ | **核心** | `"85M"` / `85000000` |
+| `avg_visit_duration` / `_sec` | ✅ | ✅ | **核心** | `"00:06:23"` / `383` |
+| `pages_per_visit` | ✅ | ✅ | **核心** | `4.32` |
+| `bounce_rate` | ✅ | ✅ | **核心** | `0.3345` |
+| `global_rank` | ✅ | ✅ | **核心** | `635` |
+| `country_rank` / `_country` | ✅ | ✅ | **核心** | `298` / `"Brazil"` |
+| `category_rank` | ✅ | ✅ | **核心** | `4` |
+| `top_countries` (JSON, top 5)| ✅ | ✅ | **核心** | `[{country, share}]` |
+| `desktop_share` / `mobile_share` | ❌ | ✅ | trial-only | `0.5948` / `0.4052` |
+| **6 大流量来源**（小数 0–1） | | | | |
+| `direct_share` | ⚠️只此一项 | ✅ | trial-only | `0.5404` |
+| `search_share` | ❌ | ✅ | trial-only | `0.2108` |
+| `social_share` | ❌ | ✅ | trial-only | `0.1941` |
+| `referral_share` | ❌ | ✅ | trial-only | `0.0300` |
+| `mail_share` | ❌ | ✅ | trial-only | `0.0106` |
+| `display_share` | ❌ | ✅ | trial-only | `0.0030` |
+| `top_keywords` (JSON) | ❌（CPC 格式） | ✅ | trial-only | `[{kw, share}]` |
+| `male_share` / `female_share` | ✅ | ❌ | anon-only | `0.7641` / `0.2359` |
+| `similar_sites` (JSON, top 10) | ✅ | ❌ | anon-only | `[{domain, affinity}]` |
+| `raw_text` | ✅ | ✅ | 调试 | 前 8000 字 |
 
 入库 `website_traffic` 表，`UNIQUE (competitor_id, snapshot_month)`，月内重复抓 UPSERT 同一行。
-免费层一般够用；如果哪天 Similarweb 把更多字段挪到登录后，再注册个免费账号即可（不收费）。
+**8 个核心字段在所有 tier 永远稳定**；trial-only 字段在 8 天 trial 过期后 + 你登出 → null（dashboard 显示 `—`）。
+**不会强制升级 / 不会因为字段缺失而崩溃**。
+
+CLI：
+```bash
+python3 -m market_rank.scrape_similarweb              # 正常抓（用 ~/.similarweb-profile）
+python3 -m market_rank.scrape_similarweb --domain X   # 只抓一个站
+python3 -m market_rank.scrape_similarweb --headed     # 显示浏览器调试
+python3 -m market_rank.scrape_similarweb --anonymous --domain X   # 不带 cookie，验证 anon 字段集（不入 MySQL）
+python3 -m market_rank.scrape_similarweb login        # 一次性手动过 CF + 登录（profile 持久化）
+```
 
 ---
 
