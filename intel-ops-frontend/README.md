@@ -84,7 +84,7 @@ src/
 │   │   └── Ads.tsx         # 广告投放
 │   └── system/
 │       ├── Candidates.tsx  # 候选发现
-│       ├── FailedJobs.tsx  # AI 死信队列
+│       ├── FailedJobs.tsx  # AI 失败队列
 │       └── SyncLog.tsx     # 同步日志
 ├── components/
 │   ├── ui/             # shadcn/ui (initialize 后自动生成)
@@ -183,8 +183,8 @@ const { value, setValue } = useUrlFilters({ source: "appmagic", region: "" })
 | `GET /api/ads` | Meta 广告创意 |
 | `GET /api/website` | Similarweb 网站数据 |
 | `GET /api/candidates` | AI 候选 app（自动排除已 in competitors） |
-| `GET /api/failed-ai-jobs` | AI 死信队列 |
-| `POST /api/failed-ai-jobs/:id/retry` | 重置死信任务 |
+| `GET /api/failed-ai-jobs` | AI 失败队列 |
+| `POST /api/failed-ai-jobs/:id/retry` | 重置失败任务 |
 | `GET /api/sync-log` | 抓取作业日志 |
 
 完整字段定义见 `src/types/api.ts`。

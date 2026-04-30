@@ -247,7 +247,7 @@ class APIHandler(BaseHTTPRequestHandler):
             return self._send_500(f"failed to read dashboard_data.json: {e}")
 
     def api_status(self):
-        """GET /api/status — 各源最近抓取 / retry queue / failed jobs / 死信 / 候选数"""
+        """GET /api/status — 各源最近抓取 / retry queue / AI 失败队列 / 候选数"""
         # 各源 last_success
         sources_status = {}
         if _sync_state:
@@ -635,9 +635,9 @@ class APIHandler(BaseHTTPRequestHandler):
         return self._send_json({"jobs": rows, "count": len(rows)})
 
     def api_failed_ai_retry(self, job_id: str):
-        """POST /api/failed-ai-jobs/:id/retry — 重置死信任务（标 resolved_at=NULL + attempts=0）
+        """POST /api/failed-ai-jobs/:id/retry — 重置失败任务（标 resolved_at=NULL + attempts=0）
 
-        实际重试由 ai_pipeline 的下次运行处理（若 task 实现了 死信回拉逻辑）。
+        实际重试由 ai_pipeline 的下次运行处理（若 task 实现了从失败队列回拉的逻辑）。
         当前简化：只重置标记，让人手动重跑。
         """
         ok = _execute(

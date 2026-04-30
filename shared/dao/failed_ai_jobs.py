@@ -1,4 +1,4 @@
-"""DAO: failed_ai_jobs — AI 任务死信队列。
+"""DAO: failed_ai_jobs — AI 失败队列（重试耗尽后写入）。
 
 调用方：ai_tasks/* 重试耗尽后写入；运维或 cron 周期性重放。
 """

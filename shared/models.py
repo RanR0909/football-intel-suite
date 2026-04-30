@@ -280,7 +280,7 @@ class Alert(Base):
 
 
 class FailedAiJob(Base):
-    """失败 AI 任务的死信队列。run_task 重试耗尽后写入这里，等人工或定时重跑。"""
+    """AI 失败队列（重试耗尽后写入）。run_task 重试耗尽后写入这里，等人工或定时重跑。"""
     __tablename__ = "failed_ai_jobs"
 
     id = Column(PK_BigInt, primary_key=True, autoincrement=True)

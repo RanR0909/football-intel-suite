@@ -9,7 +9,7 @@ Create Date: 2026-04-30 18:00:00.000000
 - entity_aliases：实体归一表（9 类实体 → canonical_id）
 - comment_entities：评论 ↔ 实体的多对多关联
 - alerts：7 类预警事件 + AI 生成的 ≤50 字 title
-- failed_ai_jobs：AI 任务失败死信队列
+- failed_ai_jobs：AI 任务失败队列（重试耗尽后人工 / 定时重跑）
 """
 from typing import Sequence, Union
 

@@ -58,7 +58,7 @@ export default function Sidebar() {
       items: [
         { to: "/system/candidates", label: "候选发现", icon: Search,
           badge: () => status?.candidates_count },
-        { to: "/system/failed-jobs", label: "AI 死信队列", icon: AlertTriangle,
+        { to: "/system/failed-jobs", label: "AI 失败队列", icon: AlertTriangle,
           badge: () => Object.values(status?.failed_ai_jobs || {})
             .reduce((a, b) => a + (b || 0), 0) || undefined },
         { to: "/system/sync-log", label: "同步日志", icon: ScrollText },

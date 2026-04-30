@@ -97,7 +97,7 @@ def label_comment(
         return {"comment_id": review_id, "error": f"http: {e}"}
 
     if not isinstance(result, dict) or result.get("_parse_error"):
-        # JSON 解析失败 — 落死信
+        # JSON 解析失败 — 写入失败队列
         dao_failed.push(
             task_name="comment_label",
             payload={"review_id": review_id, "raw_text": raw_text},

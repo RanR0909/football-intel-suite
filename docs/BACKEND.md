@@ -147,7 +147,7 @@ result = run_task("comment_label", context={"raw_text": "...", ...})
 │   comment_entities       ── 评论 ↔ 实体 多对多（uniq review_id+canonical_id）
 │   alerts                 ── 7 类预警事件 + AI 写 title
 │   app_classifications    ── unknown app AI 分类（candidate 候选池）
-│   failed_ai_jobs         ── AI 死信队列（重试耗尽后写入）
+│   failed_ai_jobs         ── AI 失败队列（重试耗尽后写入）
 │
 └─ Ops
     sync_log               ── 抓取作业日志（rolling 50）
@@ -373,7 +373,7 @@ competitors lookup（人工守门）
 | weekly_sync 完成 | "📅 周更完成" | 同上 |
 | Cookie 失效（fb_adlib / sensor_tower / appmagic / similarweb）| 即时红色卡片 | red |
 | 每小时 retry-only 实际处理过任务 | "🔁 重试汇总" | 默认 |
-| AI 死信队列累计 ≥ 10 | "⚠️ AI 死信告警" | red（dashboard 实现，未自动）|
+| AI 失败队列累计 ≥ 10 | "⚠️ AI 失败告警" | red（dashboard 实现，未自动）|
 
 ---
 
@@ -647,7 +647,7 @@ SELECT script, MAX(started_at) as last_run, success
 FROM sync_log
 GROUP BY script ORDER BY last_run DESC;
 
--- AI 死信
+-- AI 失败队列
 SELECT task_name, COUNT(*) as n, MAX(last_attempt_at) as last
 FROM failed_ai_jobs
 WHERE resolved_at IS NULL
