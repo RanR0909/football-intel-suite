@@ -280,6 +280,9 @@ def _notify_cookie_expired(source: str, error_tail: str = "") -> None:
         fields.append({"label": "错误信息", "value": error_tail[:200]})
     try:
         feishu_notify.send_card(title, fields=fields, color="red",
+                                actions=[{"text": "看同步日志",
+                                          "url": feishu_notify.dashboard_url(
+                                              "/system/sync-log", source=source)}],
                                 footer="登录后下次同步会自动恢复")
     except Exception as e:
         print(f"[feishu] cookie 告警发送失败: {e}", file=sys.stderr)
@@ -505,6 +508,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                         {"label": "队列剩余", "value": f"{queue_size} 项"},
                     ],
                     color=color,
+                    actions=[{"text": "看同步日志",
+                              "url": feishu_notify.dashboard_url("/system/sync-log")}],
                     footer=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 )
             except Exception as e:
@@ -574,10 +579,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             fields.append(fail_field)
 
         try:
+            actions = [
+                {"text": "看预警中心", "url": feishu_notify.dashboard_url("/alerts", since="24h")},
+                {"text": "看同步日志", "url": feishu_notify.dashboard_url("/system/sync-log"),
+                 "type": "default"},
+            ]
             feishu_notify.send_card(
                 "📊 每日抓取完成",
                 fields=fields,
                 color=color,
+                actions=actions,
                 footer=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             )
         except Exception as e:

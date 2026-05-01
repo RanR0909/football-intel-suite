@@ -29,8 +29,44 @@ import urllib.request
 
 WEBHOOK_ENV = "FEISHU_WEBHOOK_URL"
 KEYWORD_ENV = "FEISHU_KEYWORD"
+DASHBOARD_URL_ENV = "DASHBOARD_BASE_URL"
 DEFAULT_KEYWORD = "INTEL-OPS"
+DEFAULT_DASHBOARD_URL = "http://localhost:5173"
 TIMEOUT = 10
+
+
+# ─────────────────────────── Dashboard URL helpers ────────────────────────────
+
+
+def _dashboard_base() -> str:
+    return (os.environ.get(DASHBOARD_URL_ENV) or DEFAULT_DASHBOARD_URL).rstrip("/")
+
+
+def dashboard_url(path: str = "/", **query) -> str:
+    """构造 dashboard URL，自动拼 query 参数。"""
+    from urllib.parse import urlencode
+    base = _dashboard_base()
+    if not path.startswith("/"):
+        path = "/" + path
+    qs = urlencode({k: v for k, v in query.items() if v is not None and v != ""})
+    return f"{base}{path}{('?' + qs) if qs else ''}"
+
+
+def alert_url(alert_type: str, app_name: str = "", alert_id: int | None = None) -> str:
+    """alert 类型 → 对应 dashboard 子页 URL（与前端 AlertRow.buildDetailHref 对齐）。"""
+    page_map = {
+        "ranking":    ("/data/rankings", {"competitor": app_name}),
+        "commercial": ("/data/iap",      {"competitor": app_name}),
+        "news":       ("/content/news",  {"competitor": app_name}),
+        "release":    ("/content/releases", {"competitor": app_name}),
+        "rating":     ("/content/gp-reviews", {"competitor": app_name}),
+        "churn":      ("/content/gp-reviews", {"competitor": app_name, "label": "churn_signal"}),
+        "ads":        ("/content/ads",   {"competitor": app_name}),
+    }
+    path, params = page_map.get(alert_type, ("/alerts", {}))
+    if alert_id:
+        params["id"] = str(alert_id)
+    return dashboard_url(path, **params)
 
 
 def is_enabled() -> bool:
@@ -89,14 +125,17 @@ def send_card(
     *,
     color: str = "blue",
     footer: str | None = None,
+    actions: list[dict] | None = None,
 ) -> bool:
     """发交互卡片消息。
 
     Args:
-        title:  顶部标题（前缀自动加 keyword）
-        fields: list[{"label": str, "value": str}]，每项一行
-        color:  green / blue / orange / red / grey（决定头部色块）
-        footer: 底部备注（可选，如时间戳 / 链接）
+        title:   顶部标题（前缀自动加 keyword）
+        fields:  list[{"label": str, "value": str}]，每项一行
+        color:   green / blue / orange / red / grey（决定头部色块）
+        footer:  底部备注（可选，如时间戳）
+        actions: 底部按钮，list[{"text": str, "url": str, "type"?: str}]
+                 用 dashboard_url() / alert_url() helper 构造 URL 到看板对应子页
     """
     if not is_enabled():
         return False
@@ -112,6 +151,22 @@ def send_card(
                 "content": f"**{label}**\n{value}",
             },
         })
+    if actions:
+        valid = [a for a in actions if a.get("url")]
+        if valid:
+            elements.append({"tag": "hr"})
+            elements.append({
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": a.get("text", "查看")},
+                        "type": a.get("type", "primary"),
+                        "url": a["url"],
+                    }
+                    for a in valid
+                ],
+            })
     if footer:
         elements.append({"tag": "hr"})
         elements.append({

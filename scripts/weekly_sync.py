@@ -181,6 +181,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "📅 周更完成",
                 fields=fields,
                 color=color,
+                actions=[
+                    {"text": "看总览", "url": feishu_notify.dashboard_url("/overview")},
+                    {"text": "看新闻", "url": feishu_notify.dashboard_url("/content/news", since="7d"),
+                     "type": "default"},
+                ],
                 footer=_dt.now().strftime("%Y-%m-%d %H:%M:%S"),
             )
         except Exception as e:
