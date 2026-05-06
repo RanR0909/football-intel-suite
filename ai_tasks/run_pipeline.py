@@ -47,6 +47,7 @@ from ai_tasks.alert_engine import run_engine as run_alert_engine  # noqa: E402
 from ai_tasks.news_classifier import classify_pending as run_news_classifier  # noqa: E402
 from ai_tasks.post_topic import classify_pending as run_post_topic  # noqa: E402
 from ai_tasks.ad_selling_point import classify_pending as run_ad_selling_point  # noqa: E402
+from ai_tasks.post_entity_extract import classify_pending as run_post_entity  # noqa: E402
 
 log = logging.getLogger("ai_pipeline")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s · %(message)s")
@@ -54,16 +55,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 
 def run_content_classifiers(*, limit: int = 200, dry_run: bool = False,
                             only: str | None = None) -> dict:
-    """跑 task 5/6/7 — 三个独立 content classifier。
+    """跑 task 5/6/7 + post_entity_extract — 4 个独立 content classifier。
 
     每个分支独立 try/except — 任一失败不阻塞其他（铁律 1：AI 队列内部各任务互不依赖）。
 
-    only=None  跑全部三个
-    only='news'  只跑 news_classifier
-    only='post'  只跑 post_topic
-    only='ads'   只跑 ad_selling_point
+    only=None         跑全部四个
+    only='news'       只跑 news_classifier
+    only='post'       只跑 post_topic
+    only='post_ent'   只跑 post_entity_extract（球员/联赛实体抽取）
+    only='ads'        只跑 ad_selling_point
     """
-    out = {"news": None, "post_topic": None, "ad_selling_point": None}
+    out = {"news": None, "post_topic": None, "post_entity": None, "ad_selling_point": None}
 
     if only in (None, "news"):
         try:
@@ -80,6 +82,16 @@ def run_content_classifiers(*, limit: int = 200, dry_run: bool = False,
         except Exception as e:
             log.exception(f"post_topic 整体失败: {e}")
             out["post_topic"] = {"error": str(e)}
+
+    if only in (None, "post_ent"):
+        # task 2.5 — entity_extract on community_posts (migration 0016)
+        # 给 Social 页的"球员/联赛"维度准备数据；和 post_topic 互补但独立
+        try:
+            log.info("--- task 2.5 · post_entity_extract (community_posts) ---")
+            out["post_entity"] = run_post_entity(limit=limit, dry_run=dry_run)
+        except Exception as e:
+            log.exception(f"post_entity_extract 整体失败: {e}")
+            out["post_entity"] = {"error": str(e)}
 
     if only in (None, "ads"):
         try:
@@ -177,9 +189,9 @@ def main() -> int:
     ap.add_argument("--skip-alerts", action="store_true",
                     help="跳过 alert_engine")
     ap.add_argument("--skip-content", action="store_true",
-                    help="跳过 task 5/6/7 (news/post_topic/ad_selling_point)")
-    ap.add_argument("--only", choices=["news", "post", "ads"],
-                    help="只跑 task 5/6/7 中的某一个")
+                    help="跳过 task 5/6/7 + post_entity_extract (4 个内容分类器)")
+    ap.add_argument("--only", choices=["news", "post", "post_ent", "ads"],
+                    help="只跑 4 个内容分类器中的某一个")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
