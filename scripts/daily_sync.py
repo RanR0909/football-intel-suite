@@ -71,8 +71,10 @@ PHASE_1_FETCHERS = [
     # 评论原始抓取（拆出来的快路径；9 竞品 × 12 区 GP 实际需 5-10 分钟）
     ("comment_fetch", "评论抓取（GP+iOS）",
         ["-m", "competitor_comment.comment_fetch"], 900, "http"),
-    # 产品动态：strategy_monitor/run_headless.py 已废（文件不存在）；
-    # 版本变化数据由 comment_fetch（带 review.version）+ aggregator 派生 product_updates.items 提供。
+    # iTunes Lookup → app_versions 表（10 个 app 版本号 + releaseNotes）
+    # 比 review.version 派生更准确：直接拿 currentVersion 而不是评论里的旧版本号
+    ("app_versions", "App 版本 + releaseNotes",
+        ["-m", "async_crawler", "--sources", "app_versions"], 60, "http"),
     # Playwright - 三个手动登录源
     ("appmagic", "AppMagic 排名",
         ["-m", "market_rank.run_headless"], 240, "playwright"),

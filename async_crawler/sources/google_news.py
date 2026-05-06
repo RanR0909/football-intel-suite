@@ -169,6 +169,9 @@ class GoogleNewsCrawler(BaseCrawler):
             f"⭐ = matched business keywords · self-published & social sources excluded._\n"
         )
 
+        # 累积要入库的所有条目（DB 写入比 JSON 写入更怕异常 — 走全部循环结束后一次 upsert）
+        rows_for_db: list[dict] = []
+
         for app in cfg.get("apps", []):
             name = app["name"]
             self.log.info(f"[{name}] broad...")
@@ -198,6 +201,18 @@ class GoogleNewsCrawler(BaseCrawler):
                 "is_biz": bool(it.get("is_biz")),
             } for it in merged]
 
+            # 准备入库 — DAO 期望 {title, link, pub_dt(datetime), source, desc, app_name, matched_keyword}
+            for it in merged:
+                rows_for_db.append({
+                    "title": it["title"],
+                    "link": it["link"],
+                    "pub_dt": it["pub_dt"],   # 已是 datetime（_parse_items 解析过）
+                    "source": it["source"],
+                    "desc": it["desc"],
+                    "app_name": name,
+                    "matched_keyword": "biz" if it.get("is_biz") else "broad",
+                })
+
             rec = self.standardize(name, {
                 "query_broad": q_broad,
                 "query_biz": q_biz,
@@ -211,6 +226,17 @@ class GoogleNewsCrawler(BaseCrawler):
         if results:
             await database.save(self.source_name, results)
             self._write_markdown(all_md_sections, today)
+
+        # 入库 — JSON / MD 主路径已保留，DB 失败不影响 JSON / MD 输出（铁律 1 落地：
+        # google_news 是抓取队列，不要被下游 DB / AI 拖死）
+        if rows_for_db:
+            try:
+                from shared.dao import news_items as dao_news
+                inserted = dao_news.upsert_news_items(rows_for_db)
+                self.log.info(f"[google_news] DB upsert {inserted}/{len(rows_for_db)}")
+            except Exception as e:
+                self.log.warning(f"[google_news] DB upsert failed (JSON/MD 仍可用): {e}")
+
         return results
 
     async def _fetch_rss(self, query: str, *, hl: str, gl: str, ceid: str) -> str:
