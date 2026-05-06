@@ -1,18 +1,25 @@
-"""run_pipeline — 评论 AI 管道批量驱动器（每日 02:30 在 daily_sync 后跑）。
+"""run_pipeline — AI 管道批量驱动器（每日 02:30 在 daily_sync 后跑）。
 
 顺序：
-  1. fetch unlabeled reviews（reviews.labeled_at IS NULL）
-  2. for each review:
-     a. comment_label → 写 reviews.label / language / translated_text / labeled_at
-     b. entity_extract → 写 entity_aliases (新 canonical) + comment_entities
-  3. 跑 alert_engine 全 7 类规则
+  1. comment pipeline（comment_label + entity_extract，主路径，~200 条/批）
+  2. content classifier（task 5/6/7，独立可选，互不依赖 — 5 条铁律 §1）
+     a. news_classifier      → 写 news_items.is_business / business_category / ...
+     b. post_topic_classifier → 写 community_posts.primary_topic / ...
+     c. ad_selling_point     → 写 ad_creatives.selling_points / audience / tone
+  3. alert_engine 全 7 类规则
+
+每个分支独立失败不阻塞其他（铁律 1 落地）。
 
 CLI：
-    python3 -m ai_tasks.run_pipeline                    # 跑全管道（默认 200 条评论 + alerts）
+    python3 -m ai_tasks.run_pipeline                    # 跑全管道
     python3 -m ai_tasks.run_pipeline --limit 50         # 只跑 50 条评论
-    python3 -m ai_tasks.run_pipeline --skip-alerts      # 只跑评论管道
-    python3 -m ai_tasks.run_pipeline --skip-comments    # 只跑 alert_engine
-    python3 -m ai_tasks.run_pipeline --dry-run          # 不调 AI 不入库（仅看会处理多少条）
+    python3 -m ai_tasks.run_pipeline --skip-alerts      # 跳过 alert_engine
+    python3 -m ai_tasks.run_pipeline --skip-comments    # 跳过评论管道
+    python3 -m ai_tasks.run_pipeline --skip-content     # 跳过 task 5/6/7
+    python3 -m ai_tasks.run_pipeline --only news        # 只跑 news_classifier
+    python3 -m ai_tasks.run_pipeline --only post        # 只跑 post_topic
+    python3 -m ai_tasks.run_pipeline --only ads         # 只跑 ad_selling_point
+    python3 -m ai_tasks.run_pipeline --dry-run          # 不调 AI 不入库
 """
 
 from __future__ import annotations
@@ -37,9 +44,52 @@ except Exception:
 from ai_tasks.comment_label import label_and_persist, fetch_unlabeled  # noqa: E402
 from ai_tasks.entity_extract import extract_entities  # noqa: E402
 from ai_tasks.alert_engine import run_engine as run_alert_engine  # noqa: E402
+from ai_tasks.news_classifier import classify_pending as run_news_classifier  # noqa: E402
+from ai_tasks.post_topic import classify_pending as run_post_topic  # noqa: E402
+from ai_tasks.ad_selling_point import classify_pending as run_ad_selling_point  # noqa: E402
 
 log = logging.getLogger("ai_pipeline")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s · %(message)s")
+
+
+def run_content_classifiers(*, limit: int = 200, dry_run: bool = False,
+                            only: str | None = None) -> dict:
+    """跑 task 5/6/7 — 三个独立 content classifier。
+
+    每个分支独立 try/except — 任一失败不阻塞其他（铁律 1：AI 队列内部各任务互不依赖）。
+
+    only=None  跑全部三个
+    only='news'  只跑 news_classifier
+    only='post'  只跑 post_topic
+    only='ads'   只跑 ad_selling_point
+    """
+    out = {"news": None, "post_topic": None, "ad_selling_point": None}
+
+    if only in (None, "news"):
+        try:
+            log.info("--- task 5 · news_classifier ---")
+            out["news"] = run_news_classifier(limit=limit, dry_run=dry_run)
+        except Exception as e:
+            log.exception(f"news_classifier 整体失败: {e}")
+            out["news"] = {"error": str(e)}
+
+    if only in (None, "post"):
+        try:
+            log.info("--- task 6 · post_topic_classifier ---")
+            out["post_topic"] = run_post_topic(limit=limit, dry_run=dry_run)
+        except Exception as e:
+            log.exception(f"post_topic 整体失败: {e}")
+            out["post_topic"] = {"error": str(e)}
+
+    if only in (None, "ads"):
+        try:
+            log.info("--- task 7 · ad_selling_point ---")
+            out["ad_selling_point"] = run_ad_selling_point(limit=limit, dry_run=dry_run)
+        except Exception as e:
+            log.exception(f"ad_selling_point 整体失败: {e}")
+            out["ad_selling_point"] = {"error": str(e)}
+
+    return out
 
 
 def run_comments(limit: int = 200, dry_run: bool = False, concurrency: int = 8) -> dict:
@@ -121,22 +171,45 @@ def run_comments(limit: int = 200, dry_run: bool = False, concurrency: int = 8) 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=200,
-                    help="本次最多处理多少条未标签评论")
+                    help="每个任务最多处理多少条未分类条目")
     ap.add_argument("--skip-comments", action="store_true",
-                    help="跳过评论管道（只跑 alert_engine）")
+                    help="跳过评论管道")
     ap.add_argument("--skip-alerts", action="store_true",
-                    help="跳过 alert_engine（只跑评论管道）")
+                    help="跳过 alert_engine")
+    ap.add_argument("--skip-content", action="store_true",
+                    help="跳过 task 5/6/7 (news/post_topic/ad_selling_point)")
+    ap.add_argument("--only", choices=["news", "post", "ads"],
+                    help="只跑 task 5/6/7 中的某一个")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    result = {"comments": None, "alerts": None}
+    result = {"comments": None, "content": None, "alerts": None}
 
-    if not args.skip_comments:
-        result["comments"] = run_comments(limit=args.limit, dry_run=args.dry_run)
+    # 注意：5 条铁律 §1 要求 AI 任务之间互相独立。每个分支用独立 try/except，
+    # 任一失败不阻塞下一个。
+    if not args.skip_comments and not args.only:
+        try:
+            result["comments"] = run_comments(limit=args.limit, dry_run=args.dry_run)
+        except Exception as e:
+            log.exception(f"comment pipeline 整体失败: {e}")
+            result["comments"] = {"error": str(e)}
 
-    if not args.skip_alerts:
-        log.info("--- alert_engine ---")
-        result["alerts"] = run_alert_engine(dry_run=args.dry_run)
+    if not args.skip_content:
+        try:
+            result["content"] = run_content_classifiers(
+                limit=args.limit, dry_run=args.dry_run, only=args.only,
+            )
+        except Exception as e:
+            log.exception(f"content classifiers 整体失败: {e}")
+            result["content"] = {"error": str(e)}
+
+    if not args.skip_alerts and not args.only:
+        try:
+            log.info("--- alert_engine ---")
+            result["alerts"] = run_alert_engine(dry_run=args.dry_run)
+        except Exception as e:
+            log.exception(f"alert_engine 整体失败: {e}")
+            result["alerts"] = {"error": str(e)}
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

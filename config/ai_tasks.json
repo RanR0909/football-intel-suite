@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "_doc": "AI 任务统一配置 v2.0（2026-04-30 重构）。3 个任务，全部 haiku 4.5，全部输出 JSON。原则：AI 只做结构化工作（分类/抽取/归一/翻译/短事实陈述），不做主观判断/不写长文/不提建议/不做情感分析。",
+  "_doc": "AI 任务统一配置 v2.0（2026-05-06 加 task #5/6/7）。7 个任务，全部 haiku 4.5，全部输出 JSON。原则：AI 只做结构化工作（分类/抽取/归一/翻译/短事实陈述），不做主观判断/不写长文/不提建议/不做情感分析。",
   "endpoints": {
     "flashapi": {
       "_doc": "中转代理（默认）",
@@ -80,6 +80,39 @@
       "temperature": 0.0,
       "prompt": {
         "file": "ai_tasks/prompts/app_classifier.txt"
+      }
+    },
+    "news_classifier": {
+      "_doc": "任务 5 — Google News 商业新闻过滤 + 8 类 category 分类。输出 JSON。",
+      "model": "haiku_4_5",
+      "output_format": "json",
+      "json_strip_markdown": true,
+      "max_tokens": 256,
+      "temperature": 0.0,
+      "prompt": {
+        "file": "ai_tasks/prompts/news_classifier.txt"
+      }
+    },
+    "post_topic_classifier": {
+      "_doc": "任务 6 — Reddit/Twitter 帖子 → primary_topic(8 选 1) + secondary(0-2) + competitor_mentioned。",
+      "model": "haiku_4_5",
+      "output_format": "json",
+      "json_strip_markdown": true,
+      "max_tokens": 256,
+      "temperature": 0.0,
+      "prompt": {
+        "file": "ai_tasks/prompts/post_topic.txt"
+      }
+    },
+    "ad_selling_point": {
+      "_doc": "任务 7 — Meta 广告创意 → selling_points(8 多选) + audience(5 单) + tone(4 单)。",
+      "model": "haiku_4_5",
+      "output_format": "json",
+      "json_strip_markdown": true,
+      "max_tokens": 256,
+      "temperature": 0.0,
+      "prompt": {
+        "file": "ai_tasks/prompts/ad_selling_point.txt"
       }
     }
   }
