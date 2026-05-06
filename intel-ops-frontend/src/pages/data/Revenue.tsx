@@ -1,227 +1,217 @@
-/** 收入下载页
+/** 收入下载页 · 双源合并视图
  *
- * 数据现实（按 source 字段覆盖）：
- *   sensor_tower → us 1 国，dl + rev + rank 全有  (10 条 / 10 竞品)
- *   androidrank  → 不分国家，仅 Android dl       (8 条 / 8 竞品，rev 永远 0)
- *   appmagic     → 12 国，仅排名（dl/rev 全 NULL） → 不在本页列出，去"排名异动"
+ * 用户视角："大概看个趋势" — 不要 source 切换，把 2 个源的数据并排展示。
  *
- * 所以本页：
- *   · source chip 只列 sensor_tower / androidrank
- *   · sensor_tower 选中 → region 锁 us
- *   · androidrank 选中 → region 隐藏（数据本身不分国家），revenue 列也隐藏
+ * 数据现实：
+ *   sensor_tower → us 1 国 · 下载 + 收入 + 排名 (10/10 竞品)
+ *   androidrank  → 全球总 · 仅下载 (8/8 竞品，无收入)
+ *
+ * 表格 6 列：
+ *   产品 | ST · 月下载(US) vs AF | ST · 月收入(US) vs AF | AR · 全球下载 vs AF
+ *
+ * AF 永远固定第一行高亮，其他竞品按 ST 月收入降序（同样保留 baseline 比较）。
  */
 import { useMemo, useState } from "react"
 import PageHeader from "@/components/shared/PageHeader"
 import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
-import FilterChips from "@/components/shared/FilterChips"
 import BaselineToggle from "@/components/shared/BaselineToggle"
 import BaselineDeltaCell from "@/components/shared/BaselineDeltaCell"
 import EmptyState from "@/components/shared/EmptyState"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useRank } from "@/hooks/api/useRank"
-import { useUrlFilters } from "@/hooks/useUrlFilters"
 import { computeNumericDelta } from "@/lib/baseline"
 import { formatCompactNumber } from "@/lib/utils"
 import { BASELINE_APP } from "@/types/domain"
 
-type Source = "sensor_tower" | "androidrank"
-
-interface SourceMeta {
-  value: Source
-  label: string
-  /** 该源原生支持哪些区域。空数组 = 不分国家（全球总） */
-  regions: string[]
-  hasRevenue: boolean
-  hasRank: boolean
-  hint: string
+interface MergedRow {
+  competitor: string
+  st_dl: number | null      // Sensor Tower us 月下载
+  st_rev: number | null     // Sensor Tower us 月收入
+  st_rank: number | null    // Sensor Tower us 体育榜排名
+  ar_dl: number | null      // Androidrank 全球总下载
 }
 
-const SOURCES: SourceMeta[] = [
-  {
-    value: "sensor_tower",
-    label: "Sensor Tower",
-    regions: ["us"],
-    hasRevenue: true,
-    hasRank: true,
-    hint: "仅美区 · 月估算 · 下载+收入+排名",
-  },
-  {
-    value: "androidrank",
-    label: "Androidrank",
-    regions: [],
-    hasRevenue: false,
-    hasRank: false,
-    hint: "全球总 · 仅 Android · 仅下载（无收入数据）",
-  },
-]
-
 export default function Revenue() {
-  const { value, setValue } = useUrlFilters({
-    source: "sensor_tower", region: "us",
-  })
   const [showBaseline, setShowBaseline] = useState(true)
-  const source = value("source") as Source
-  const meta = SOURCES.find((s) => s.value === source) || SOURCES[0]
 
-  // sensor_tower → 锁 us；androidrank → region 字段对它无意义，传空
-  const region = meta.regions.length > 0 ? meta.regions[0] : ""
-  // 选中 source 时若 URL 上 region 不在该 source 支持列表，自动 reset
-  if (value("region") !== region) {
-    // 静默修正 URL（避免下次刷新还是错的）
-    setTimeout(() => setValue("region", region), 0)
-  }
+  // 两个源并发拉
+  const stQ = useRank({ source: "sensor_tower", region: "us", limit: 100 })
+  const arQ = useRank({ source: "androidrank", limit: 100 })
 
-  const { data, isLoading, isError, refetch } = useRank({
-    source, region: region || undefined, limit: 100,
-  })
-  const rows = data?.rankings || []
+  const isLoading = stQ.isLoading || arQ.isLoading
+  const isError = stQ.isError && arQ.isError
+  const refetch = () => { stQ.refetch(); arQ.refetch() }
 
-  const af = rows.find((r) => r.competitor === BASELINE_APP)
-  const others = useMemo(
-    () => rows.filter((r) => r.competitor && r.competitor !== BASELINE_APP)
+  // 按竞品名合并两个 source 的字段
+  const { rows, af } = useMemo(() => {
+    const stByName: Record<string, any> = {}
+    for (const r of stQ.data?.rankings || []) {
+      if (r.competitor) stByName[r.competitor] = r
+    }
+    const arByName: Record<string, any> = {}
+    for (const r of arQ.data?.rankings || []) {
+      if (r.competitor) arByName[r.competitor] = r
+    }
+    // 取两个源 competitor 名字的并集
+    const allNames = new Set<string>([
+      ...Object.keys(stByName),
+      ...Object.keys(arByName),
+    ])
+    const merged: MergedRow[] = [...allNames].map((name) => ({
+      competitor: name,
+      st_dl: stByName[name]?.downloads_num ?? null,
+      st_rev: stByName[name]?.revenue_num ?? null,
+      st_rank: stByName[name]?.rank_value ?? null,
+      ar_dl: arByName[name]?.downloads_num ?? null,
+    }))
+    const af = merged.find((r) => r.competitor === BASELINE_APP) || null
+    const others = merged
+      .filter((r) => r.competitor !== BASELINE_APP)
       .sort((a, b) => {
-        if (meta.hasRevenue) return (b.revenue_num || 0) - (a.revenue_num || 0)
-        return (b.downloads_num || 0) - (a.downloads_num || 0)
-      }),
-    [rows, meta.hasRevenue]
-  )
+        const va = a.st_rev ?? a.st_dl ?? a.ar_dl ?? 0
+        const vb = b.st_rev ?? b.st_dl ?? b.ar_dl ?? 0
+        return vb - va
+      })
+    return { rows: af ? [af, ...others] : others, af }
+  }, [stQ.data, arQ.data])
+
+  // KPI — AF baseline 4 个数
+  const kpi = {
+    afDl: af?.st_dl,
+    afRev: af?.st_rev,
+    afRank: af?.st_rank,
+    completeness: rows.filter((r) =>
+      r.competitor !== BASELINE_APP && (r.st_dl != null || r.ar_dl != null)
+    ).length,
+  }
+  const compCount = rows.filter((r) => r.competitor !== BASELINE_APP).length
 
   return (
     <div>
       <PageHeader
         title="收入下载"
-        subtitle={`以 AF 为基准对比 9 监控竞品 · ${meta.label}（${meta.hint}）`}
+        subtitle="Sensor Tower (US 月估算) + Androidrank (全球·Android) · 以 AF 为基准"
       />
 
       <KpiRow>
         <KpiCard
           label="AF 月下载"
-          value={af?.downloads_num != null ? formatCompactNumber(af.downloads_num) : "—"}
-          hint={region ? `${region.toUpperCase()} 区` : "全球"}
+          value={kpi.afDl != null ? formatCompactNumber(kpi.afDl) : "—"}
+          hint="US (Sensor Tower)"
         />
-        {meta.hasRevenue ? (
-          <KpiCard
-            label="AF 月收入"
-            value={af?.revenue_num != null ? "$" + formatCompactNumber(af.revenue_num) : "—"}
-            hint={region ? `${region.toUpperCase()} 区` : "全球"}
-          />
-        ) : (
-          <KpiCard label="AF 月收入" value="—" hint={`${meta.label} 不提供`} />
-        )}
         <KpiCard
-          label="AF 排名"
-          value={af?.rank_value != null && meta.hasRank ? `#${af.rank_value}` : "—"}
-          hint={meta.hasRank ? "体育榜" : `${meta.label} 不提供`}
+          label="AF 月收入"
+          value={kpi.afRev != null ? "$" + formatCompactNumber(kpi.afRev) : "—"}
+          hint="US (Sensor Tower)"
+        />
+        <KpiCard
+          label="AF US 排名"
+          value={kpi.afRank != null ? `#${kpi.afRank}` : "—"}
+          hint="体育榜"
         />
         <KpiCard
           label="数据完整度"
-          value={`${
-            others.filter((r) => meta.hasRevenue ? r.revenue_num != null : r.downloads_num != null).length
-          }/${others.length}`}
-          hint={`竞品有${meta.hasRevenue ? "收入" : "下载"}数据的`}
+          value={`${kpi.completeness}/${compCount}`}
+          hint="竞品至少有一个源"
         />
       </KpiRow>
 
-      <div className="space-y-2 mb-3">
-        <FilterChips
-          label="数据源"
-          options={SOURCES.map((s) => ({ value: s.value, label: s.label }))}
-          value={source}
-          onChange={(v) => setValue("source", v)}
-        />
-        {/* 区域 chip 只在 source 有多区域时展示；否则一行说明实际覆盖 */}
-        {meta.regions.length > 1 ? (
-          <FilterChips
-            label="区域"
-            options={meta.regions.map((r) => ({ value: r, label: r.toUpperCase() }))}
-            value={region}
-            onChange={(v) => setValue("region", v)}
-          />
-        ) : (
-          <div className="text-2xs text-muted-foreground pl-1">
-            <span className="font-mono">{meta.label}</span>:
-            {meta.regions.length === 1
-              ? <> 数据仅覆盖 <span className="font-mono font-medium">{meta.regions[0].toUpperCase()}</span> 区域</>
-              : <> 数据不分国家（全球总）</>
-            }
-          </div>
-        )}
-        <div className="flex justify-end">
-          <BaselineToggle show={showBaseline} onChange={setShowBaseline} />
-        </div>
+      <div className="flex justify-end mb-3">
+        <BaselineToggle show={showBaseline} onChange={setShowBaseline} />
       </div>
 
       {isLoading && <SkeletonTable rows={10} />}
-      {isError && <EmptyState type="error" onRetry={() => refetch()} />}
+      {isError && <EmptyState type="error" onRetry={refetch} />}
       {!isLoading && !isError && rows.length === 0 && <EmptyState type="empty" />}
 
       {rows.length > 0 && (
-        <div className="border border-border-soft rounded-md bg-card overflow-hidden">
+        <div className="border border-border-soft rounded-md bg-card overflow-x-auto">
           <table className="w-full text-xs">
+            {/* 双层表头：上层是数据源分组，下层是字段 */}
             <thead className="bg-muted/30">
+              <tr className="text-2xs uppercase tracking-wider text-muted-foreground border-b border-border-soft">
+                <th rowSpan={2} className="text-left px-3 align-bottom pb-1.5 pt-2">产品</th>
+                <th
+                  colSpan={showBaseline ? 4 : 2}
+                  className="text-center px-3 pt-1.5 pb-0.5 border-l border-border-soft text-muted-foreground/80 font-mono"
+                >
+                  Sensor Tower (US 月估算)
+                </th>
+                <th
+                  colSpan={showBaseline ? 2 : 1}
+                  className="text-center px-3 pt-1.5 pb-0.5 border-l border-border-soft text-muted-foreground/80 font-mono"
+                >
+                  Androidrank (全球·Android)
+                </th>
+                <th rowSpan={2} className="text-right px-3 align-bottom pb-1.5 pt-2 border-l border-border-soft">
+                  US 排名
+                </th>
+              </tr>
               <tr className="text-2xs uppercase tracking-wider text-muted-foreground">
-                <th className="text-left px-3 h-8">产品</th>
-                <th className="text-right px-3 h-8">月下载</th>
+                <th className="text-right px-3 h-8 border-l border-border-soft">月下载</th>
                 {showBaseline && <th className="text-right px-3 h-8">vs AF</th>}
-                {meta.hasRevenue && <th className="text-right px-3 h-8">月收入</th>}
-                {meta.hasRevenue && showBaseline && <th className="text-right px-3 h-8">vs AF</th>}
-                {meta.hasRank && <th className="text-right px-3 h-8">排名</th>}
+                <th className="text-right px-3 h-8">月收入</th>
+                {showBaseline && <th className="text-right px-3 h-8">vs AF</th>}
+                <th className="text-right px-3 h-8 border-l border-border-soft">月下载</th>
+                {showBaseline && <th className="text-right px-3 h-8">vs AF</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border-soft">
-              {af && (
-                <tr className="bg-pill-blue-bg/40 font-medium">
-                  <td className="px-3 h-9">
-                    <span className="text-semantic-info">{BASELINE_APP}</span>
-                    <span className="ml-2 text-2xs text-pill-blue-fg">[baseline]</span>
-                  </td>
-                  <td className="px-3 h-9 text-right tabular-nums">
-                    {af.downloads_num != null ? formatCompactNumber(af.downloads_num) : "—"}
-                  </td>
-                  {showBaseline && <td className="px-3 h-9 text-right text-muted-foreground">—</td>}
-                  {meta.hasRevenue && (
+              {rows.map((r) => {
+                const isAf = r.competitor === BASELINE_APP
+                return (
+                  <tr
+                    key={r.competitor}
+                    className={isAf
+                      ? "bg-pill-blue-bg/40 font-medium"
+                      : "hover:bg-muted/30 transition-colors duration-150"}
+                  >
+                    <td className="px-3 h-9">
+                      {isAf ? (
+                        <>
+                          <span className="text-semantic-info">{BASELINE_APP}</span>
+                          <span className="ml-2 text-2xs text-pill-blue-fg">[baseline]</span>
+                        </>
+                      ) : (
+                        <span>{r.competitor}</span>
+                      )}
+                    </td>
+                    {/* Sensor Tower 块 */}
+                    <td className="px-3 h-9 text-right tabular-nums border-l border-border-soft">
+                      {r.st_dl != null ? formatCompactNumber(r.st_dl) : "—"}
+                    </td>
+                    {showBaseline && (
+                      <td className="px-3 h-9 text-right">
+                        {isAf ? <span className="text-muted-foreground">—</span>
+                              : <BaselineDeltaCell delta={computeNumericDelta(r.st_dl, af?.st_dl ?? null)} />}
+                      </td>
+                    )}
                     <td className="px-3 h-9 text-right tabular-nums">
-                      {af.revenue_num != null ? "$" + formatCompactNumber(af.revenue_num) : "—"}
+                      {r.st_rev != null ? "$" + formatCompactNumber(r.st_rev) : "—"}
                     </td>
-                  )}
-                  {meta.hasRevenue && showBaseline && (
-                    <td className="px-3 h-9 text-right text-muted-foreground">—</td>
-                  )}
-                  {meta.hasRank && (
-                    <td className="px-3 h-9 text-right tabular-nums">
-                      {af.rank_value != null ? `#${af.rank_value}` : "—"}
+                    {showBaseline && (
+                      <td className="px-3 h-9 text-right">
+                        {isAf ? <span className="text-muted-foreground">—</span>
+                              : <BaselineDeltaCell delta={computeNumericDelta(r.st_rev, af?.st_rev ?? null)} />}
+                      </td>
+                    )}
+                    {/* Androidrank 块 */}
+                    <td className="px-3 h-9 text-right tabular-nums border-l border-border-soft">
+                      {r.ar_dl != null ? formatCompactNumber(r.ar_dl) : "—"}
                     </td>
-                  )}
-                </tr>
-              )}
-              {others.map((r) => (
-                <tr key={r.id} className="hover:bg-muted/30 transition-colors duration-150">
-                  <td className="px-3 h-9 font-medium">{r.competitor}</td>
-                  <td className="px-3 h-9 text-right tabular-nums">
-                    {r.downloads_num != null ? formatCompactNumber(r.downloads_num) : "—"}
-                  </td>
-                  {showBaseline && (
-                    <td className="px-3 h-9 text-right">
-                      <BaselineDeltaCell delta={computeNumericDelta(r.downloads_num, af?.downloads_num)} />
+                    {showBaseline && (
+                      <td className="px-3 h-9 text-right">
+                        {isAf ? <span className="text-muted-foreground">—</span>
+                              : <BaselineDeltaCell delta={computeNumericDelta(r.ar_dl, af?.ar_dl ?? null)} />}
+                      </td>
+                    )}
+                    {/* 排名 */}
+                    <td className="px-3 h-9 text-right tabular-nums border-l border-border-soft">
+                      {r.st_rank != null ? `#${r.st_rank}` : "—"}
                     </td>
-                  )}
-                  {meta.hasRevenue && (
-                    <td className="px-3 h-9 text-right tabular-nums">
-                      {r.revenue_num != null ? "$" + formatCompactNumber(r.revenue_num) : "—"}
-                    </td>
-                  )}
-                  {meta.hasRevenue && showBaseline && (
-                    <td className="px-3 h-9 text-right">
-                      <BaselineDeltaCell delta={computeNumericDelta(r.revenue_num, af?.revenue_num)} />
-                    </td>
-                  )}
-                  {meta.hasRank && (
-                    <td className="px-3 h-9 text-right tabular-nums">
-                      {r.rank_value != null ? `#${r.rank_value}` : "—"}
-                    </td>
-                  )}
-                </tr>
-              ))}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
