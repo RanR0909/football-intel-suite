@@ -1152,11 +1152,19 @@ class APIHandler(BaseHTTPRequestHandler):
             return self._send_json({"error": f"invalid tab: {tab}"}, status=400)
 
         # 主聚合：按 canonical_id 累计提及数 + 各竞品分布 + 各区域分布
+        # 注意 dedup：reviews 表 86% 重复（同一英文 GP 评论被 12 国 INSERT 12 次）。
+        # COUNT(DISTINCT ce.review_id) 把 12 个不同 review_id 算 12 次 — 数字虚高。
+        # 改用 CONCAT(competitor_id, platform, content, score, version) 作 dedup key,
+        # 跟 /api/reviews 那边的 GROUP BY 维度保持一致。
+        DEDUP_KEY = (
+            "CONCAT_WS('|', r.competitor_id, r.platform, r.content, "
+            "          IFNULL(r.score, ''), IFNULL(r.version, ''))"
+        )
         rows = _query(f"""
             SELECT ce.canonical_id,
                    ea.primary_name,
                    ea.entity_type,
-                   COUNT(DISTINCT ce.review_id) as total_mentions
+                   COUNT(DISTINCT {DEDUP_KEY}) as total_mentions
             FROM comment_entities ce
             JOIN reviews r ON r.id = ce.review_id
             LEFT JOIN entity_aliases ea ON ea.canonical_id = ce.canonical_id
@@ -1168,16 +1176,17 @@ class APIHandler(BaseHTTPRequestHandler):
         out = []
         for r in rows:
             cid = r["canonical_id"]
-            # 各竞品分布
+            # 各竞品分布 — 同样 dedup
             by_comp_rows = _query(f"""
-                SELECT cp.name as competitor, COUNT(DISTINCT ce.review_id) as n
+                SELECT cp.name as competitor,
+                       COUNT(DISTINCT {DEDUP_KEY}) as n
                 FROM comment_entities ce
                 JOIN reviews r ON r.id = ce.review_id
                 JOIN competitors cp ON cp.id = r.competitor_id
                 WHERE ce.canonical_id = :cid AND {label_filter}
                 GROUP BY cp.name ORDER BY n DESC LIMIT 10
             """, cid=cid)
-            # 各区域分布
+            # 各区域分布 — 不 dedup（同一评论在多区域出现是真的多区域热度）
             by_region_rows = _query(f"""
                 SELECT r.region_code as region, COUNT(*) as n
                 FROM comment_entities ce
