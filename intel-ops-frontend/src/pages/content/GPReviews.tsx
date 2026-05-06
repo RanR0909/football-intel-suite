@@ -227,10 +227,19 @@ function AggregatedList({
 // 跟"问题 Top" tab (entity 聚合) 的关系：
 //   · 问题 Top    → 看"哪几类 bug 提及次数最多"（产品全局视角）
 //   · 问题原文    → 看"具体每个 1 星 / 2 星用户在抱怨什么"（产品具体反馈）
-// 两者互补，前者数据驱动决策优先级，后者读出来直接拿去复现 bug。
 //
-// 排序：score ASC（1 星最差最先）+ at DESC（同分按时间倒序）
-// 分组：score 1-5；评分越低越红
+// 后端去重：(competitor, platform, content, score, version) GROUP BY，
+// 同一英文 GP 评论在 12 国出现的 12 条 → 合成 1 条 + regions=["GB","CA",...]
+//
+// 默认每个 score section 折叠（用 <details>）— 1 星 174 条 / 2 星 82 条
+// 全部展开太长。点击 header 展开看全部（不再做 30 条截断）。
+
+const SCORE_VARIANT: Record<string, "red" | "amber" | "gray" | "green"> = {
+  "1": "red", "2": "red", "3": "amber", "4": "gray", "5": "green", "?": "gray",
+}
+const SCORE_LABELS: Record<string, string> = {
+  "1": "1 ★ 极差", "2": "2 ★ 差", "3": "3 ★ 中", "4": "4 ★ 良", "5": "5 ★ 优", "?": "无评分",
+}
 
 function RawProblemsTab({ reviews }: { reviews: any[] }) {
   const grouped = useMemo(() => {
@@ -256,58 +265,74 @@ function RawProblemsTab({ reviews }: { reviews: any[] }) {
     )
   }
 
-  const SCORE_VARIANT: Record<string, "red" | "amber" | "gray" | "green"> = {
-    "1": "red", "2": "red", "3": "amber", "4": "gray", "5": "green", "?": "gray",
-  }
-  const SCORE_LABELS: Record<string, string> = {
-    "1": "1 ★ 极差", "2": "2 ★ 差", "3": "3 ★ 中", "4": "4 ★ 良", "5": "5 ★ 优", "?": "无评分",
-  }
+  const totalPosts = reviews.length
 
   return (
     <div className="space-y-2">
+      <div className="text-2xs text-muted-foreground px-1">
+        共 {totalPosts} 条 (已按内容去重；同一评论在多区域出现合并显示)
+      </div>
       {(["1", "2", "3", "4", "5", "?"] as const).map((sc) => {
         const subset = grouped[sc] || []
         if (subset.length === 0) return null
+        // 1 星默认展开（最重要）；其他默认折叠
+        const defaultOpen = sc === "1"
         return (
-          <section key={sc} className="border border-border-soft rounded-md bg-card overflow-hidden">
-            <header className="flex items-center justify-between px-3 h-9 bg-muted/30 border-b border-border-soft">
+          <details
+            key={sc}
+            open={defaultOpen}
+            className="border border-border-soft rounded-md bg-card overflow-hidden group"
+          >
+            <summary
+              className="flex items-center justify-between px-3 h-9 bg-muted/30 border-b border-border-soft cursor-pointer list-none hover:bg-muted/50"
+            >
               <div className="flex items-center gap-2">
+                <span className="text-2xs text-muted-foreground group-open:rotate-90 inline-block transition-transform">▶</span>
                 <Pill variant={SCORE_VARIANT[sc] || "gray"}>{SCORE_LABELS[sc]}</Pill>
                 <span className="text-2xs text-muted-foreground tabular-nums">{subset.length} 条</span>
               </div>
-            </header>
+            </summary>
             <div className="divide-y divide-border-soft">
-              {subset.slice(0, 30).map((r) => (
-                <article key={r.id} className="px-3 py-2.5 hover:bg-muted/30 transition-colors duration-150">
-                  <div className="flex items-baseline gap-2 mb-1 text-2xs flex-wrap">
-                    <span className="font-medium">{r.competitor}</span>
-                    <Pill variant="gray">{(r.region_code || "").toUpperCase()}</Pill>
-                    <Pill variant="blue">{r.platform}</Pill>
-                    {r.version && (
-                      <span className="font-mono text-muted-foreground">v{r.version}</span>
+              {subset.map((r) => {
+                const regions = r.regions && r.regions.length > 0
+                  ? r.regions
+                  : (r.region_code ? [r.region_code] : [])
+                return (
+                  <article key={r.id} className="px-3 py-2.5 hover:bg-muted/30 transition-colors duration-150">
+                    <div className="flex items-baseline gap-2 mb-1 text-2xs flex-wrap">
+                      <span className="font-medium">{r.competitor}</span>
+                      {/* 多区域 chip — 同一评论命中几个国家就展示几个 */}
+                      {regions.length === 1 ? (
+                        <Pill variant="gray">{regions[0].toUpperCase()}</Pill>
+                      ) : regions.length <= 3 ? (
+                        <Pill variant="gray">{regions.map((x: string) => x.toUpperCase()).join(" · ")}</Pill>
+                      ) : (
+                        <Pill variant="gray" className="font-mono">
+                          {regions.length} 国 ({regions.slice(0, 3).map((x: string) => x.toUpperCase()).join(" · ")} +{regions.length - 3})
+                        </Pill>
+                      )}
+                      <Pill variant="blue">{r.platform}</Pill>
+                      {r.version && (
+                        <span className="font-mono text-muted-foreground">v{r.version}</span>
+                      )}
+                      <span className="ml-auto font-mono text-muted-foreground tabular-nums">
+                        {r.at ? new Date(r.at).toLocaleDateString("zh-CN") : "—"}
+                      </span>
+                    </div>
+                    <p className="text-xs leading-snug text-foreground">
+                      {r.translated_text || r.content}
+                    </p>
+                    {r.translated_text && r.content && r.translated_text !== r.content && (
+                      <details className="mt-1 text-2xs text-muted-foreground">
+                        <summary className="cursor-pointer">原文 ({r.language || "?"})</summary>
+                        <p className="mt-1 italic leading-snug">{r.content}</p>
+                      </details>
                     )}
-                    <span className="ml-auto font-mono text-muted-foreground tabular-nums">
-                      {r.at ? new Date(r.at).toLocaleDateString("zh-CN") : "—"}
-                    </span>
-                  </div>
-                  <p className="text-xs leading-snug text-foreground">
-                    {r.translated_text || r.content}
-                  </p>
-                  {r.translated_text && r.content && r.translated_text !== r.content && (
-                    <details className="mt-1 text-2xs text-muted-foreground">
-                      <summary className="cursor-pointer">原文 ({r.language || "?"})</summary>
-                      <p className="mt-1 italic leading-snug">{r.content}</p>
-                    </details>
-                  )}
-                </article>
-              ))}
-              {subset.length > 30 && (
-                <div className="text-2xs text-center text-muted-foreground py-2">
-                  仅展示前 30 条，全 {subset.length} 条可下载（待开发）
-                </div>
-              )}
+                  </article>
+                )
+              })}
             </div>
-          </section>
+          </details>
         )
       })}
     </div>

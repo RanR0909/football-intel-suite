@@ -61,7 +61,10 @@ export interface ReviewEntity {
 export interface Review {
   id: number
   competitor: string
-  region_code: string
+  /** 第一个命中的区域（兼容老调用点）；多区域请用 regions */
+  region_code: string | null
+  /** 经过去重后该评论涉及的所有区域（GP 同一英文评论被 12 国 INSERT 12 次的合并结果） */
+  regions: string[]
   platform: "gp" | "ios"
   score: number | null
   version: string | null

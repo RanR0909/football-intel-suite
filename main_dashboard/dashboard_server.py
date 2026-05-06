@@ -620,15 +620,21 @@ class APIHandler(BaseHTTPRequestHandler):
                 wheres.append("COALESCE(r.at, r.fetched_at) >= :cutoff")
                 params["cutoff"] = cutoff
 
+        # ─── 去重：reviews 表 86% 重复（GP 同一英文评论被 12 个 country
+        #     各 INSERT 一次）。用 GROUP BY (competitor, platform, content,
+        #     score, version) 合并，regions 字段聚合所有命中的区域 CSV。
+        #     id 取 MIN，时间取 MIN — 保留最早记录。
         sql = (
-            "SELECT r.id, c.name as competitor, r.region_code, r.platform, "
-            "r.score, r.version, r.content, r.label, r.language, "
-            "r.translated_text, r.at, r.labeled_at "
+            "SELECT MIN(r.id) as id, c.name as competitor, "
+            "GROUP_CONCAT(DISTINCT r.region_code "
+            "             ORDER BY r.region_code SEPARATOR ',') as regions, "
+            "r.platform, r.score, r.version, r.content, r.label, r.language, "
+            "r.translated_text, MIN(r.at) as at, MIN(r.labeled_at) as labeled_at "
             "FROM reviews r JOIN competitors c ON c.id = r.competitor_id "
             f"WHERE {' AND '.join(wheres)} "
-            # COALESCE — 历史评论 r.at 多数为 NULL（早期抓取没存评论时间），
-            # 直接 ORDER BY r.at DESC 全 NULL 时排序退化为 unstable。
-            "ORDER BY COALESCE(r.at, r.fetched_at) DESC LIMIT :limit"
+            "GROUP BY c.name, r.platform, r.score, r.version, r.content, "
+            "         r.label, r.language, r.translated_text "
+            "ORDER BY MIN(COALESCE(r.at, r.fetched_at)) DESC LIMIT :limit"
         )
         params["limit"] = limit
         rows = _query(sql, **params)
@@ -655,6 +661,13 @@ class APIHandler(BaseHTTPRequestHandler):
                 })
             for r in rows:
                 r["entities"] = by_rid.get(r["id"], [])
+
+        # 拆 regions CSV → 数组（前端按 chip 渲染），region_code 留第一个保持兼容
+        for r in rows:
+            csv = r.pop("regions", "") or ""
+            regions = [x for x in csv.split(",") if x]
+            r["regions"] = regions
+            r["region_code"] = regions[0] if regions else None
 
         return self._send_json({"reviews": rows, "count": len(rows)})
 
