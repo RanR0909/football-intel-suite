@@ -86,6 +86,9 @@ export default function Revenue() {
   }
   const compCount = rows.filter((r) => r.competitor !== BASELINE_APP).length
 
+  // AR 块特殊提示：AF 不在 Androidrank 索引（区域市场），导致 vs AF 列全空
+  const arHasAf = af?.ar_dl != null
+
   return (
     <div>
       <PageHeader
@@ -124,6 +127,16 @@ export default function Revenue() {
       {isError && <EmptyState type="error" onRetry={refetch} />}
       {!isLoading && !isError && rows.length === 0 && <EmptyState type="empty" />}
 
+      {rows.length > 0 && !arHasAf && (
+        <div className="mb-2 px-3 py-2 rounded-md border border-semantic-warning/30 bg-semantic-warning/5 text-xs text-muted-foreground">
+          ⚠ <span className="font-mono">Androidrank</span> 不收录{" "}
+          <span className="font-mono text-foreground">AllFootball</span>（区域市场）
+          {" "}和{" "}
+          <span className="font-mono text-foreground">310Scores</span>（app 太新），
+          故 vs AF 列仅展示 Sensor Tower 块。
+        </div>
+      )}
+
       {rows.length > 0 && (
         <div className="border border-border-soft rounded-md bg-card overflow-x-auto">
           <table className="w-full text-xs">
@@ -138,10 +151,15 @@ export default function Revenue() {
                   Sensor Tower (US 月估算)
                 </th>
                 <th
-                  colSpan={showBaseline ? 2 : 1}
+                  colSpan={showBaseline && arHasAf ? 2 : 1}
                   className="text-center px-3 pt-1.5 pb-0.5 border-l border-border-soft text-muted-foreground/80 font-mono"
                 >
                   Androidrank (全球·Android)
+                  {!arHasAf && (
+                    <span className="ml-1 normal-case font-sans text-2xs text-semantic-warning">
+                      · AF 不在此源
+                    </span>
+                  )}
                 </th>
                 <th rowSpan={2} className="text-right px-3 align-bottom pb-1.5 pt-2 border-l border-border-soft">
                   US 排名
@@ -153,7 +171,7 @@ export default function Revenue() {
                 <th className="text-right px-3 h-8">月收入</th>
                 {showBaseline && <th className="text-right px-3 h-8">vs AF</th>}
                 <th className="text-right px-3 h-8 border-l border-border-soft">月下载</th>
-                {showBaseline && <th className="text-right px-3 h-8">vs AF</th>}
+                {showBaseline && arHasAf && <th className="text-right px-3 h-8">vs AF</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border-soft">
@@ -195,11 +213,11 @@ export default function Revenue() {
                               : <BaselineDeltaCell delta={computeNumericDelta(r.st_rev, af?.st_rev ?? null)} />}
                       </td>
                     )}
-                    {/* Androidrank 块 */}
+                    {/* Androidrank 块 — vs AF 列仅在 AF 有数据时展示 */}
                     <td className="px-3 h-9 text-right tabular-nums border-l border-border-soft">
                       {r.ar_dl != null ? formatCompactNumber(r.ar_dl) : "—"}
                     </td>
-                    {showBaseline && (
+                    {showBaseline && arHasAf && (
                       <td className="px-3 h-9 text-right">
                         {isAf ? <span className="text-muted-foreground">—</span>
                               : <BaselineDeltaCell delta={computeNumericDelta(r.ar_dl, af?.ar_dl ?? null)} />}
