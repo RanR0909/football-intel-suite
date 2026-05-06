@@ -57,47 +57,62 @@ SCROLL_TIMES = 2              # 向下滚动次数（每次约+10条）
 PAGE_TIMEOUT_SEC = 25
 
 
-# ---- DOM 提取（heuristic — Meta 经常改 class，按 text pattern 找）------
+# ---- DOM 提取（heuristic — Meta 经常改 class，按 多语言文本前缀 + 向上爬 root）------
+# Fix 3 (2026-05-06):
+#   · Meta 不用 [role="article"] 包广告卡 — 改回旧策略 (找 ID 文本元素 → 爬 root)
+#   · 中文界面实测：「资料库编号」（不是「广告资料库 ID」）+「开始投放」+「赞助内容」
+#   · 多语言：英文 / 中文 / 法语 都覆盖
 EXTRACT_JS = r"""
 () => {
-  // 找到所有含 "Library ID:" 的元素，往上找广告卡 root
   const cards = [];
   const seen = new Set();
+  // 文本前缀 → 各语言 Library ID 标签
+  const ID_RE = /^(Library ID|资料库编号|ID de la bibliothèque)/i;
+  const ID_EXTRACT = /(?:Library ID|资料库编号|ID de la bibliothèque)[:：\s]*([0-9]{10,})/i;
+
   const all = document.querySelectorAll('div, span');
   for (const el of all) {
     const text = (el.innerText || '').trim();
-    if (!text.startsWith('Library ID')) continue;
-    // 向上爬 root（足够大的容器）
+    if (!ID_RE.test(text)) continue;
+    // 向上爬 root（同时含 ID + 投放时间 / 平台 = 完整广告卡）
     let parent = el;
     for (let i = 0; i < 12; i++) {
       if (!parent.parentElement) break;
       parent = parent.parentElement;
-      const t = (parent.innerText || '');
-      if (t.length > 250 && (t.includes('Started running') || t.includes('Library ID'))) {
+      const t = parent.innerText || '';
+      if (t.length > 250 && /(Started running|开始投放|Diffusion lancée|Library ID|资料库编号)/i.test(t)) {
         break;
       }
     }
     if (seen.has(parent)) continue;
     seen.add(parent);
+
     const fullText = (parent.innerText || '').slice(0, 2000);
-    const idMatch = fullText.match(/Library ID[:：]\s*([0-9]+)/);
-    const startMatch = fullText.match(/Started running on\s+([^\n]+)/i);
-    const platformsMatch = fullText.match(/Platforms?\s+([^\n]+)/i);
-    // 找广告页名（页面内常见格式：第一行 = page name）
+    const idMatch = fullText.match(ID_EXTRACT);
+    if (!idMatch) continue;
+    const startMatch = fullText.match(
+      /(?:Started running on|开始投放|Diffusion lancée le)[:：\s]+([^\n]+)/i
+    );
+    const platformsMatch = fullText.match(/(?:Platforms?|平台|Plateformes?)[:：\s]*\n?\s*([^\n]+)/i);
     const lines = fullText.split('\n').map(s => s.trim()).filter(Boolean);
     const pageName = lines[0] || '';
-    // 找 media URL（卡片内第一个 <img> 或 video src）
     let mediaUrl = '';
     const img = parent.querySelector('img[src*="scontent"], img[src*="fbcdn"], video');
     if (img) mediaUrl = img.src || img.currentSrc || '';
-    // 抽出"广告文案"：去掉 metadata 行后的剩余（保留前 500 字）
-    const metaPrefixes = ['Library ID', 'Started running', 'Platforms', 'Active', 'Inactive', 'Sponsored'];
+    // 文案：去掉 metadata 行
+    const metaPrefixes = [
+      'Library ID', '资料库编号', 'ID de la bibliothèque',
+      'Started running', '开始投放', 'Platforms', '平台', 'Plateformes',
+      'Active', '投放中', 'Inactive', '已停',
+      'Sponsored', '赞助内容', '赞助',
+      'EU transparency', '欧盟境内',
+    ];
     const bodyLines = lines.filter(l =>
       !metaPrefixes.some(p => l.startsWith(p)) && l.length > 4
     );
     const adText = bodyLines.slice(0, 6).join(' · ').slice(0, 500);
     cards.push({
-      ad_id: idMatch ? idMatch[1] : '',
+      ad_id: idMatch[1],
       text: adText,
       start_date: startMatch ? startMatch[1].trim() : '',
       platform: platformsMatch ? platformsMatch[1].trim() : '',
@@ -130,11 +145,23 @@ async def _accept_cookies_if_needed(page) -> None:
 
 async def _scroll_and_collect(page, query_url: str, max_cards: int = SEARCH_LIMIT_PER_QUERY) -> list[dict]:
     await page.goto(query_url, wait_until="domcontentloaded")
-    # 等首屏加载（Meta 渲染慢）
+    # Fix 2 (2026-05-06): 等首屏加载 — Meta 不用 ARIA role 包卡片，纯文本侦测。
+    # 中文界面实测关键词："资料库编号"（不是"广告资料库 ID"）/ "开始投放" / "赞助内容"
     try:
-        await page.wait_for_selector("text=Library ID", timeout=PAGE_TIMEOUT_SEC * 1000)
+        await page.wait_for_function(
+            r"""() => {
+                const t = document.body.innerText || '';
+                // 找到广告卡（多语言）
+                if (/Library ID|资料库编号|ID de la bibliothèque/i.test(t)) return true;
+                // 明确 0 结果
+                if (/no\s+results|没有结果|0\s+results?\s+found/i.test(t)) return true;
+                // 需登录（Meta 现在搜广告库强制登录）
+                if (/^(log\s*in|登录|登入|S'identifier)$/im.test(t)) return true;
+                return false;
+            }""",
+            timeout=PAGE_TIMEOUT_SEC * 1000,
+        )
     except Exception:
-        # 没有 "Library ID" → 该 query 0 结果，或反爬
         return []
     await _accept_cookies_if_needed(page)
     await asyncio.sleep(1)
@@ -250,10 +277,15 @@ async def cmd_scrape(headed: bool = False, countries: list[str] | None = None) -
         try:
             for app_name in competitors:
                 for country in target_countries:
+                    # Fix 1 (2026-05-06): URL 参数对齐 Meta 当前默认行为。
+                    # 旧版只有 active_status / ad_type / country / q，Meta 默认走"广告主精确匹配"
+                    # → 用 q=SofaScore 找不到（FB Page name 不一定叫 SofaScore）→ 0 条。
+                    # 加 search_type=keyword_unordered 强制关键词模糊匹配（与 Chrome 手动访问一致）。
                     url = (
                         "https://www.facebook.com/ads/library/"
                         f"?active_status=active&ad_type=all&country={country}"
-                        f"&q={quote(app_name)}"
+                        f"&is_targeted_country=false&media_type=all"
+                        f"&q={quote(app_name)}&search_type=keyword_unordered"
                     )
                     print(f"[{app_name}/{country}] 抓取中...")
                     try:
