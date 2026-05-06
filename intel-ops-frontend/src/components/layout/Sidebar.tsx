@@ -59,7 +59,9 @@ export default function Sidebar() {
         { to: "/system/candidates", label: "候选发现", icon: Search,
           badge: () => status?.candidates_count },
         { to: "/system/failed-jobs", label: "AI 失败队列", icon: AlertTriangle,
-          badge: () => Object.values(status?.failed_ai_jobs || {})
+          // 显式指定 Object.values 的元素类型，否则空对象 fallback `{} as {}` 会让
+          // b 推断为 unknown，导致 a + b 报 TS18046。
+          badge: () => Object.values<number>(status?.failed_ai_jobs ?? {})
             .reduce((a, b) => a + (b || 0), 0) || undefined },
         { to: "/system/sync-log", label: "同步日志", icon: ScrollText },
       ],
