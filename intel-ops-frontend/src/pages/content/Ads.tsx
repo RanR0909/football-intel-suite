@@ -143,6 +143,17 @@ export default function Ads() {
                   <Pill key={sp} variant="amber">{SELLING_POINT_LABELS[sp]}</Pill>
                 ))}
                 <span className="text-muted-foreground line-clamp-1 flex-1">{a.body_text || "(无文案)"}</span>
+                {a.ad_id && (
+                  <a
+                    href={`https://www.facebook.com/ads/library/?id=${a.ad_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-2xs text-semantic-info hover:underline tabular-nums shrink-0"
+                    title={`Meta Ad Library · ID ${a.ad_id}`}
+                  >
+                    原投放 ↗
+                  </a>
+                )}
               </div>
             ))}
           </div>
