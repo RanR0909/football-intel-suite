@@ -626,7 +626,9 @@ class APIHandler(BaseHTTPRequestHandler):
             "r.translated_text, r.at, r.labeled_at "
             "FROM reviews r JOIN competitors c ON c.id = r.competitor_id "
             f"WHERE {' AND '.join(wheres)} "
-            "ORDER BY r.at DESC LIMIT :limit"
+            # COALESCE — 历史评论 r.at 多数为 NULL（早期抓取没存评论时间），
+            # 直接 ORDER BY r.at DESC 全 NULL 时排序退化为 unstable。
+            "ORDER BY COALESCE(r.at, r.fetched_at) DESC LIMIT :limit"
         )
         params["limit"] = limit
         rows = _query(sql, **params)
