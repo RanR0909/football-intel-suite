@@ -1244,14 +1244,47 @@ class APIHandler(BaseHTTPRequestHandler):
             return self._send_json({"dim": dim, "items": rows, "count": len(rows)})
 
         if dim in ("player", "league"):
-            # 通过 entity_aliases + comment_entities 找不到 — community_posts 没接 entity_extract。
-            # 退化：返回 dim, items=[] + hint
-            return self._send_json({
-                "dim": dim,
-                "items": [],
-                "count": 0,
-                "hint": "player/league dim requires entity_extract on community_posts (not yet wired)",
-            })
+            # 走 community_post_entities × entity_aliases (migration 0016 + post_entity_extract task)
+            entity_type = "player" if dim == "player" else "league"
+            rows = _query(f"""
+                SELECT ea.canonical_id,
+                       ea.primary_name,
+                       COUNT(DISTINCT cpe.post_id) as post_count,
+                       SUM(COALESCE(p.score, 0)) as total_score
+                FROM community_post_entities cpe
+                JOIN community_posts p ON p.id = cpe.post_id
+                JOIN entity_aliases ea ON ea.canonical_id = cpe.canonical_id
+                WHERE ea.entity_type = :etype {time_clause}
+                GROUP BY ea.canonical_id, ea.primary_name
+                ORDER BY post_count DESC, total_score DESC LIMIT :lim
+            """, etype=entity_type, **params)
+            # 每行附带 Top 3 提及该实体的竞品 + 几个高频共现实体
+            for r in rows:
+                cid = r["canonical_id"]
+                # 命中该 player/league 时主要是哪几个竞品在讨论
+                comps = _query(f"""
+                    SELECT c.name as competitor, COUNT(DISTINCT p.id) as n
+                    FROM community_post_entities cpe
+                    JOIN community_posts p ON p.id = cpe.post_id
+                    JOIN competitors c ON c.id = p.competitor_id
+                    WHERE cpe.canonical_id = :cid {time_clause}
+                    GROUP BY c.name ORDER BY n DESC LIMIT 3
+                """, cid=cid, **{k: v for k, v in params.items() if k != "lim"})
+                r["top_competitors"] = comps
+                # 高频共现实体（同 post 里同时出现的其他实体，按出现次数）
+                cooc = _query(f"""
+                    SELECT ea2.primary_name as name, ea2.entity_type as etype,
+                           COUNT(DISTINCT cpe2.post_id) as n
+                    FROM community_post_entities cpe1
+                    JOIN community_post_entities cpe2 ON cpe2.post_id = cpe1.post_id
+                                                     AND cpe2.canonical_id != cpe1.canonical_id
+                    JOIN entity_aliases ea2 ON ea2.canonical_id = cpe2.canonical_id
+                    WHERE cpe1.canonical_id = :cid
+                    GROUP BY ea2.primary_name, ea2.entity_type
+                    ORDER BY n DESC LIMIT 5
+                """, cid=cid)
+                r["cooccurring"] = cooc
+            return self._send_json({"dim": dim, "items": rows, "count": len(rows)})
 
         return self._send_json({"error": f"invalid dim: {dim}"}, status=400)
 

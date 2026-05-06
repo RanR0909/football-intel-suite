@@ -3,8 +3,8 @@
  * 改造点 vs v1:
  *  · 主视图改 4 tab：热门话题 / 球员讨论 / 赛事讨论 / 产品提及
  *  · 数据 = /api/community-posts/aggregated（task #6 post_topic 输出聚合）
- *  · player / league dim 后端尚未实现 entity_extract on community_posts，
- *    会返回 hint — 前端展示提示而不是空白
+ *  · player / league dim 走 community_post_entities × entity_aliases (0016) —
+ *    含主推竞品 + 共现实体（Top 5 同帖共现的其他实体）
  *  · 底部下钻：原始帖流（保留）
  */
 import { useMemo } from "react"
@@ -21,7 +21,7 @@ import { ArrowUp, MessageCircle, ExternalLink } from "lucide-react"
 import { BASELINE_APP, COMPETITORS, POST_TOPIC_LABELS } from "@/types/domain"
 import type {
   CommunityAggregatedDim,
-  CommunityAggTopicRow, CommunityAggCompetitorRow,
+  CommunityAggTopicRow, CommunityAggCompetitorRow, CommunityAggEntityRow,
 } from "@/types/api"
 
 const TABS: Array<{ value: CommunityAggregatedDim; label: string }> = [
@@ -229,6 +229,51 @@ function AggregatedTab({ dim, since }: { dim: CommunityAggregatedDim; since: str
     )
   }
 
-  // player / league — 后端 hint 路径
+  // player / league — community_post_entities × entity_aliases
+  if (dim === "player" || dim === "league") {
+    const rows = items as CommunityAggEntityRow[]
+    return (
+      <div className="border border-border-soft rounded-md bg-card overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/30">
+            <tr className="text-2xs uppercase tracking-wider text-muted-foreground">
+              <th className="text-left  px-3 h-8">{dim === "player" ? "球员" : "联赛"}</th>
+              <th className="text-right px-3 h-8 tabular-nums">提及帖数</th>
+              <th className="text-right px-3 h-8 tabular-nums">总热度</th>
+              <th className="text-left  px-3 h-8">主推竞品 Top 3</th>
+              <th className="text-left  px-3 h-8">高频共现</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.canonical_id} className="border-t border-border-soft hover:bg-muted/30">
+                <td className="px-3 py-2">
+                  <span className="font-medium">{r.primary_name}</span>
+                  <span className="ml-1 font-mono text-2xs text-muted-foreground">{r.canonical_id}</span>
+                </td>
+                <td className="text-right px-3 py-2 tabular-nums font-mono">{r.post_count}</td>
+                <td className="text-right px-3 py-2 tabular-nums font-mono">{r.total_score}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {(r.top_competitors || []).map((c) => (
+                      <Pill key={c.competitor} variant="blue">{c.competitor} {c.n}</Pill>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {(r.cooccurring || []).slice(0, 5).map((co) => (
+                      <Pill key={co.name} variant="gray">{co.name}<span className="text-2xs ml-0.5 opacity-60">·{co.etype}</span></Pill>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   return <EmptyState type="empty" hint={data?.hint || "暂未实现"} />
 }

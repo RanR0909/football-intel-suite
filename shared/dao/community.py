@@ -156,6 +156,60 @@ def fetch_unclassified_topic(*, limit: int = 200) -> list[dict]:
         ]
 
 
+# ─────────────────── entity_extract on community_posts (migration 0016) ───────
+
+def fetch_unentitied(*, limit: int = 200) -> list[dict]:
+    """entity_extracted_at IS NULL 的帖子（task 2 还没在它上面跑过）。
+
+    排除 failed_ai_jobs 里 task_name='post_entity_extract' 的 post_id。
+    """
+    if not _db.is_mysql_enabled():
+        return []
+    import sqlalchemy as sa
+
+    blacklist: set[int] = set()
+    with _db.engine().connect() as c:
+        rows = c.execute(sa.text("""
+            SELECT DISTINCT JSON_EXTRACT(payload_json, '$.post_id') AS pid
+            FROM failed_ai_jobs
+            WHERE task_name = 'post_entity_extract' AND resolved_at IS NULL
+        """)).fetchall()
+        for r in rows:
+            try:
+                blacklist.add(int(r[0]))
+            except (TypeError, ValueError):
+                pass
+
+    with _db.session() as s:
+        q = s.query(CommunityPost).filter(CommunityPost.entity_extracted_at.is_(None))
+        if blacklist:
+            q = q.filter(~CommunityPost.id.in_(blacklist))
+        rows = q.order_by(CommunityPost.score.desc(),
+                          CommunityPost.id.desc()).limit(limit).all()
+        return [
+            {
+                "id": r.id,
+                "post_id": r.post_id,
+                "title": r.title,
+                "body": r.selftext,
+                "score": r.score,
+            }
+            for r in rows
+        ]
+
+
+def mark_entity_extracted(post_db_id: int) -> bool:
+    """跑完 entity_extract 后标记时间戳，避免下次重复跑（铁律 4）。"""
+    if not _db.is_mysql_enabled():
+        return False
+    with _db.session() as s:
+        row = s.query(CommunityPost).filter(CommunityPost.id == post_db_id).first()
+        if not row:
+            return False
+        row.entity_extracted_at = datetime.utcnow()
+    return True
+
+
 def update_topic(post_db_id: int, payload: dict) -> bool:
     """payload: {primary_topic, secondary_topics, competitor_mentioned, confidence}"""
     if not _db.is_mysql_enabled():

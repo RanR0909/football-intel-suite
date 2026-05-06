@@ -168,12 +168,16 @@ class CommunityPost(Base):
     topic_classified_at = Column(DateTime)          # NULL = 未分类
     topic_confidence = Column(DECIMAL(3, 2))
 
+    # ---- entity_extract on community_posts（migration 0016）----
+    entity_extracted_at = Column(DateTime)          # NULL = 未跑过 entity_extract
+
     __table_args__ = (
         UniqueConstraint("source", "post_id", name="uniq_post"),
         Index("idx_post_comp_created", "competitor_id", "created_utc"),
         Index("idx_post_primary_topic", "primary_topic"),
         Index("idx_post_competitor_mention", "competitor_mentioned"),
         Index("idx_post_topic_classified_at", "topic_classified_at"),
+        Index("idx_post_entity_extracted_at", "entity_extracted_at"),
     )
 
 
@@ -265,6 +269,28 @@ class CommentEntity(Base):
         UniqueConstraint("review_id", "canonical_id", name="uniq_review_entity"),
         Index("idx_comment_ent_canonical", "canonical_id"),
         Index("idx_comment_ent_type", "entity_type"),
+    )
+
+
+class CommunityPostEntity(Base):
+    """社媒帖子 ↔ 实体 关联表（multi-many，0016）。
+
+    与 CommentEntity 对偶：reviews → community_posts。schema 一致，
+    只是外键和唯一约束指向 community_posts.id。
+    """
+    __tablename__ = "community_post_entities"
+
+    id = Column(PK_BigInt, primary_key=True, autoincrement=True)
+    post_id = Column(BigInteger, ForeignKey("community_posts.id"), nullable=False)
+    canonical_id = Column(String(64), ForeignKey("entity_aliases.canonical_id"), nullable=False)
+    entity_type = Column(String(32), nullable=False)
+    raw_value = Column(String(255))
+    extracted_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("post_id", "canonical_id", name="uniq_post_entity"),
+        Index("idx_post_ent_canonical", "canonical_id"),
+        Index("idx_post_ent_type", "entity_type"),
     )
 
 
@@ -453,5 +479,5 @@ ALL_TABLES = [
     "app_classifications",
     "sync_log",
     # v2 内容聚合
-    "news_items", "app_versions",
+    "news_items", "app_versions", "community_post_entities",
 ]

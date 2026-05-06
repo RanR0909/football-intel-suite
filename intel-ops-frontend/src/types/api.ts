@@ -322,9 +322,19 @@ export interface CommunityAggCompetitorRow {
   top_topics: Array<{ topic: PostTopic; n: number }>
 }
 
+/** dim=player|league — 来自 community_post_entities × entity_aliases (migration 0016) */
+export interface CommunityAggEntityRow {
+  canonical_id: string
+  primary_name: string
+  post_count: number
+  total_score: number
+  top_competitors: Array<{ competitor: string; n: number }>
+  cooccurring: Array<{ name: string; etype: EntityType; n: number }>
+}
+
 export interface CommunityAggregatedResponse {
   dim: CommunityAggregatedDim
-  items: CommunityAggTopicRow[] | CommunityAggCompetitorRow[]
+  items: CommunityAggTopicRow[] | CommunityAggCompetitorRow[] | CommunityAggEntityRow[]
   count: number
   hint?: string
 }
