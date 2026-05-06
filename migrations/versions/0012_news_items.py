@@ -36,6 +36,8 @@ def upgrade() -> None:
         sa.Column("title", sa.String(length=512), nullable=False),
         sa.Column("snippet", sa.Text()),                              # spec 字段：摘要 (google_news 里的 desc)
         sa.Column("source", sa.String(length=128)),                   # techcrunch.com 等域名
+        # url 保留 1024 char 以兼容 google news 长 URL；唯一性走前缀索引（见下面 op.execute）。
+        # 不在这里加 UniqueConstraint("url") — utf8mb4 下 1024 × 4 = 4096B > MySQL 3072B 限制。
         sa.Column("url", sa.String(length=1024), nullable=False),
         sa.Column("published_at", sa.DateTime()),                     # google news pubDate 解析后
         sa.Column("matched_keyword", sa.String(length=128)),          # 触发命中的关键词
@@ -47,8 +49,15 @@ def upgrade() -> None:
         sa.Column("competitors_mentioned", sa.Text()),                # JSON array: ["SofaScore", "FotMob"]
         sa.Column("classification_confidence", sa.Numeric(3, 2)),     # 0.00 - 1.00
         sa.Column("classified_at", sa.DateTime()),                    # NULL = 未分类（重复跑判定）
-        sa.UniqueConstraint("url", name="uniq_news_url"),
     )
+    # url 唯一索引：MySQL 走前 500 字符前缀索引（500 × 4 utf8mb4 = 2000B < 3072B 限制）。
+    # google_news RSS URL 通常含足够独特的前缀（hash + path），冲撞概率极低。
+    # SQLite 走全列唯一索引（不支持前缀长度）。
+    bind = op.get_bind()
+    if bind.dialect.name == "mysql":
+        op.execute("CREATE UNIQUE INDEX uniq_news_url ON news_items (url(500))")
+    else:
+        op.create_index("uniq_news_url", "news_items", ["url"], unique=True)
     op.create_index("idx_news_published", "news_items", ["published_at"])
     op.create_index("idx_news_classified_at", "news_items", ["classified_at"])
     op.create_index("idx_news_business", "news_items", ["is_business", "business_category"])
@@ -60,4 +69,5 @@ def downgrade() -> None:
     op.drop_index("idx_news_business", table_name="news_items")
     op.drop_index("idx_news_classified_at", table_name="news_items")
     op.drop_index("idx_news_published", table_name="news_items")
+    op.drop_index("uniq_news_url", table_name="news_items")
     op.drop_table("news_items")
