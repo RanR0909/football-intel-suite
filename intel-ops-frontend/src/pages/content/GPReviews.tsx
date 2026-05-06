@@ -10,14 +10,12 @@ import { useMemo } from "react"
 import PageHeader from "@/components/shared/PageHeader"
 import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
 import FilterChips from "@/components/shared/FilterChips"
-import AppScopeChip from "@/components/shared/AppScopeChip"
 import EmptyState from "@/components/shared/EmptyState"
 import Pill from "@/components/shared/Pill"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useReviews } from "@/hooks/api/useReviews"
 import { useReviewsAggregated } from "@/hooks/api/useAggregated"
 import { useUrlFilters } from "@/hooks/useUrlFilters"
-import { useFilterStore } from "@/stores/filterStore"
 import {
   BASELINE_APP, COMPETITORS, REVIEW_LABEL_DISPLAY,
 } from "@/types/domain"
@@ -42,7 +40,6 @@ export default function GPReviews() {
   const tab = (value("tab") || "problems") as ReviewsAggregatedTab
   const competitor = value("competitor")
   const since = value("since")
-  const { appScope } = useFilterStore()
 
   // 主聚合数据（每个 tab）
   const { data: agg, isLoading, isError, refetch } = useReviewsAggregated(tab, 30)
@@ -51,13 +48,7 @@ export default function GPReviews() {
   const { data: rawReviews } = useReviews({
     competitor: competitor || undefined, since, limit: 500,
   })
-  const allReviews = useMemo(() => {
-    return (rawReviews?.reviews || []).filter((r) => {
-      if (appScope === "competitor" && r.competitor === BASELINE_APP) return false
-      if (appScope === "baseline" && r.competitor !== BASELINE_APP) return false
-      return true
-    })
-  }, [rawReviews, appScope])
+  const allReviews = useMemo(() => rawReviews?.reviews || [], [rawReviews])
 
   // KPI（top 1 of 3 关键 tab）
   const { data: aggProblems } = useReviewsAggregated("problems", 1)
@@ -90,7 +81,6 @@ export default function GPReviews() {
       </KpiRow>
 
       <div className="space-y-2 mb-3">
-        <AppScopeChip />
         <FilterChips
           label="维度"
           options={TABS.map((t) => ({ value: t.value, label: t.label }))}

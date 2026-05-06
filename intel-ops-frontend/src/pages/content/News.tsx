@@ -9,13 +9,11 @@ import { useMemo } from "react"
 import PageHeader from "@/components/shared/PageHeader"
 import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
 import FilterChips from "@/components/shared/FilterChips"
-import AppScopeChip from "@/components/shared/AppScopeChip"
 import EmptyState from "@/components/shared/EmptyState"
 import Pill from "@/components/shared/Pill"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useNews } from "@/hooks/api/useNews"
 import { useUrlFilters } from "@/hooks/useUrlFilters"
-import { useFilterStore } from "@/stores/filterStore"
 import {
   BASELINE_APP, COMPETITORS,
   NEWS_BUCKETS, BUSINESS_CATEGORY_LABELS,
@@ -39,7 +37,6 @@ export default function News() {
   const competitor = value("competitor")
   const bucket = value("bucket")
   const showAll = value("show_all") === "1"
-  const { appScope } = useFilterStore()
 
   const { data, isLoading, isError, refetch } = useNews({
     since,
@@ -49,14 +46,9 @@ export default function News() {
   })
   const allNews = data?.news || []
 
-  // 二次过滤（app scope + bucket — 后端没有 bucket 概念，全在前端切）
+  // 二次过滤（仅 bucket — 后端没有 bucket 概念，前端切）
   const filtered = useMemo(() => {
     return allNews.filter((n) => {
-      const app = n.app_name || ""
-      // app scope（vs filterStore）
-      if (appScope === "competitor" && app === BASELINE_APP) return false
-      if (appScope === "baseline" && app !== BASELINE_APP) return false
-      // 按桶过滤
       if (bucket) {
         const b = NEWS_BUCKETS.find((x) => x.key === bucket)
         if (!b) return false
@@ -64,7 +56,7 @@ export default function News() {
       }
       return true
     })
-  }, [allNews, appScope, bucket])
+  }, [allNews, bucket])
 
   // KPI（按 spec wireframe 02 的 4 张卡）
   const kpi = useMemo(() => {
@@ -120,7 +112,6 @@ export default function News() {
       </KpiRow>
 
       <div className="space-y-2 mb-3">
-        <AppScopeChip />
         <FilterChips label="时间" options={TIME_OPTIONS} value={since}
                      onChange={(v) => setValue("since", v)} />
         <FilterChips

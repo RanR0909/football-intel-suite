@@ -9,13 +9,11 @@
 import { useMemo, useState } from "react"
 import PageHeader from "@/components/shared/PageHeader"
 import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
-import AppScopeChip from "@/components/shared/AppScopeChip"
 import EmptyState from "@/components/shared/EmptyState"
 import Pill from "@/components/shared/Pill"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useVersions, useVersionRelatedReviews } from "@/hooks/api/useVersions"
 import { useUrlFilters } from "@/hooks/useUrlFilters"
-import { useFilterStore } from "@/stores/filterStore"
 import FilterChips from "@/components/shared/FilterChips"
 import {
   BASELINE_APP, COMPETITORS,
@@ -28,20 +26,13 @@ export default function Releases() {
   const { value, setValue } = useUrlFilters({ since: "30d", competitor: "" })
   const since = value("since")
   const competitor = value("competitor")
-  const { appScope } = useFilterStore()
 
   const { data, isLoading, isError, refetch } = useVersions({
     competitor: competitor || undefined,
     since,
     limit: 200,
   })
-  const versions = useMemo(() => {
-    return (data?.versions || []).filter((v) => {
-      if (appScope === "competitor" && v.competitor === BASELINE_APP) return false
-      if (appScope === "baseline" && v.competitor !== BASELINE_APP) return false
-      return true
-    })
-  }, [data, appScope])
+  const versions = useMemo(() => data?.versions || [], [data])
 
   const kpi = useMemo(() => {
     const apps = new Set(versions.map((v) => v.competitor))
@@ -74,7 +65,6 @@ export default function Releases() {
       </KpiRow>
 
       <div className="space-y-2 mb-3">
-        <AppScopeChip />
         <FilterChips
           label="时间"
           options={[

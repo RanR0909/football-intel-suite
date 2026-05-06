@@ -9,14 +9,12 @@ import { useMemo } from "react"
 import PageHeader from "@/components/shared/PageHeader"
 import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
 import FilterChips from "@/components/shared/FilterChips"
-import AppScopeChip from "@/components/shared/AppScopeChip"
 import EmptyState from "@/components/shared/EmptyState"
 import Pill from "@/components/shared/Pill"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useAds } from "@/hooks/api/useAds"
 import { useAdsAggregated } from "@/hooks/api/useAggregated"
 import { useUrlFilters } from "@/hooks/useUrlFilters"
-import { useFilterStore } from "@/stores/filterStore"
 import {
   BASELINE_APP, COMPETITORS, REGION_LABELS,
   SELLING_POINT_LABELS, AUDIENCE_LABELS, TONE_LABELS,
@@ -49,17 +47,10 @@ export default function Ads() {
   const tab = (value("tab") || "selling_point") as Tab
   const country = value("country")
   const competitor = value("competitor")
-  const { appScope } = useFilterStore()
 
   // 拉总览（用于 KPI + 底部下钻）
   const { data: rawAds } = useAds({ country, competitor, limit: 500 })
-  const filteredAds = useMemo(() => {
-    return (rawAds?.ads || []).filter((a) => {
-      if (appScope === "competitor" && a.competitor === BASELINE_APP) return false
-      if (appScope === "baseline" && a.competitor !== BASELINE_APP) return false
-      return true
-    })
-  }, [rawAds, appScope])
+  const filteredAds = useMemo(() => rawAds?.ads || [], [rawAds])
 
   const kpi = useMemo(() => {
     const total = filteredAds.length
@@ -111,7 +102,6 @@ export default function Ads() {
       </KpiRow>
 
       <div className="space-y-2 mb-3">
-        <AppScopeChip />
         <FilterChips
           label="维度"
           options={TABS.map((t) => ({ value: t.value, label: t.label }))}

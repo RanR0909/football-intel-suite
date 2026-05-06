@@ -11,14 +11,12 @@ import { useMemo } from "react"
 import PageHeader from "@/components/shared/PageHeader"
 import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
 import FilterChips from "@/components/shared/FilterChips"
-import AppScopeChip from "@/components/shared/AppScopeChip"
 import EmptyState from "@/components/shared/EmptyState"
 import Pill from "@/components/shared/Pill"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useCommunity } from "@/hooks/api/useCommunity"
 import { useCommunityAggregated } from "@/hooks/api/useAggregated"
 import { useUrlFilters } from "@/hooks/useUrlFilters"
-import { useFilterStore } from "@/stores/filterStore"
 import { ArrowUp, MessageCircle, ExternalLink } from "lucide-react"
 import { BASELINE_APP, COMPETITORS, POST_TOPIC_LABELS } from "@/types/domain"
 import type {
@@ -47,19 +45,12 @@ export default function Social() {
   const source = value("source") as "reddit" | "twitter" | ""
   const competitor = value("competitor")
   const since = value("since")
-  const { appScope } = useFilterStore()
 
   // 总览原始帖（KPI + 底部下钻）
   const { data: rawPosts } = useCommunity({
     source: source || undefined, competitor, limit: 200,
   })
-  const filteredPosts = useMemo(() => {
-    return (rawPosts?.posts || []).filter((p) => {
-      if (appScope === "competitor" && p.competitor === BASELINE_APP) return false
-      if (appScope === "baseline" && p.competitor !== BASELINE_APP) return false
-      return true
-    })
-  }, [rawPosts, appScope])
+  const filteredPosts = useMemo(() => rawPosts?.posts || [], [rawPosts])
 
   const kpi = useMemo(() => ({
     total: filteredPosts.length,
@@ -83,7 +74,6 @@ export default function Social() {
       </KpiRow>
 
       <div className="space-y-2 mb-3">
-        <AppScopeChip />
         <FilterChips
           label="维度"
           options={TABS.map((t) => ({ value: t.value, label: t.label }))}
