@@ -771,16 +771,26 @@ class APIHandler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     r["classification_confidence"] = None
 
-        # 兜底：表完全空 → 回退读 async_google_news.json
-        # （只发生在 google_news 抓过但还没跑过 news_classifier，且表本身也未 ingest 历史时）
+        # 兜底：仅当 news_items 表本身完全空时回退读 JSON
+        # （google_news 跑过但还没 ingest 入库 + 还没跑 news_classifier 的早期场景）
+        # 注意：不能用 `if not rows`！过滤后空 ≠ 表空 — 24h since 过滤后 0 条
+        # 但表里有 63 条已分类，错误触发 fallback 会让 JSON 里的比赛预告
+        # 涌入前端展示在"等待分类"桶，造成"今日 11 条 > 7d 2 条"自相矛盾。
         if not rows:
-            rows = self._derive_news_from_json(cutoff, limit)
+            empty_table = _query("SELECT 1 AS x FROM news_items LIMIT 1")
+            if not empty_table:
+                rows = self._derive_news_from_json(cutoff, limit, business_only)
 
         return self._send_json({"news": rows, "count": len(rows)})
 
     @staticmethod
-    def _derive_news_from_json(cutoff, limit: int) -> list:
-        """news_items 表空时退化读 async_google_news.json（保持前端不空白）。"""
+    def _derive_news_from_json(cutoff, limit: int, business_only: bool = True) -> list:
+        """news_items 表空时退化读 async_google_news.json（保持前端不空白）。
+
+        business_only=True 时只返回 google_news 标记 is_biz=True 的条目（关键词 fuzzy 命中），
+        防御性 — 跟 SQL 路径的 `WHERE is_business=1` 行为对齐，避免 fallback 数据
+        被当成"等待分类"展示。
+        """
         path = DATA_DIR / "async_google_news.json"
         if not path.exists():
             return []
@@ -796,6 +806,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 pub_iso = item.get("pub_iso") or ""
                 if cutoff_iso and pub_iso and pub_iso < cutoff_iso:
                     continue
+                is_biz = bool(item.get("is_biz"))
+                if business_only and not is_biz:
+                    continue
                 out.append({
                     "id": -1,
                     "title": item.get("title"),
@@ -803,10 +816,10 @@ class APIHandler(BaseHTTPRequestHandler):
                     "source": item.get("source"),
                     "url": item.get("link"),
                     "published_at": pub_iso,
-                    "matched_keyword": "biz" if item.get("is_biz") else "broad",
+                    "matched_keyword": "biz" if is_biz else "broad",
                     "app_name": app,
                     "fetched_at": None,
-                    "is_business": bool(item.get("is_biz")),
+                    "is_business": is_biz,
                     "business_category": None,
                     "competitors_mentioned": [],
                     "classification_confidence": None,
