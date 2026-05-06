@@ -1173,12 +1173,12 @@ class APIHandler(BaseHTTPRequestHandler):
             # 代表评论
             sample_rows = _query(f"""
                 SELECT r.id, COALESCE(r.translated_text, r.content) as text_zh,
-                       cp.name as competitor, r.region_code as region, r.rating as score
+                       cp.name as competitor, r.region_code as region, r.score as score
                 FROM comment_entities ce
                 JOIN reviews r ON r.id = ce.review_id
                 JOIN competitors cp ON cp.id = r.competitor_id
                 WHERE ce.canonical_id = :cid AND {label_filter}
-                ORDER BY r.posted_at DESC LIMIT 1
+                ORDER BY COALESCE(r.at, r.fetched_at) DESC LIMIT 1
             """, cid=cid)
             out.append({
                 "canonical_id": cid,

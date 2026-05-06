@@ -1,8 +1,10 @@
 /** GP 评论页（spec 前端实现文档 §9.8 + wireframe 01）
  *
  * 改造点 vs v1:
- *  · 主视图改 4 tab：问题 Top / 好评 Top / 本地化 / 竞品流向
- *  · 每 tab 走 /api/reviews/aggregated?tab=… (按 entity 聚合)
+ *  · 主视图改 5 tab：问题 Top / 问题原文 / 好评 Top / 本地化 / 竞品流向
+ *  · 聚合 tab 走 /api/reviews/aggregated?tab=… (按 entity 聚合)
+ *  · "问题原文" tab = label='complaint' 评论原帖流，按差评分组按竞品分桶
+ *    (类似社媒"产品信号"，给产品视角直接读用户抱怨原文)
  *  · KPI 改"内容向"：总评论数 / 最热问题 / 最热请求功能 / 主要流向竞品
  *  · 底部保留 6 类标签矩阵作下钻
  */
@@ -21,11 +23,16 @@ import {
 } from "@/types/domain"
 import type { ReviewLabel, ReviewsAggregatedTab, ReviewsAggregatedResponse } from "@/types/api"
 
-const TABS: Array<{ value: ReviewsAggregatedTab; label: string }> = [
-  { value: "problems",     label: "问题 Top" },
-  { value: "praise",       label: "好评 Top" },
-  { value: "localization", label: "本地化" },
-  { value: "churn",        label: "竞品流向" },
+/** "raw_problems" 是非聚合 tab — 直接列 complaint 评论原文（≤2 星优先）。
+ *  其他 4 个走 useReviewsAggregated。 */
+type GPTab = ReviewsAggregatedTab | "raw_problems"
+
+const TABS: Array<{ value: GPTab; label: string }> = [
+  { value: "problems",      label: "问题 Top" },
+  { value: "raw_problems",  label: "问题原文" },   // 用户重点：直接读差评原文
+  { value: "praise",        label: "好评 Top" },
+  { value: "localization",  label: "本地化" },
+  { value: "churn",         label: "竞品流向" },
 ]
 
 const LABEL_KEYS: ReviewLabel[] = [
@@ -37,16 +44,20 @@ export default function GPReviews() {
   const { value, setValue } = useUrlFilters({
     tab: "problems", competitor: "", since: "7d",
   })
-  const tab = (value("tab") || "problems") as ReviewsAggregatedTab
+  const tab = (value("tab") || "problems") as GPTab
   const competitor = value("competitor")
   const since = value("since")
 
-  // 主聚合数据（每个 tab）
-  const { data: agg, isLoading, isError, refetch } = useReviewsAggregated(tab, 30)
+  // 主聚合数据（每个聚合 tab；raw_problems tab 不用）
+  const aggTab: ReviewsAggregatedTab = tab === "raw_problems" ? "problems" : tab
+  const { data: agg, isLoading, isError, refetch } = useReviewsAggregated(aggTab, 30)
 
   // 用于 KPI 计算和底部矩阵的原始 reviews
+  // raw_problems tab 同时拿 label='complaint' 的全量原文（最多 500 条）
   const { data: rawReviews } = useReviews({
-    competitor: competitor || undefined, since, limit: 500,
+    competitor: competitor || undefined,
+    label: tab === "raw_problems" ? "complaint" : undefined,
+    since, limit: 500,
   })
   const allReviews = useMemo(() => rawReviews?.reviews || [], [rawReviews])
 
@@ -110,14 +121,20 @@ export default function GPReviews() {
         />
       </div>
 
-      {isLoading && <SkeletonTable rows={6} />}
-      {isError && <EmptyState type="error" onRetry={() => refetch()} />}
-      {!isLoading && !isError && (!agg || agg.items.length === 0) && (
-        <EmptyState type="empty" hint="entity_extract 还未在该维度产出结果" />
-      )}
+      {tab === "raw_problems" ? (
+        <RawProblemsTab reviews={allReviews} />
+      ) : (
+        <>
+          {isLoading && <SkeletonTable rows={6} />}
+          {isError && <EmptyState type="error" onRetry={() => refetch()} />}
+          {!isLoading && !isError && (!agg || agg.items.length === 0) && (
+            <EmptyState type="empty" hint="entity_extract 还未在该维度产出结果" />
+          )}
 
-      {agg && agg.items.length > 0 && (
-        <AggregatedList items={agg.items} tab={tab} />
+          {agg && agg.items.length > 0 && (
+            <AggregatedList items={agg.items} tab={aggTab} />
+          )}
+        </>
       )}
 
       {/* 底部下钻：6 类标签矩阵 */}
@@ -201,6 +218,98 @@ function AggregatedList({
           已显示前 30 个 {tab} 主题
         </div>
       )}
+    </div>
+  )
+}
+
+// ─────────── 问题原文 tab — complaint 类评论按差评分组 ───────────
+//
+// 跟"问题 Top" tab (entity 聚合) 的关系：
+//   · 问题 Top    → 看"哪几类 bug 提及次数最多"（产品全局视角）
+//   · 问题原文    → 看"具体每个 1 星 / 2 星用户在抱怨什么"（产品具体反馈）
+// 两者互补，前者数据驱动决策优先级，后者读出来直接拿去复现 bug。
+//
+// 排序：score ASC（1 星最差最先）+ at DESC（同分按时间倒序）
+// 分组：score 1-5；评分越低越红
+
+function RawProblemsTab({ reviews }: { reviews: any[] }) {
+  const grouped = useMemo(() => {
+    // 按 score 分桶（1 / 2 / 3 / 4 / 5 / null）+ 同桶内按 at desc
+    const buckets: Record<string, any[]> = { "1": [], "2": [], "3": [], "4": [], "5": [], "?": [] }
+    for (const r of reviews) {
+      const k = r.score == null ? "?" : String(r.score)
+      if (!buckets[k]) buckets[k] = []
+      buckets[k].push(r)
+    }
+    for (const k of Object.keys(buckets)) {
+      buckets[k].sort((a, b) => (b.at || "").localeCompare(a.at || ""))
+    }
+    return buckets
+  }, [reviews])
+
+  if (!reviews || reviews.length === 0) {
+    return (
+      <EmptyState
+        type="empty"
+        hint="近窗口内 0 条 complaint 评论 — 放宽时间或换一个竞品"
+      />
+    )
+  }
+
+  const SCORE_VARIANT: Record<string, "red" | "amber" | "gray" | "green"> = {
+    "1": "red", "2": "red", "3": "amber", "4": "gray", "5": "green", "?": "gray",
+  }
+  const SCORE_LABELS: Record<string, string> = {
+    "1": "1 ★ 极差", "2": "2 ★ 差", "3": "3 ★ 中", "4": "4 ★ 良", "5": "5 ★ 优", "?": "无评分",
+  }
+
+  return (
+    <div className="space-y-2">
+      {(["1", "2", "3", "4", "5", "?"] as const).map((sc) => {
+        const subset = grouped[sc] || []
+        if (subset.length === 0) return null
+        return (
+          <section key={sc} className="border border-border-soft rounded-md bg-card overflow-hidden">
+            <header className="flex items-center justify-between px-3 h-9 bg-muted/30 border-b border-border-soft">
+              <div className="flex items-center gap-2">
+                <Pill variant={SCORE_VARIANT[sc] || "gray"}>{SCORE_LABELS[sc]}</Pill>
+                <span className="text-2xs text-muted-foreground tabular-nums">{subset.length} 条</span>
+              </div>
+            </header>
+            <div className="divide-y divide-border-soft">
+              {subset.slice(0, 30).map((r) => (
+                <article key={r.id} className="px-3 py-2.5 hover:bg-muted/30 transition-colors duration-150">
+                  <div className="flex items-baseline gap-2 mb-1 text-2xs flex-wrap">
+                    <span className="font-medium">{r.competitor}</span>
+                    <Pill variant="gray">{(r.region_code || "").toUpperCase()}</Pill>
+                    <Pill variant="blue">{r.platform}</Pill>
+                    {r.version && (
+                      <span className="font-mono text-muted-foreground">v{r.version}</span>
+                    )}
+                    <span className="ml-auto font-mono text-muted-foreground tabular-nums">
+                      {r.at ? new Date(r.at).toLocaleDateString("zh-CN") : "—"}
+                    </span>
+                  </div>
+                  <p className="text-xs leading-snug text-foreground">
+                    {r.translated_text || r.content}
+                  </p>
+                  {r.translated_text && r.content && r.translated_text !== r.content && (
+                    <details className="mt-1 text-2xs text-muted-foreground">
+                      <summary className="cursor-pointer">原文 ({r.language || "?"})</summary>
+                      <p className="mt-1 italic leading-snug">{r.content}</p>
+                    </details>
+                  )}
+                </article>
+              ))}
+              {subset.length > 30 && (
+                <div className="text-2xs text-center text-muted-foreground py-2">
+                  仅展示前 30 条，全 {subset.length} 条可下载（待开发）
+                </div>
+              )}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }
