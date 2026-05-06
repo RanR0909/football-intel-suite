@@ -162,10 +162,22 @@ def _ssl_context(verify: bool) -> ssl.SSLContext:
 
 
 def _do_http(url: str, body: bytes, headers: dict, timeout: int, verify_ssl: bool) -> dict:
-    req = urllib.request.Request(url, data=body, headers=headers)
-    ctx = _ssl_context(verify_ssl)
-    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-        return json.loads(resp.read())
+    """HTTP 调用，带 socket-level timeout 兜底。
+
+    urllib.urlopen 的 timeout 在 SSL handshake 阶段不一定生效（实测中转中有时
+    SSL EOF 后死等到分钟级）。socket.setdefaulttimeout 强制全局超时，确保
+    任何阶段卡住都能 abort。
+    """
+    import socket as _socket
+    _old = _socket.getdefaulttimeout()
+    _socket.setdefaulttimeout(timeout)
+    try:
+        req = urllib.request.Request(url, data=body, headers=headers)
+        ctx = _ssl_context(verify_ssl)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return json.loads(resp.read())
+    finally:
+        _socket.setdefaulttimeout(_old)
 
 
 def _http_call(cfg: dict, prompt: str) -> str:
@@ -232,11 +244,68 @@ def _parse_output(text: str, cfg: dict) -> Any:
     fmt = cfg.get("output_format", "text")
     if fmt == "json":
         candidate = _strip_json(text) if cfg.get("json_strip_markdown") else text
+        # 1) 严格 JSON
         try:
             return json.loads(candidate)
         except json.JSONDecodeError:
-            return {"_raw": text, "_parse_error": True}
+            pass
+        # 2) 宽松 JSON：把字符串字段值里**未转义的内引号**自动转义
+        # haiku 偶发翻译时把内容里的 " 直接照搬，导致 JSON 破裂；这里做兜底
+        salvaged = _try_loose_json(candidate)
+        if salvaged is not None:
+            return salvaged
+        # 3) 最后回退：regex 抢救 label / language / translated_text 等关键字段
+        rescued = _regex_rescue_json(candidate)
+        if rescued:
+            rescued["_rescued"] = True
+            return rescued
+        return {"_raw": text, "_parse_error": True}
     return text
+
+
+def _try_loose_json(s: str) -> Any | None:
+    """把字符串值里未转义的引号 escape，再尝试 json.loads。
+
+    思路：把 JSON 当作 ASCII 字符流走一遍 state machine，
+    在字符串里遇到 " 但下一个 token 不是 ":" / "}" / "]" / "," 时，认为是内引号，加 \\
+    """
+    import re
+    # 简化版：先用正则匹配 "key": "value" 模式，把 value 里裸引号替换成 \"
+    # 不完美但够覆盖 haiku 这类 case
+    def fix_value(m):
+        key, val = m.group(1), m.group(2)
+        # 反向覆盖：val 里如果有未转义 " 就转义
+        fixed = re.sub(r'(?<!\\)"', r'\\"', val)
+        return f'"{key}": "{fixed}"'
+    # 匹配 "key": "value" 一直到下一个 ", 或 "} 或 "]
+    # 注意：value 内部允许换行 + 任意字符，直到 (?=",\s*"\w+":|\s*\})
+    pattern = re.compile(
+        r'"(\w+)":\s*"((?:.|\n)*?)"(?=\s*[,}\]])',
+        re.DOTALL,
+    )
+    fixed = pattern.sub(fix_value, s)
+    try:
+        return json.loads(fixed)
+    except Exception:
+        return None
+
+
+def _regex_rescue_json(s: str) -> dict | None:
+    """JSON 完全炸时，用 regex 提取 label/language/translated_text 等关键字段。"""
+    import re
+    out = {}
+    for k in ("label", "language"):
+        m = re.search(rf'"{k}"\s*:\s*"([^"]+)"', s)
+        if m:
+            out[k] = m.group(1)
+    # translated_text 可能含引号：取到下一个键名前的全部
+    m = re.search(
+        r'"translated_text"\s*:\s*"(.+?)"\s*[,}]\s*\n?\s*"',
+        s, re.DOTALL,
+    )
+    if m:
+        out["translated_text"] = m.group(1).replace('\\n', '\n').replace('\\"', '"')
+    return out if out else None
 
 
 # ─────────────────────────── 主入口 ───────────────────────────

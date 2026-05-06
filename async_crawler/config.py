@@ -11,6 +11,5 @@ SCHEDULE = {
     "sensor_tower":  86400,
     "androidrank":   86400,
     "reddit":        3600,
-    "iap_pricing":   86400 * 7,  # 每周
     "fb_adlib":      86400,
 }

@@ -89,9 +89,7 @@ pip3 install --user --break-system-packages \
   app-store-scraper \
   pandas \
   requests \
-  beautifulsoup4 \
-  streamlit \
-  plotly
+  beautifulsoup4
 ```
 
 **或用 venv（更干净，推荐）**
@@ -105,9 +103,7 @@ pip install \
   app-store-scraper \
   pandas \
   requests \
-  beautifulsoup4 \
-  streamlit \
-  plotly
+  beautifulsoup4
 ```
 
 > 启动看板.command 用的是系统 `python3`。如果用 venv，要么改 .command 里的 `python3` 为 `.venv/bin/python3`，要么每次启动前 `source .venv/bin/activate`。
@@ -122,8 +118,6 @@ pip install \
 | `pandas` | market_rank 表格处理 | **必需** |
 | `requests` | strategy_monitor / market_rank HTTP 调用 | **必需** |
 | `beautifulsoup4` | 部分 HTML 解析备用 | 可选 |
-| `streamlit` | competitor_comment 老 Streamlit UI（看板已不依赖） | 可选 |
-| `plotly` | 图表生成（看板已不依赖） | 可选 |
 
 > **最小集**（跑看板 + 同步抓取够）：`aiohttp + google-play-scraper + pandas + requests`
 
@@ -210,6 +204,27 @@ chmod +x 启动看板.command
 
 ---
 
+### 5b. Playwright 持久登录态（一次性手动登）
+
+下面 4 个抓取器走 Playwright 持久 profile，**首次必须手动登录一次**（cookie 存盘后续自动用，失效再重登）：
+
+| 抓取器 | 一次性登录命令 | 登录页 | 登录方式 |
+|---|---|---|---|
+| **qimai IAP**（替代 Apple HTML，绕开 IP redirect 到 CN 的死结） | `python3 -m market_rank.scrape_qimai_iap login` | qimai.cn 首页 | 手机号 / 微信 / 账号 |
+| AppMagic | `python3 -m market_rank.scrape_appmagic login` | appmagic.rocks | 免费账号 |
+| Sensor Tower | `python3 -m market_rank.scrape_sensor_tower login` | sensortower.com | 免费账号 |
+| Meta Ad Library | `python3 -m market_rank.scrape_fb_adlib login` | facebook.com/ads/library | FB 账号 |
+
+**qimai 登录的额外注意**（反爬绕过）：
+- 我们用**系统 Google Chrome** 而不是 Playwright bundled chromium（关掉 `AutomationControlled` flag）
+- 弹窗打开后**只在首页操作**，不要点 app 链接（点错跳到详情页未登录态会被 SPA 弹 /404，那是 qimai 反爬正常行为）
+- 在 qimai.cn 首页右上角点「登录」 → 完成验证 → 看到自己的头像/昵称才算登录成
+- 回终端按 Enter 保存 cookie 到 `~/.qimai-profile/state.json`
+
+如果新登的还 404，重新跑 `login` 命令——cookie 失效或 qimai 换了反爬规则，可能要再加 stealth 措施。
+
+---
+
 ### 6. 首次同步数据
 
 1. 浏览器顶部点 "**同步数据**" 按钮
@@ -244,10 +259,9 @@ Football_Intel_Suite/
 │   └── raw/                # 抓取产物
 │
 ├── main_dashboard/
-│   ├── generate_dashboard.py     # 入口：生成 dashboard.html
-│   ├── dashboard_server.py       # API 服务器
-│   ├── dashboard_template.html   # UI 模板
-│   └── dashboard.html            # 生成产物（自动）
+│   └── dashboard_server.py       # v2 REST API（:8899）
+│
+├── intel-ops-frontend/           # React + Vite 前端（:5173）
 │
 ├── data_pipeline/
 │   ├── aggregator.py        # 7 数据源 → 统一 dashboard_data.json
@@ -299,16 +313,7 @@ lsof -ti:8899 | xargs kill -9
   - `超时（1200秒）`：网络慢，单独跑该脚本看进度
   - `ModuleNotFoundError`：装依赖
 
-### 5. 想分享看板（不带服务器）
-
-```bash
-python3 main_dashboard/generate_dashboard.py
-cp main_dashboard/dashboard.html ~/Desktop/INTEL-OPS_快照_$(date +%Y%m%d).html
-```
-
-得到的单 HTML 文件双击就能看，自动启用静态模式（隐藏同步 / AI 按钮）。
-
-### 6. 想 SSL 证书校验跳过
+### 5. 想 SSL 证书校验跳过
 
 部分企业网络拦截 SSL，脚本里多数 `urlopen` 已加 `ssl.CERT_NONE` 跳过。如仍报错：
 
@@ -338,8 +343,8 @@ aiohttp + google-play-scraper + pandas + requests
 
 ```
 aiohttp + google-play-scraper + app-store-scraper +
-pandas + requests + beautifulsoup4 + streamlit + plotly
-+ CLAUDE_API_KEY + X_BEARER_TOKEN + META_AD_LIBRARY_TOKEN
+pandas + requests + beautifulsoup4
++ CLAUDE_API_KEY + X_BEARER_TOKEN
 ```
 
 ---

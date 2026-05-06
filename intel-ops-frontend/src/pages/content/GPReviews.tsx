@@ -30,7 +30,7 @@ export default function GPReviews() {
   const { appScope } = useFilterStore()
 
   const { data, isLoading, isError, refetch } = useReviews({
-    competitor, label, region, since, limit: 200,
+    competitor, label, region, since, limit: 500,
   })
   const all = data?.reviews || []
   const filtered = useMemo(() => {

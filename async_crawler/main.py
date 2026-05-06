@@ -36,9 +36,11 @@ def _all_sources():
     sensor_tower / fb_adlib 已迁移到 market_rank/ 下的 Playwright 脚本（需手动登录），
     不在 async_crawler 自动循环里跑 — 由 dashboard_server SCRIPTS 单独触发。
     """
+    # iap_pricing 已从 async_crawler 注销 — Apple HTML 抓法在国内 IP 全被 redirect 到 CN
+    # storefront，改用 market_rank/scrape_qimai_iap.py（qimai.cn 周更）
     from async_crawler.sources import (
         appstore_rank, reviews,
-        androidrank, reddit, twitter, iap_pricing, google_news,
+        androidrank, reddit, twitter, google_news,
     )
     return [
         ("appstore_rank", "App Store 排名", appstore_rank),
@@ -46,7 +48,6 @@ def _all_sources():
         ("androidrank",   "Androidrank",    androidrank),
         ("reddit",        "Reddit 舆情",    reddit),
         ("twitter",       "X (Twitter)",    twitter),
-        ("iap_pricing",   "IAP 定价",       iap_pricing),
         ("google_news",   "Google 商业新闻", google_news),
     ]
 

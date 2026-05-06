@@ -141,12 +141,33 @@ def label_and_persist(review_id: int, raw_text: str, *, language_hint: str = "")
 
 
 def fetch_unlabeled(*, limit: int = 200, competitor_id: int | None = None) -> list[dict]:
-    """取出还没有 labeled_at 的评论（用于 daily_sync 触发）。"""
+    """取出还没有 labeled_at 的评论（用于 daily_sync 触发）。
+
+    排除已在 failed_ai_jobs 里的 review_id（多次重试都失败的），
+    避免 daily_sync 反复死磕同一批 garbage review 触发 abort。
+    """
     if not _db.is_mysql_enabled():
         return []
+    import sqlalchemy as sa
+    # 取 failed_ai_jobs 里已知失败的 review_id（comment_label 任务 + 未 resolved）
+    blacklist: set[int] = set()
+    with _db.engine().connect() as c:
+        rows = c.execute(sa.text("""
+            SELECT DISTINCT JSON_EXTRACT(payload_json, '$.review_id') AS rid
+            FROM failed_ai_jobs
+            WHERE task_name = 'comment_label' AND resolved_at IS NULL
+        """)).fetchall()
+        for r in rows:
+            try:
+                blacklist.add(int(r[0]))
+            except (TypeError, ValueError):
+                pass
+
     with _db.session() as s:
         q = s.query(Review).filter(Review.labeled_at.is_(None))
         q = q.filter(Review.content.isnot(None))
+        if blacklist:
+            q = q.filter(~Review.id.in_(blacklist))
         if competitor_id is not None:
             q = q.filter(Review.competitor_id == competitor_id)
         rows = q.order_by(Review.id.desc()).limit(limit).all()

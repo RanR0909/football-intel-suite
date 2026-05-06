@@ -4,7 +4,7 @@
 3 阶段流水线：
   Phase 1（并行）：所有抓取源（HTTP + Playwright），目标 ~3 min
   Phase 2（串行）：comment_label + commercial_strategy（AI 重活），目标 ~15 min
-  Phase 3：generate_dashboard 聚合 → 重新生成静态 HTML
+  Phase 3：data_pipeline.aggregator → dashboard_data.json（v2 backend 派生 alerts/news 用）
 
 设计：
 - 每个子任务独立 timeout（不让一个慢任务拖死全部）
@@ -71,9 +71,8 @@ PHASE_1_FETCHERS = [
     # 评论原始抓取（拆出来的快路径；9 竞品 × 12 区 GP 实际需 5-10 分钟）
     ("comment_fetch", "评论抓取（GP+iOS）",
         ["-m", "competitor_comment.comment_fetch"], 900, "http"),
-    # 产品动态（含轻量 AI 解读 diff，沿用现状）
-    ("strategy_monitor", "产品动态监测",
-        [str(_PROJECT_ROOT / "strategy_monitor" / "run_headless.py")], 180, "http"),
+    # 产品动态：strategy_monitor/run_headless.py 已废（文件不存在）；
+    # 版本变化数据由 comment_fetch（带 review.version）+ aggregator 派生 product_updates.items 提供。
     # Playwright - 三个手动登录源
     ("appmagic", "AppMagic 排名",
         ["-m", "market_rank.run_headless"], 240, "playwright"),
@@ -102,14 +101,16 @@ PHASE_2_AI = [
     ("discover_peers", "AI 自动发现新 peer（基于 appstore_rank top 100）",
         ["-m", "ai_tasks.discover_peers", "--limit", "120"], 900),
     # 主 AI 管道：评论 label + entity_extract + 7 类预警
+    # limit 1500：comment_fetch 单次抓 ~1200 条新评论，1500 容量保证消化新增 + 部分历史 backlog；
+    # 并发 8 路下 1500 条 ~10 min；timeout 60 min 留充足余量
     ("ai_pipeline", "AI 管道（label + 实体抽取 + 7 类预警）",
-        ["-m", "ai_tasks.run_pipeline", "--limit", "300"], 1800),
+        ["-m", "ai_tasks.run_pipeline", "--limit", "1500"], 3600),
 ]
 
-# Phase 3：聚合
+# Phase 3：聚合（写 data/dashboard_data.json，供 v2 backend 读派生 alerts/news 等）
 PHASE_3_AGG = [
-    ("generate_dashboard", "看板生成（聚合）",
-        [str(_PROJECT_ROOT / "main_dashboard" / "generate_dashboard.py")], 120),
+    ("aggregate", "聚合 dashboard_data.json",
+        ["-m", "data_pipeline.aggregator"], 120),
 ]
 
 DAILY_MAX_AGE_HOURS = 20.0  # 各源新鲜度阈值（launchd 02:00 ± 抖动）
@@ -528,7 +529,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     queue_size = len(retry_queue.snapshot().get("items") or [])
     all_failures = p1_failures + p2_failures
     if not p3_ok:
-        all_failures.append({"name": "generate_dashboard", "kind": "error", "duration_sec": 0})
+        all_failures.append({"name": "aggregate", "kind": "error", "duration_sec": 0})
 
     print("\n" + "=" * 70)
     print(f"=== daily_sync 完成 — 总耗时 {total/60:.1f} min ===")
@@ -542,8 +543,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         for f in all_failures:
             print(f"    ✗ {f['name']}  kind={f['kind']}  {f['duration_sec']}s")
     print("=" * 70)
+    sys.stdout.flush()  # 确保 nohup log 落盘，避免之前末尾段崩溃看不到 traceback
 
-    # 飞书结束卡片：颜色按失败数 — 0 绿 / 1-2 橙 / 3+ 红
+    # 飞书优先发：放在所有可能崩溃的代码（_notify osascript / atexit）之前，保证一定发出去
+    # 之前 daily_sync 跑完后没收到飞书 → 主进程在 print 总览后异常 exit，没走到下面的 send_card
     if not args.dry_run:
         if total_fail == 0:
             color = "green"
@@ -593,14 +596,21 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
         except Exception as e:
             print(f"[feishu] 结束卡片发送失败: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
 
-    # macOS 通知（保留，本机弹窗）
-    if expired:
-        _notify("INTEL-OPS · Cookie 失效", f"{', '.join(expired)} 需要重新登录")
-    if total_fail >= 3:
-        _notify("INTEL-OPS · 同步告警", f"今日同步 {total_fail} 个任务失败，详情见 sync_log")
-    elif total / 60 > 30:
-        _notify("INTEL-OPS · 同步耗时告警", f"今日同步耗时 {total/60:.0f} 分钟（>30 min）")
+    # macOS 通知（保留，本机弹窗）— 包 try 兜底，不让任何异常吞掉返回值
+    try:
+        if expired:
+            _notify("INTEL-OPS · Cookie 失效", f"{', '.join(expired)} 需要重新登录")
+        if total_fail >= 3:
+            _notify("INTEL-OPS · 同步告警", f"今日同步 {total_fail} 个任务失败，详情见 sync_log")
+        elif total / 60 > 30:
+            _notify("INTEL-OPS · 同步耗时告警", f"今日同步耗时 {total/60:.0f} 分钟（>30 min）")
+    except Exception as e:
+        print(f"[notify] macOS 通知异常: {e}", file=sys.stderr)
 
     return 0 if total_fail == 0 else 1
 

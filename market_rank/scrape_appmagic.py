@@ -111,6 +111,13 @@ EXTRACT_JS = r"""
   const firstCol = Array.from(cols).find(c => c.querySelectorAll('top-apps-item').length > 0);
   if (!firstCol) return [];
   const items = Array.from(firstCol.querySelectorAll('top-apps-item'));
+  // 过滤掉看起来像 delta/数字标签的行：纯数字、箭头、+/-、百分号都不能算 app 名
+  const isAppNameLike = (s) => {
+    if (!s) return false;
+    if (s.length < 3) return false;
+    if (/^[\d\s↑↓+\-=%·.,]+$/.test(s)) return false;
+    return /[A-Za-z一-龥]/.test(s);
+  };
   return items.map((el, idx) => {
     const text = (el.innerText || '').trim();
     const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
@@ -118,14 +125,18 @@ EXTRACT_JS = r"""
     const rankIdx = lines.findIndex(l => l === expected);
     let delta = null, name = '', publisher = '', downloads = null;
     if (rankIdx > 0) delta = lines.slice(0, rankIdx).join(' ') || null;
-    if (rankIdx >= 0) {
-      name = lines[rankIdx + 1] || '';
-      publisher = lines[rankIdx + 2] || '';
-      const dl = lines[rankIdx + 3];
+    // 从合理起点开始找第一个像 app 名的行（不再裸取 lines[0]）
+    const start = rankIdx >= 0 ? rankIdx + 1 : 0;
+    for (let i = start; i < lines.length; i++) {
+      if (isAppNameLike(lines[i])) { name = lines[i]; break; }
+    }
+    if (name) {
+      const ni = lines.indexOf(name);
+      // publisher 紧跟 name；downloads 再下一行（且要以数字/$/~/>开头）
+      const pubCand = lines[ni + 1] || '';
+      if (pubCand && isAppNameLike(pubCand)) publisher = pubCand;
+      const dl = lines[ni + 2];
       if (dl && /^[~>$\d]/.test(dl)) downloads = dl;
-    } else {
-      name = lines[0] || '';
-      publisher = lines[1] || '';
     }
     return { rank: idx + 1, delta, name, publisher, downloads };
   });

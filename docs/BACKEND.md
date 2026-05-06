@@ -55,18 +55,19 @@ launchd 定时触发 sync 脚本 → 12 数据源并行抓取 → 落 MySQL/JSON
 | `comment_fetch` | GP + iOS 用户评论（12 区）| 日 02:00 | `competitor_comment/comment_fetch.py` — 官方 review feeds |
 | `reddit` | r/soccer 等帖子搜索 | 日 02:00 | `async_crawler/sources/reddit.py` — Reddit JSON API |
 | `twitter` | 推文搜索 | 日 02:00 | `async_crawler/sources/twitter.py` — fapi.uk 第三方代理（apiKey） |
-| `iap_pricing` | App Store IAP 价格（12 区）| 周日 03:00 | `async_crawler/sources/iap_pricing.py` — apps.apple.com HTML |
+| `iap_pricing` | IAP 价格（cn 区，¥）| 周日 03:00 | `market_rank/scrape_qimai_iap.py` — qimai.cn Playwright（Apple 直抓被 IP redirect 卡死，已换数据源） |
 | `google_news` | 商业新闻 RSS（business 关键词命中）| 周日 03:00 | `async_crawler/sources/google_news.py` — Google News RSS |
 | `strategy_monitor` | 版本号 / 描述变化 | 日 02:00 | `strategy_monitor/changelog_*.py` — iTunes Lookup |
 
-### 2.2 Playwright 持久 profile（4 个，需一次性人工登录）
+### 2.2 Playwright 持久 profile（5 个，需一次性人工登录）
 
 | 源 | 抓什么 | profile 路径 | 备注 |
 |---|---|---|---|
 | `appmagic` | 全球 + 12 国排名 | `~/.appmagic-profile` | 免费账号即可 |
 | `fb_adlib` | Meta 广告库（5 国 × 10 app = 50 query 拆任务并跑）| `~/.meta-adlib-profile` | per-country 拆并发 |
 | `sensor_tower` | 月下载估算 / 收入 / 排名 | `~/.sensortower-profile` | 免费账号 |
-| `similarweb_traffic` | 网站流量 / 设备 / 停留 / 排名 | `~/.similarweb-profile` | 用系统 Chrome（`channel="chrome"`）过 CloudFront |
+| `qimai_iap` | App Store IAP 价格（cn 区）| `~/.qimai-profile/state.json` | 系统 Chrome + 关 `AutomationControlled` 反爬；登录方法详见 SETUP.md §5b |
+| ~~`similarweb_traffic`~~ | （已死，CloudFront 拦 IP）→ 改用 `market_rank/scrape_sitedata.py`（SiteData 扩展 API） | — | 不需要 Playwright，纯 HTTP；UUID 在 `.env.local` |
 
 ### 2.3 共有约束
 
@@ -256,7 +257,7 @@ Phase 2 · AI 串行
                 → INSERT alerts 表
 
 Phase 3 · 聚合
-   └─ generate_dashboard       ── 把所有源汇成 dashboard_data.json
+   └─ aggregate                ── 把所有源汇成 dashboard_data.json
 
 完成后 → 飞书 "📊 每日抓取完成" 卡片（绿/橙/红 按失败数）
 ```
@@ -270,7 +271,7 @@ Phase 1 · 4 个周更任务（串行）
    1. iap_pricing             ── 价格 7 天才变一次
    2. google_news             ── RSS 商业新闻（业务关键词命中）
    3. similarweb_traffic       ── 网站流量
-   4. generate_dashboard       ── 重生成看板
+   4. aggregate                ── 重生成 dashboard_data.json
 
 完成后 → 飞书 "📅 周更完成" 卡片
 ```
@@ -433,7 +434,7 @@ competitor_comment/
 
 main_dashboard/
 ├── dashboard_server.py       — HTTP server（dashboard 前端 + on-demand API）
-└── generate_dashboard.py     — 聚合所有源 → dashboard_data.json
+└── (已删，v1 HTML 渲染入口；v2 用 data_pipeline/aggregator.py)
 
 config/
 ├── ai_tasks.json             — 4 个 AI 任务配置
@@ -481,7 +482,7 @@ data/
     ↓
 ⑩  INSERT alerts 行 (severity=mid)
     ↓
-⑪  03:00 generate_dashboard 把所有源汇到 dashboard_data.json
+⑪  03:00 aggregate 把所有源汇到 dashboard_data.json
     ↓
 ⑫  前端 fetch /api/data/dashboard_data
     ↓
@@ -542,12 +543,11 @@ alembic revision -m "..."
 
 ### 看板
 ```bash
-# 起 dashboard server（默认 :8000）
+# 起 dashboard server（默认 :8899）
 python3 main_dashboard/dashboard_server.py
 
 # 重生成 dashboard_data.json
-python3 main_dashboard/generate_dashboard.py
-python3 main_dashboard/generate_dashboard.py --sync   # 先 daily_sync 再聚合
+python3 -m data_pipeline.aggregator
 ```
 
 ---

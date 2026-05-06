@@ -31,11 +31,11 @@
 └──────────────────────────────────────┬──────────────────────────────┘
                                        ▼
 ┌── 看板层 ────────────────────────────────────────────────────────────┐
-│  main_dashboard/dashboard_server.py   HTTP API                       │
-│  main_dashboard/generate_dashboard.py 生成 dashboard.html            │
+│  main_dashboard/dashboard_server.py   HTTP API（v2 后端 :8899）      │
+│  intel-ops-frontend/                  React + Vite 前端（:5173）     │
 │                                                                      │
-│  页面：总览 4 层金字塔 / 预警中心 / 产品动态 / 排名 / 评论 / 周报 /    │
-│        商业分析 / 社媒舆情（汇总 + 单竞品）                            │
+│  页面：总览看点 / 预警中心 / 排名异动 / 收入下载 / IAP / 网站数据 /    │
+│        产品动态 / GP 评论 / 社媒 / 商业新闻 / 广告投放 / 候选发现     │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -96,7 +96,7 @@ fb_adlib / reddit_crawl / twitter_crawl
         │
         ▼ Promise.all 并行（任一失败不阻塞）
         ▼
-generate_dashboard（聚合 + 重算 22 条预警）
+data_pipeline.aggregator（聚合 dashboard_data.json + 重算预警）
         │
         ▼
 增量刷新前端（不重载页面）+ 进度文案 + Toast 通知
@@ -162,9 +162,9 @@ data_pipeline/
   alert_engine.py     22 条预警触发器
 
 main_dashboard/
-  dashboard_server.py 后端 HTTP API
-  dashboard_template.html 前端模板（JSON-driven）
-  generate_dashboard.py 模板渲染入口
+  dashboard_server.py 后端 HTTP API（:8899，v2 仅做 REST API）
+
+intel-ops-frontend/      React 18 + Vite 5 + TS 前端（:5173）
 
 data/
   dashboard_data.json 唯一聚合产物（前端消费）
@@ -209,19 +209,19 @@ python3 competitor_comment/review_3d_summary.py SofaScore --days 3
 python3 competitor_comment/weekly_review.py
 python3 competitor_comment/run_all_details.py
 
-# 看板
-python3 main_dashboard/generate_dashboard.py
-python3 main_dashboard/dashboard_server.py
+# 看板（v2：双击启动看板.command 同时拉起 backend + vite）
+bash 启动看板.command
+# 或分别：
+python3 main_dashboard/dashboard_server.py 8899   # backend
+cd intel-ops-frontend && npm run dev               # frontend :5173
 ```
 
-### 同步看板（手动 + 一键）
+### 同步数据
 
 ```bash
-# 全部抓取 + 聚合 + 生成（命令行）
-python3 main_dashboard/generate_dashboard.py --sync
-
-# 浏览器一键（推荐）
-打开 http://localhost:8899 → 总览右上"同步数据"
+# 全部抓取 + 聚合（手动）
+python3 scripts/daily_sync.py
+python3 -m data_pipeline.aggregator   # 单独重新聚合
 ```
 
 ---

@@ -794,6 +794,9 @@ def _fill_ads(
         records = by_comp.get(name, [])
         info_dict = process_competitor_ads(records) if records else {}
         if not info_dict:
+            # M2: 显式置 None。schema.CommercialInfo.ads 默认就是 None，
+            # 这里再保险一次 — 确保中间步骤未误设 AdsInfo()。
+            snap.commercial.ads = None
             continue
         # Phase 3 预留：合入独立持久化的 AI 分析
         ai = ads_ai.get(name)

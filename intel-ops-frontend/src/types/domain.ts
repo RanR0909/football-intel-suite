@@ -12,26 +12,27 @@ export const COMPETITORS = [
 export const BASELINE_APP = "AllFootball" as const
 export type CompetitorName = (typeof COMPETITORS)[number] | typeof BASELINE_APP
 
+// 与 data/regions.json 保持一致（项目实际抓取的 12 国）
 export const REGIONS = [
-  "us", "gb", "de", "fr", "es", "it",
-  "br", "mx", "ng", "sa", "ae", "jp",
+  "us", "ng", "my", "id", "sa", "ae",
+  "jp", "ca", "vn", "gb", "br", "ru",
 ] as const
 
 export type Region = (typeof REGIONS)[number]
 
 export const REGION_LABELS: Record<Region, string> = {
   us: "美国 🇺🇸",
-  gb: "英国 🇬🇧",
-  de: "德国 🇩🇪",
-  fr: "法国 🇫🇷",
-  es: "西班牙 🇪🇸",
-  it: "意大利 🇮🇹",
-  br: "巴西 🇧🇷",
-  mx: "墨西哥 🇲🇽",
   ng: "尼日利亚 🇳🇬",
+  my: "马来西亚 🇲🇾",
+  id: "印尼 🇮🇩",
   sa: "沙特 🇸🇦",
   ae: "阿联酋 🇦🇪",
   jp: "日本 🇯🇵",
+  ca: "加拿大 🇨🇦",
+  vn: "越南 🇻🇳",
+  gb: "英国 🇬🇧",
+  br: "巴西 🇧🇷",
+  ru: "俄罗斯 🇷🇺",
 }
 
 export const ALERT_TYPE_LABELS: Record<AlertType, string> = {

@@ -61,16 +61,36 @@ export default function Ads() {
     return top ? `${REGION_LABELS[top[0] as Region] || top[0].toUpperCase()} (${top[1]})` : "—"
   }, [filtered])
 
+  // M2: 区分"未抓取"vs"抓到 0 条" — 把没出现在 ad_creatives 表的竞品列出来。
+  // 后端 schema commercial.ads 已用 None 标记未抓，但 /api/ads 走的是另一张表，
+  // 这里复用 COMPETITORS 名单与 matrix 差集得到。
+  const notFetched = useMemo(() => {
+    if (appScope === "baseline") return []  // 仅 AF 时不展示该提示
+    const seen = new Set([...matrix.keys()])
+    return COMPETITORS.filter((c) => !seen.has(c))
+  }, [matrix, appScope])
+
   return (
     <div>
       <PageHeader title="广告投放" subtitle="Meta 广告库 · 竞品 × 国家矩阵" />
 
       <KpiRow>
         <KpiCard label="活跃创意" value={totalActive} hint="所有 region" />
-        <KpiCard label="覆盖竞品" value={matrix.size} />
+        <KpiCard
+          label="覆盖竞品"
+          value={`${matrix.size} / ${COMPETITORS.length}`}
+          hint={notFetched.length > 0 ? `${notFetched.length} 个未抓取` : "全覆盖"}
+        />
         <KpiCard label="投放 Top1 竞品" value={topCompetitor} />
         <KpiCard label="投放 Top1 国家" value={topRegion} />
       </KpiRow>
+
+      {notFetched.length > 0 && (
+        <div className="mb-3 px-3 py-2 rounded-md border border-semantic-warning/30 bg-semantic-warning/5 text-xs text-muted-foreground">
+          ⚠ 未抓取广告数据：<span className="font-mono text-foreground">{notFetched.join(" · ")}</span>
+          <span className="ml-2 text-2xs">（与"抓到 0 条投放"不同 — fb_adlib 抓取本身未覆盖到该竞品）</span>
+        </div>
+      )}
 
       <div className="space-y-2 mb-3">
         <AppScopeChip />

@@ -129,7 +129,7 @@ export default function Website() {
               <span className="text-sm font-medium">Top Countries</span>
             </header>
             <div className="p-3 text-xs space-y-2">
-              {rows.filter((r) => r.top_countries.length).map((r) => (
+              {rows.filter((r) => r.top_countries?.length).map((r) => (
                 <div key={r.id}>
                   <div className="font-medium mb-1">{r.competitor}</div>
                   <div className="flex flex-wrap gap-1">
@@ -149,7 +149,7 @@ export default function Website() {
               <span className="text-sm font-medium">Similar Sites</span>
             </header>
             <div className="p-3 text-xs space-y-2">
-              {rows.filter((r) => r.similar_sites.length).map((r) => (
+              {rows.filter((r) => r.similar_sites?.length).map((r) => (
                 <div key={r.id}>
                   <div className="font-medium mb-1">{r.competitor}</div>
                   <div className="flex flex-wrap gap-1">

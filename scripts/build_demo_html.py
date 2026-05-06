@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -47,7 +48,48 @@ def _rows(s, sql: str, **params):
     return [{k: _to_jsonable(v) for k, v in r._mapping.items()} for r in rows]
 
 
+_API_BASE = os.environ.get("DEMO_API_BASE", "http://127.0.0.1:8899")
+
+
+def _api_get(path: str) -> dict:
+    """打 v2 API，与 live 前端拿同一份数据；backend 不可达就返回 {}。"""
+    import urllib.request as _urlreq, urllib.error as _urlerr
+    url = f"{_API_BASE}{path}"
+    try:
+        req = _urlreq.Request(url, headers={"Accept": "application/json"})
+        with _urlreq.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (_urlerr.URLError, json.JSONDecodeError, OSError) as e:
+        print(f"  ✗ API {path} 失败: {e}（demo 该板块可能空）", file=sys.stderr)
+        return {}
+
+
 def export_data() -> dict:
+    """从运行中的 v2 backend (默认 :8899) 拉数据，保证 demo 和实时面板一致。
+
+    各 endpoint 已在 dashboard_server.py 实现 fallback（alerts/candidates 表空时
+    从 dashboard_data.json + market_rank_snapshots 派生），demo 拿到的就是前端看到的。
+    """
+    print("[*] 从 v2 API 拉数据 ...", file=sys.stderr)
+    out = {
+        "alerts":           _api_get("/api/alerts?limit=200").get("alerts", []),
+        "rank":             _api_get("/api/rank?limit=200").get("rankings", []),
+        "iap":              _api_get("/api/iap?limit=800").get("iap_items", []),
+        "ads":              _api_get("/api/ads?limit=500").get("ads", []),
+        "website":          _api_get("/api/website?limit=200").get("website", []),
+        "reviews":          _api_get("/api/reviews?limit=500").get("reviews", []),
+        "community":        _api_get("/api/community?limit=100").get("posts", []),
+        "candidates":       _api_get("/api/candidates?limit=100").get("candidates", []),
+        "failed_ai_jobs":   _api_get("/api/failed-ai-jobs?limit=50").get("jobs", []),
+        "sync_log":         _api_get("/api/sync-log?limit=50").get("logs", []),
+        "news":             _api_get("/api/news?limit=50").get("news", []),
+        "status":           _api_get("/api/status") or {},
+    }
+    return out
+
+
+def _legacy_export_data_via_sql() -> dict:
+    """旧版直接打 MySQL 的实现 — 与 live 面板不一致（不再使用，留作参考）。"""
     if not db.is_mysql_enabled():
         raise RuntimeError("MYSQL_DSN 未配置")
 

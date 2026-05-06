@@ -41,7 +41,7 @@ pnpm install        # 或 npm install / yarn
 ```bash
 # 在仓库根目录
 python3 main_dashboard/dashboard_server.py
-# → http://localhost:8000
+# → http://localhost:8899
 ```
 
 ### 3. 启动前端
@@ -51,7 +51,7 @@ pnpm dev
 # → http://localhost:5173
 ```
 
-Vite 已配置代理：`/api/*` → `http://localhost:8000/api/*`，前端代码用 `axios.get("/alerts")` 即可。
+Vite 已配置代理：`/api/*` → `http://localhost:8899/api/*`，前端代码用 `axios.get("/alerts")` 即可。
 
 ### 4. （可选）只跑前端不依赖后端
 
@@ -231,7 +231,7 @@ pnpm lint             # ESLint
 
 后端开发需提供：
 
-1. **API base URL**：dev `http://localhost:8000`，prod 域名待定
+1. **API base URL**：dev `http://localhost:8899`，prod 域名待定
 2. **CORS**：dashboard_server.py 默认允许 `localhost:5173` / `:4173`
 3. **OpenAPI**：可选 — 用 `openapi-typescript` 生成更精确的类型
 4. **WebSocket / SSE**：v1 暂用 30s 轮询（已实现），后续按需接入实时推送

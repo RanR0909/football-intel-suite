@@ -483,10 +483,10 @@ python3 -m ai_tasks.discover_peers list --include-already-tracked   # 含已跟�
      Phase 2 AI：
        2.1 ai_tasks.discover_peers   — 用 app_classifier 扫 appstore_rank 未知 app（30 天缓存）
        2.2 ai_tasks.run_pipeline     — comment_label + entity_extract + alert_engine
-     Phase 3 聚合：generate_dashboard
+     Phase 3 聚合：data_pipeline.aggregator → dashboard_data.json
 
    周更 周日 03:00（scripts/weekly_sync.py）
-     iap_pricing / google_news / similarweb_traffic / 看板重生成
+     iap_pricing / google_news / similarweb_traffic / aggregate
 
    每小时（retry-only launchd）
      处理 retry_queue 到期任务（不抓新数据）

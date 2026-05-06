@@ -149,7 +149,9 @@ class CommercialInfo:
     description_keywords: list = field(default_factory=list)
     seller_url: Optional[str] = None
     ai_intent: Optional[str] = None
-    ads: AdsInfo = field(default_factory=AdsInfo)
+    # M2: 默认 None 表示"未抓到任何记录"。
+    # AdsInfo() 默认全 0/空 — 不能用作"未抓"标志，否则前端会展示 0 与"抓到 0 条"无法区分。
+    ads: Optional[AdsInfo] = None
 
 
 @dataclass

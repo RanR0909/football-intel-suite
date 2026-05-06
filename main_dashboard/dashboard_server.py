@@ -12,8 +12,8 @@
 - CORS：默认允许 vite dev server (`localhost:5173`) + 同域
 
 启动：
-    python3 main_dashboard/dashboard_server.py        # 默认 :8000
-    python3 main_dashboard/dashboard_server.py 8001   # 自定义端口
+    python3 main_dashboard/dashboard_server.py        # 默认 :8899
+    python3 main_dashboard/dashboard_server.py 9999   # 自定义端口
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ import logging
 import os
 import sys
 from datetime import date, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -136,6 +136,10 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        # M4: 禁缓存 — 避免 /api/status 等高频接口被代理/浏览器缓存。
+        # React 端 TanStack Query 自己已做 staleTime 控制，no-store 只影响中间层。
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
         self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
@@ -248,7 +252,7 @@ class APIHandler(BaseHTTPRequestHandler):
         """GET /api/data/dashboard_data — 完整聚合数据"""
         if not DASHBOARD_DATA_PATH.exists():
             return self._send_json({"error": "dashboard_data.json not generated yet",
-                                    "hint": "run: python3 main_dashboard/generate_dashboard.py"},
+                                    "hint": "run: python3 -m data_pipeline.aggregator"},
                                    status=503)
         try:
             data = json.loads(DASHBOARD_DATA_PATH.read_text(encoding="utf-8"))
@@ -287,19 +291,33 @@ class APIHandler(BaseHTTPRequestHandler):
             "WHERE is_relevant = 1 AND topic IN ('football','multi_sport') "
             "AND confidence >= 0.85"
         )
+        cand_n = (candidate_count[0]["n"] if candidate_count else 0)
+        # 表为空 → 用派生候选数
+        if cand_n == 0:
+            cand_n = len(self._derive_candidates_from_rank(limit=100))
 
-        # alerts new
+        # alerts new（表为空 → 用派生 alerts 总数；保持 sidebar 红点准确）
         alerts_new = _query(
             "SELECT COUNT(*) as n FROM alerts WHERE status = 'new' "
             "AND fired_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
         )
+        alerts_n = (alerts_new[0]["n"] if alerts_new else 0)
+        if alerts_n == 0:
+            # 派生：5 类各取 sub_limit=20，union 后大概 < 100
+            tmp = []
+            tmp.extend(self._derive_release_alerts_from_json(limit=20))
+            tmp.extend(self._derive_ranking_alerts_from_db(limit=20))
+            tmp.extend(self._derive_news_alerts_from_json(limit=20))
+            tmp.extend(self._derive_churn_alerts_from_db(limit=20))
+            tmp.extend(self._derive_rating_alerts_from_db(limit=20))
+            alerts_n = len(tmp)
 
         return self._send_json({
             "sources": sources_status,
             "retry_queue_size": retry_size,
             "failed_ai_jobs": {r["task_name"]: r["n"] for r in failed_ai},
-            "candidates_count": (candidate_count[0]["n"] if candidate_count else 0),
-            "alerts_new_7d": (alerts_new[0]["n"] if alerts_new else 0),
+            "candidates_count": cand_n,
+            "alerts_new_7d": alerts_n,
             "ts": datetime.utcnow().isoformat(),
         })
 
@@ -344,7 +362,215 @@ class APIHandler(BaseHTTPRequestHandler):
                 r["metadata"] = json.loads(mj) if mj else {}
             except Exception:
                 r["metadata"] = {}
+        # 回退：alerts 表为空时从 dashboard_data.json 派生（避免「产品动态/排名异动」面板空白）
+        # 当 alerts 表为空（alert_engine 未跑）时，从 JSON / 现有 MySQL 数据派生几类常见 alerts。
+        # 不指定 type 时各类各取 sub_limit 条均衡分布；指定 type 时只派生对应一种到 limit。
+        derive_all = not atype
+        sub_limit = max(20, limit // 5) if derive_all else limit
+        if not rows and (derive_all or atype == "release"):
+            rows.extend(self._derive_release_alerts_from_json(limit=sub_limit))
+        if derive_all or atype == "ranking":
+            rows.extend(self._derive_ranking_alerts_from_db(limit=sub_limit))
+        if derive_all or atype == "news":
+            rows.extend(self._derive_news_alerts_from_json(limit=sub_limit))
+        if derive_all or atype == "churn":
+            rows.extend(self._derive_churn_alerts_from_db(limit=sub_limit))
+        if derive_all or atype == "rating":
+            rows.extend(self._derive_rating_alerts_from_db(limit=sub_limit))
+        # 总长度截到 limit
+        if len(rows) > limit:
+            rows = rows[:limit]
+        # since 过滤兜底（派生 alerts 不走 SQL，自己 filter）
+        # L7: 用 datetime 解析比较，不再字符串比较 — 防止格式异常 (如 "T00:00:00") 误通过
+        if since and rows:
+            cutoff = self._parse_since(since)
+            if cutoff:
+                def _within(fa: str) -> bool:
+                    if not fa:
+                        return False
+                    try:
+                        return datetime.fromisoformat(fa.replace("Z", "+00:00").rstrip("Z")) >= cutoff
+                    except Exception:
+                        return False
+                rows = [r for r in rows if _within(r.get("fired_at") or "")]
         return self._send_json({"alerts": rows, "count": len(rows)})
+
+    @staticmethod
+    def _derive_release_alerts_from_json(limit: int) -> list:
+        """从 dashboard_data.json product_updates.items 派生 release alerts。"""
+        try:
+            fp = Path(__file__).resolve().parent.parent / "data" / "dashboard_data.json"
+            blob = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        items = (blob.get("product_updates") or {}).get("items") or []
+        out = []
+        for i, it in enumerate(items[:limit]):
+            # L7: 缺日期的派生 alert 直接跳过 — 否则 fired_at 会拼成 "T00:00:00"，
+            # 字符串排序时 "T" > "2026-..."，错误地通过 since 过滤。
+            d = it.get("date")
+            if not d:
+                continue
+            out.append({
+                "id": -1000 - i,  # 负 id 区分非 DB 来源
+                "alert_type": "release",
+                "severity": "info",
+                "app_name": it.get("competitor"),
+                "competitor_id": None,
+                "title": it.get("summary") or f"{it.get('competitor')} {it.get('version','')}",
+                "rule_triggered": "version_feature",
+                "fired_at": f"{d}T00:00:00",
+                "status": "new",
+                "metadata": {
+                    "version": it.get("version"),
+                    "type": it.get("type"),
+                    "tags": it.get("tags") or [],
+                    "source_url": it.get("source_url"),
+                },
+            })
+        return out
+
+    @staticmethod
+    def _derive_ranking_alerts_from_db(limit: int) -> list:
+        """从 market_rank_snapshots 直接派生 ranking alerts（最近一天 |delta|≥10）。"""
+        try:
+            rows = _query("""
+                SELECT m.source, m.region_code, COALESCE(c.name, m.name) AS app,
+                       m.rank_value, m.delta, m.snapshot_date
+                FROM market_rank_snapshots m
+                LEFT JOIN competitors c ON c.id = m.competitor_id
+                WHERE m.snapshot_date = CURDATE()
+                  AND m.delta IS NOT NULL
+                  AND ABS(m.delta) >= 10
+                ORDER BY ABS(m.delta) DESC LIMIT :lim
+            """, lim=limit)
+        except Exception:
+            return []
+        out = []
+        for i, r in enumerate(rows or []):
+            # L7: 同 release alert，缺 snapshot_date 的条目会拼出 "T00:00:00" 误过过滤。
+            sd = r.get("snapshot_date")
+            if not sd:
+                continue
+            delta = r.get("delta") or 0
+            sev = "danger" if abs(delta) >= 20 else "warn"
+            region = (r.get("region_code") or "").upper() or "全球"
+            app = r.get("app") or "—"
+            out.append({
+                "id": -2000 - i,
+                "alert_type": "ranking",
+                "severity": sev,
+                "app_name": app,
+                "competitor_id": None,
+                "title": f"{app} 排名变 {int(delta):+d}（{region}）",
+                "rule_triggered": "rank_jump_abs",
+                "fired_at": f"{sd}T00:00:00",
+                "status": "new",
+                "metadata": {
+                    "delta": int(delta),
+                    "rank_value": r.get("rank_value"),
+                    "region": r.get("region_code"),
+                    "source": r.get("source"),
+                },
+            })
+        return out
+
+    @staticmethod
+    def _derive_news_alerts_from_json(limit: int) -> list:
+        """从 async_google_news.json 派生 news alerts（每竞品取前 N 条）。"""
+        fp = Path(__file__).resolve().parent.parent / "data" / "async_google_news.json"
+        if not fp.exists():
+            return []
+        try:
+            blob = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        out = []
+        for rec in blob if isinstance(blob, list) else []:
+            comp = rec.get("competitor", "")
+            for it in (rec.get("data") or {}).get("items", [])[:5]:
+                if len(out) >= limit: break
+                title = it.get("title") or ""
+                pub = it.get("pub") or it.get("published") or ""
+                # 解析 RFC2822 → ISO（粗）
+                from email.utils import parsedate_to_datetime
+                try:
+                    dt = parsedate_to_datetime(pub)
+                    fired = dt.isoformat()
+                except Exception:
+                    fired = pub or ""
+                out.append({
+                    "id": -3000 - len(out),
+                    "alert_type": "news",
+                    "severity": "info",
+                    "app_name": comp,
+                    "competitor_id": None,
+                    "title": title[:200],
+                    "rule_triggered": "biz_news",
+                    "fired_at": fired,
+                    "status": "new",
+                    "metadata": {"source_url": it.get("link"), "source": it.get("source")},
+                })
+            if len(out) >= limit: break
+        return out
+
+    @staticmethod
+    def _derive_churn_alerts_from_db(limit: int) -> list:
+        """从 reviews label='churn_signal' 派生 churn alerts。"""
+        try:
+            rows = _query("""
+                SELECT r.id, c.name AS competitor, r.region_code, r.score,
+                       LEFT(r.content, 120) AS content, r.fetched_at, r.labeled_at
+                FROM reviews r JOIN competitors c ON c.id = r.competitor_id
+                WHERE r.label = 'churn_signal'
+                ORDER BY r.fetched_at DESC LIMIT :lim
+            """, lim=limit)
+        except Exception:
+            return []
+        out = []
+        for i, r in enumerate(rows or []):
+            out.append({
+                "id": -4000 - i,
+                "alert_type": "churn",
+                "severity": "danger",
+                "app_name": r.get("competitor"),
+                "competitor_id": None,
+                "title": f"{r.get('competitor')}（{(r.get('region_code') or '').upper()}）{r.get('content','')}",
+                "rule_triggered": "churn_signal_review",
+                "fired_at": (r.get("fetched_at").isoformat() if hasattr(r.get("fetched_at"), "isoformat") else str(r.get("fetched_at") or "")),
+                "status": "new",
+                "metadata": {"score": r.get("score"), "region": r.get("region_code")},
+            })
+        return out
+
+    @staticmethod
+    def _derive_rating_alerts_from_db(limit: int) -> list:
+        """从 reviews label='complaint' 派生 rating alerts（投诉聚集）。"""
+        try:
+            rows = _query("""
+                SELECT r.id, c.name AS competitor, r.region_code, r.score,
+                       LEFT(r.content, 120) AS content, r.fetched_at
+                FROM reviews r JOIN competitors c ON c.id = r.competitor_id
+                WHERE r.label = 'complaint' AND r.score <= 2
+                ORDER BY r.fetched_at DESC LIMIT :lim
+            """, lim=limit)
+        except Exception:
+            return []
+        out = []
+        for i, r in enumerate(rows or []):
+            out.append({
+                "id": -5000 - i,
+                "alert_type": "rating",
+                "severity": "warn",
+                "app_name": r.get("competitor"),
+                "competitor_id": None,
+                "title": f"{r.get('competitor')}（{(r.get('region_code') or '').upper()}）★{r.get('score')} {r.get('content','')}",
+                "rule_triggered": "negative_review",
+                "fired_at": (r.get("fetched_at").isoformat() if hasattr(r.get("fetched_at"), "isoformat") else str(r.get("fetched_at") or "")),
+                "status": "new",
+                "metadata": {"score": r.get("score"), "region": r.get("region_code")},
+            })
+        return out
 
     def api_alert_ack(self, alert_id: str):
         """POST /api/alerts/:id/ack — 标记预警已读"""
@@ -375,7 +601,8 @@ class APIHandler(BaseHTTPRequestHandler):
         if since:
             cutoff = self._parse_since(since)
             if cutoff:
-                wheres.append("r.fetched_at >= :cutoff")
+                # 优先按 review 时间（Apple 写的），其次 fetched_at —— 否则全部今天抓的会全命中
+                wheres.append("COALESCE(r.at, r.fetched_at) >= :cutoff")
                 params["cutoff"] = cutoff
 
         sql = (
@@ -451,7 +678,9 @@ class APIHandler(BaseHTTPRequestHandler):
         if source:
             wheres.append("m.source = :source")
             params["source"] = source
-        if region:
+        if region == "global":
+            wheres.append("m.region_code IS NULL")
+        elif region:
             wheres.append("m.region_code = :region")
             params["region"] = region
         if competitor:
@@ -574,6 +803,7 @@ class APIHandler(BaseHTTPRequestHandler):
         q = self._qs()
         source = q.get("source", "")
         competitor = q.get("competitor", "")
+        since = q.get("since", "")
         limit = min(int(q.get("limit") or 50), 500)
         wheres = ["1=1"]
         params = {"limit": limit}
@@ -583,6 +813,11 @@ class APIHandler(BaseHTTPRequestHandler):
         if competitor:
             wheres.append("c.name = :competitor")
             params["competitor"] = competitor
+        if since:
+            cutoff = self._parse_since(since)
+            if cutoff:
+                wheres.append("COALESCE(p.created_utc, p.fetched_at) >= :cutoff")
+                params["cutoff"] = cutoff
         sql = (
             "SELECT p.id, c.name as competitor, p.source, p.post_id, p.subreddit, "
             "p.title, p.selftext, p.score, p.num_comments, p.url, "
@@ -639,7 +874,53 @@ class APIHandler(BaseHTTPRequestHandler):
                     r[k] = json.loads(v) if v else []
                 except Exception:
                     r[k] = []
+        # 回退：app_classifications 0 行（AI 分类未跑）→ 从 market_rank_snapshots 派生潜在候选
+        if not rows:
+            rows = self._derive_candidates_from_rank(limit=limit)
         return self._send_json({"candidates": rows, "count": len(rows)})
+
+    @staticmethod
+    def _derive_candidates_from_rank(limit: int) -> list:
+        """app_classifications 空时 fallback：market_rank_snapshots 里 top 50 但不在 competitors 的 app。"""
+        try:
+            rows = _query("""
+                SELECT m.name AS name, m.source, m.region_code,
+                       MIN(m.rank_value) AS best_rank,
+                       MAX(m.snapshot_date) AS latest_date,
+                       COUNT(DISTINCT m.region_code) AS region_coverage
+                FROM market_rank_snapshots m
+                LEFT JOIN competitors c ON c.id = m.competitor_id
+                WHERE m.competitor_id IS NULL
+                  AND m.name IS NOT NULL
+                  AND CHAR_LENGTH(m.name) >= 4
+                  AND m.name NOT REGEXP '^[0-9]+$'
+                  AND m.rank_value <= 50
+                GROUP BY m.name, m.source, m.region_code
+                ORDER BY region_coverage DESC, best_rank ASC
+                LIMIT :lim
+            """, lim=limit)
+        except Exception:
+            return []
+        out = []
+        for i, r in enumerate(rows or []):
+            out.append({
+                "id": -7000 - i,
+                "app_id": None,
+                "platform": "ios",
+                "bundle_id": None,
+                "name": r.get("name"),
+                "publisher": None,
+                "category": "Sports",
+                "description_excerpt": f"来自 {r.get('source')} {(r.get('region_code') or 'global').upper()} 榜，最高 #{r.get('best_rank')}",
+                "matched_keywords": [],
+                "is_relevant": 1,
+                "topic": "football",
+                "categories": ["sports"],
+                "confidence": 0.7,  # 派生默认中信
+                "rejection_reason": None,
+                "classified_at": str(r.get("latest_date") or ""),
+            })
+        return out
 
     def api_failed_ai_jobs(self):
         """GET /api/failed-ai-jobs?resolved=false&task=&limit="""
@@ -737,12 +1018,16 @@ class APIHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8899
     host = "0.0.0.0"
     log.info(f"INTEL-OPS API server listening on http://{host}:{port}")
     log.info(f"  CORS allowed origins: {sorted(ALLOWED_ORIGINS)}")
     log.info(f"  React dev: cd intel-ops-frontend && pnpm dev")
-    HTTPServer((host, port), APIHandler).serve_forever()
+    # M5: ThreadingHTTPServer 让多个 React 页面并行 fetch /api/* 不互相阻塞。
+    # daemon_threads=True → 主进程 Ctrl+C 时不被守护线程拖住。
+    server = ThreadingHTTPServer((host, port), APIHandler)
+    server.daemon_threads = True
+    server.serve_forever()
 
 
 if __name__ == "__main__":

@@ -1,18 +1,16 @@
 #!/bin/bash
-# INTEL-OPS v2.0 看板启动器
-# 启动顺序：
-#   ① 后端 API server (python · :8000)
-#   ② 前端 dev server (vite · :5173)
-#   ③ 浏览器打开 http://localhost:5173
-# Ctrl+C 同时关掉两个进程
+# INTEL-OPS 看板启动器（v2 — 同时启动 dashboard_server :8899 + vite :5173）
+# 密钥从 .env.local 加载（gitignored）；首次：cp .env.local.example .env.local 并填入
 
 set -e
+set -u
+set -o pipefail
 
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
-FRONT="$ROOT/intel-ops-frontend"
+FRONTEND_DIR="$ROOT/intel-ops-frontend"
 
-# ─── 1. 加载 .env.local ────────────────────────────────────────
+# ─── 1. 加载 .env.local ───
 if [ -f ".env.local" ]; then
   set -a
   # shellcheck disable=SC1091
@@ -20,132 +18,138 @@ if [ -f ".env.local" ]; then
   set +a
 else
   echo "❌ 缺少 .env.local"
-  echo ""
-  echo "首次使用，请先："
+  echo "首次使用："
   echo "  cp .env.local.example .env.local"
-  echo "  然后用编辑器填入 CLAUDE_API_KEY 等"
-  echo ""
+  echo "  然后用编辑器填入真实 API key"
   exit 1
 fi
 
-# ─── 2. 校验关键 key ───────────────────────────────────────────
-if [ -z "$CLAUDE_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+# ─── 2. 校验关键 key ───
+if [ -z "${CLAUDE_API_KEY:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "❌ 至少需要 CLAUDE_API_KEY（中转）或 ANTHROPIC_API_KEY（官方）之一"
   echo "   编辑 .env.local 填入"
   exit 1
 fi
 
-# ─── 3. 校验前端项目存在 ───────────────────────────────────────
-if [ ! -d "$FRONT" ]; then
-  echo "❌ 找不到前端项目 $FRONT"
-  echo "   仓库可能不完整，请重新 clone / pull"
-  exit 1
-fi
+# ─── 3. 端口清理函数 ───
+kill_port() {
+  local port=$1
+  local pids
+  pids="$(lsof -ti:"$port" 2>/dev/null || true)"
+  if [ -n "$pids" ]; then
+    echo "  释放 :$port (PID $pids)"
+    echo "$pids" | xargs kill -TERM 2>/dev/null || true
+    for _ in 1 2 3; do
+      sleep 1
+      [ -z "$(lsof -ti:"$port" 2>/dev/null || true)" ] && return 0
+    done
+    pids="$(lsof -ti:"$port" 2>/dev/null || true)"
+    [ -n "$pids" ] && echo "$pids" | xargs kill -KILL 2>/dev/null || true
+  fi
+}
 
-# ─── 4. 杀旧进程（API :8000，Vite :5173） ──────────────────────
-lsof -ti:8000 2>/dev/null | xargs kill -9 2>/dev/null || true
-lsof -ti:5173 2>/dev/null | xargs kill -9 2>/dev/null || true
-# 兼容旧版本端口（万一还有残留）
-lsof -ti:8899 2>/dev/null | xargs kill -9 2>/dev/null || true
+echo "── 释放旧端口 ──"
+kill_port 8899
+kill_port 5173
 
-# ─── 5. 生成最新 dashboard_data.json ───────────────────────────
-echo "▶ 生成 dashboard_data.json …"
-python3 main_dashboard/generate_dashboard.py >/dev/null 2>&1 || \
-  echo "  ⚠️  generate_dashboard 跑挂了；后端 API 仍可启动（前端会显示 503）"
+# ─── 4. 启动 backend dashboard_server :8899（脱离 session）───
+echo "── 启动 backend (:8899) ──"
+nohup python3 -u main_dashboard/dashboard_server.py 8899 \
+  > /tmp/intelops-backend.log \
+  2> /tmp/intelops-backend.err \
+  < /dev/null &
+disown
+BACKEND_PID=$!
 
-# ─── 6. 启动后端 API（:8000） ──────────────────────────────────
-mkdir -p /tmp/intel-ops
-LOG_API="/tmp/intel-ops/api.log"
-LOG_WEB="/tmp/intel-ops/web.log"
-
-echo "▶ 启动后端 API …  日志: $LOG_API"
-python3 main_dashboard/dashboard_server.py 8000 > "$LOG_API" 2>&1 &
-PID_API=$!
-
-# ─── 7. 启动前端 dev server（:5173） ──────────────────────────
-cd "$FRONT"
-
-# 选 package manager（优先 pnpm，否则 npm）
-if command -v pnpm >/dev/null 2>&1; then
-  PM="pnpm"
-elif command -v npm >/dev/null 2>&1; then
-  PM="npm"
-else
-  echo "❌ 未找到 pnpm / npm — 请先装 Node.js (https://nodejs.org)"
-  kill $PID_API 2>/dev/null || true
-  exit 1
-fi
-
-# 首次启动 / 依赖缺失 → 自动 install
-if [ ! -d "node_modules" ]; then
-  echo "▶ 首次运行，安装前端依赖（$PM install，可能需要 1-3 分钟）…"
-  $PM install
-fi
-
-echo "▶ 启动前端 dev server …  日志: $LOG_WEB"
-$PM run dev > "$LOG_WEB" 2>&1 &
-PID_WEB=$!
-
-cd "$ROOT"
-
-# ─── 8. 等就绪 + 打开浏览器 ───────────────────────────────────
-echo "▶ 等待服务器就绪 …"
-for i in $(seq 1 20); do
-  if curl -fs http://localhost:8000/api/health >/dev/null 2>&1 && \
-     curl -fs http://localhost:5173 >/dev/null 2>&1; then
+for _ in 1 2 3 4 5 6 7 8; do
+  if curl -sf -o /dev/null --max-time 1 "http://127.0.0.1:8899/api/status"; then
+    echo "  ✓ backend ready (PID $BACKEND_PID)"
     break
   fi
-  sleep 0.5
-done
-
-open http://localhost:5173
-
-# ─── 9. 状态打印 ──────────────────────────────────────────────
-echo ""
-echo "═════════════════════════════════════════════════════════════"
-echo "✅ INTEL-OPS v2.0 已启动"
-echo "═════════════════════════════════════════════════════════════"
-echo "  后端 API   : http://localhost:8000   (PID $PID_API)"
-echo "  前端 看板  : http://localhost:5173   (PID $PID_WEB)"
-echo ""
-echo "  CLAUDE_API_KEY     : $([ -n "$CLAUDE_API_KEY" ] && echo "✓ 已配" || echo "✗ 未配")"
-echo "  ANTHROPIC_API_KEY  : $([ -n "$ANTHROPIC_API_KEY" ] && echo "✓ 已配" || echo "✗ 未配 (fallback)")"
-echo "  UTOOLS_AUTH_TOKEN  : $([ -n "$UTOOLS_AUTH_TOKEN" ] && echo "✓ 已配 (Twitter via fapi.uk)" || echo "✗ 未配 (Twitter 跳过)")"
-echo "  MYSQL_DSN          : $([ -n "$MYSQL_DSN" ] && echo "✓ 已配" || echo "✗ 未配 (退化为 JSON-only)")"
-echo "  REDIS_URL          : $([ -n "$REDIS_URL" ] && echo "✓ 已配" || echo "✗ 未配 (sync_state 退化)")"
-echo "  FEISHU_WEBHOOK_URL : $([ -n "$FEISHU_WEBHOOK_URL" ] && echo "✓ 已配" || echo "✗ 未配 (无飞书通知)")"
-echo ""
-echo "  实时日志："
-echo "    后端: tail -f $LOG_API"
-echo "    前端: tail -f $LOG_WEB"
-echo ""
-echo "  按 Ctrl+C 同时关闭两个服务"
-echo "═════════════════════════════════════════════════════════════"
-echo ""
-
-# ─── 10. 优雅退出 ─────────────────────────────────────────────
-cleanup() {
-  echo ""
-  echo "▶ 收到退出信号，正在停止 …"
-  kill $PID_API 2>/dev/null || true
-  kill $PID_WEB 2>/dev/null || true
-  wait $PID_API 2>/dev/null || true
-  wait $PID_WEB 2>/dev/null || true
-  echo "  已停止"
-  exit 0
-}
-trap cleanup INT TERM
-
-# 任一进程挂掉 → 提示并退出
-while kill -0 $PID_API 2>/dev/null && kill -0 $PID_WEB 2>/dev/null; do
   sleep 1
 done
 
+if ! curl -sf -o /dev/null --max-time 1 "http://127.0.0.1:8899/api/status"; then
+  echo "❌ backend 起不来，看 /tmp/intelops-backend.err"
+  tail -20 /tmp/intelops-backend.err
+  exit 1
+fi
+
+# ─── 5. 启动 vite 前端 :5173 ───
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+  echo "❌ $FRONTEND_DIR/node_modules 不存在"
+  echo "   先跑：cd intel-ops-frontend && npm install"
+  exit 1
+fi
+
+echo "── 启动 vite (:5173) ──"
+cd "$FRONTEND_DIR"
+nohup node_modules/.bin/vite \
+  > /tmp/intelops-vite.log \
+  2> /tmp/intelops-vite.err \
+  < /dev/null &
+disown
+VITE_PID=$!
+cd "$ROOT"
+
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -sf -o /dev/null --max-time 1 "http://127.0.0.1:5173/"; then
+    echo "  ✓ vite ready (PID $VITE_PID)"
+    break
+  fi
+  sleep 1
+done
+
+if ! curl -sf -o /dev/null --max-time 1 "http://127.0.0.1:5173/"; then
+  echo "❌ vite 起不来，看 /tmp/intelops-vite.err"
+  tail -20 /tmp/intelops-vite.err
+  exit 1
+fi
+
+# ─── 6. 打开浏览器到 v2 前端 ───
+open http://127.0.0.1:5173/overview
+
 echo ""
-if ! kill -0 $PID_API 2>/dev/null; then
-  echo "❌ 后端 API 已退出 — 见 $LOG_API"
-fi
-if ! kill -0 $PID_WEB 2>/dev/null; then
-  echo "❌ 前端 dev server 已退出 — 见 $LOG_WEB"
-fi
-cleanup
+echo "════════════════════════════════════════"
+echo "  ✅ INTEL-OPS 已启动"
+echo "════════════════════════════════════════"
+echo "  v2 前端:    http://127.0.0.1:5173/   (PID $VITE_PID)"
+echo "  v2 后端 API: http://127.0.0.1:8899/  (PID $BACKEND_PID)"
+echo ""
+echo "  日志:"
+echo "    backend out: /tmp/intelops-backend.log"
+echo "    backend err: /tmp/intelops-backend.err"
+echo "    vite out:    /tmp/intelops-vite.log"
+echo "    vite err:    /tmp/intelops-vite.err"
+echo ""
+echo "  Key 状态:"
+echo "    CLAUDE_API_KEY:    $([ -n "${CLAUDE_API_KEY:-}" ] && echo "已配置" || echo "未配置")"
+echo "    ANTHROPIC_API_KEY: $([ -n "${ANTHROPIC_API_KEY:-}" ] && echo "已配置" || echo "未配置")"
+echo "    X_BEARER_TOKEN:    $([ -n "${X_BEARER_TOKEN:-}" ] && echo "已配置" || echo "未配置（X 抓取会跳过）")"
+echo "    MYSQL_DSN:         $([ -n "${MYSQL_DSN:-}" ] && echo "已配置" || echo "未配置（dao 降级 JSON-only）")"
+echo "    REDIS_URL:         $([ -n "${REDIS_URL:-}" ] && echo "已配置" || echo "未配置")"
+echo ""
+echo "  停止：关闭此终端窗口；或："
+echo "    lsof -ti:8899 | xargs kill"
+echo "    lsof -ti:5173 | xargs kill"
+echo ""
+
+# 让脚本保持前台，关闭终端窗口能直接停服务
+trap "echo '收到 Ctrl+C，停止服务...'; kill_port 5173; kill_port 8899; exit 0" INT TERM
+echo "按 Ctrl+C 停止两个服务"
+# 监控进程是否还活，任一死了就退出脚本
+while true; do
+  sleep 5
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "❌ backend 进程已退出，看 /tmp/intelops-backend.err"
+    tail -20 /tmp/intelops-backend.err
+    kill_port 5173
+    exit 1
+  fi
+  if ! kill -0 "$VITE_PID" 2>/dev/null; then
+    echo "❌ vite 进程已退出，看 /tmp/intelops-vite.err"
+    tail -20 /tmp/intelops-vite.err
+    kill_port 8899
+    exit 1
+  fi
+done

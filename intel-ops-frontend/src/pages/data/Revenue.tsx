@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import PageHeader from "@/components/shared/PageHeader"
 import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
+import FilterChips from "@/components/shared/FilterChips"
 import RegionChip from "@/components/shared/RegionChip"
 import BaselineToggle from "@/components/shared/BaselineToggle"
 import BaselineDeltaCell from "@/components/shared/BaselineDeltaCell"
@@ -12,13 +13,21 @@ import { computeNumericDelta } from "@/lib/baseline"
 import { formatCompactNumber } from "@/lib/utils"
 import { BASELINE_APP } from "@/types/domain"
 
+// Sensor Tower：iOS + Android 月估算（收入 / 下载 / 类目排名，per-竞品）
+// Androidrank：纯 Android 历史 ratings + 估算下载（per-竞品，免费源）
+const SOURCE_OPTIONS = [
+  { value: "sensor_tower", label: "Sensor Tower · 月估算" },
+  { value: "androidrank", label: "Androidrank · Android 历史" },
+]
+
 export default function Revenue() {
-  const { value, setValue } = useUrlFilters({ region: "us" })
+  const { value, setValue } = useUrlFilters({ source: "sensor_tower", region: "us" })
   const [showBaseline, setShowBaseline] = useState(true)
+  const source = value("source")
   const region = value("region")
 
   const { data, isLoading, isError, refetch } = useRank({
-    source: "sensor_tower", region, limit: 100,
+    source, region, limit: 100,
   })
   const rows = data?.rankings || []
 
@@ -33,7 +42,7 @@ export default function Revenue() {
     <div>
       <PageHeader
         title="收入下载"
-        subtitle="以 AF 为基准对比所有竞品（数据源：Sensor Tower 月估算）"
+        subtitle={`以 AF 为基准对比 9 监控竞品（数据源：${SOURCE_OPTIONS.find(s => s.value === source)?.label || "—"}）`}
       />
 
       <KpiRow>
@@ -60,6 +69,12 @@ export default function Revenue() {
       </KpiRow>
 
       <div className="space-y-2 mb-3">
+        <FilterChips
+          label="数据源"
+          options={SOURCE_OPTIONS}
+          value={source}
+          onChange={(v) => setValue("source", v)}
+        />
         <RegionChip value={region} onChange={(v) => setValue("region", v)} />
         <div className="flex justify-end">
           <BaselineToggle show={showBaseline} onChange={setShowBaseline} />

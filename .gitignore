@@ -17,3 +17,9 @@ data/raw/
 
 # AppMagic 抓取产物（每次跑产生新文件，不入库）
 appmagic_output/
+
+# Demo 单文件 HTML（由 scripts/build_demo_html.py 生成）
+data/demo.html
+
+# TypeScript 增量编译缓存（intel-ops-frontend）
+*.tsbuildinfo
