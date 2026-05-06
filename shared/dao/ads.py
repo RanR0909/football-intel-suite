@@ -1,10 +1,13 @@
 """DAO: ad_creatives — Meta 广告库。
 
-调用方：market_rank/scrape_fb_adlib.py
+调用方：
+- market_rank/scrape_fb_adlib.py（抓取层 upsert_ad_creatives）
+- ai_tasks/ad_selling_point.py（AI 层 update_selling / fetch_unclassified_selling）
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 
@@ -90,3 +93,70 @@ def upsert_ad_creatives(competitor_name: str, region: str, ads: list[dict]) -> i
     except Exception as e:
         log.warning(f"[ads] upsert 失败（{competitor_name}/{region}）: {e}")
         return 0
+
+
+# ─────────────────── AI v2 task #7 ad_selling_point ───────────────────
+
+
+def fetch_unclassified_selling(*, limit: int = 200) -> list[dict]:
+    """取出 selling_classified_at IS NULL 的创意。"""
+    if not _db.is_mysql_enabled():
+        return []
+    import sqlalchemy as sa
+
+    blacklist: set[int] = set()
+    with _db.engine().connect() as c:
+        rows = c.execute(sa.text("""
+            SELECT DISTINCT JSON_EXTRACT(payload_json, '$.ad_id') AS aid
+            FROM failed_ai_jobs
+            WHERE task_name = 'ad_selling_point' AND resolved_at IS NULL
+        """)).fetchall()
+        for r in rows:
+            try:
+                blacklist.add(int(r[0]))
+            except (TypeError, ValueError):
+                pass
+
+    with _db.session() as s:
+        q = s.query(AdCreative).filter(AdCreative.selling_classified_at.is_(None))
+        q = q.filter(AdCreative.text.isnot(None))
+        if blacklist:
+            q = q.filter(~AdCreative.id.in_(blacklist))
+        rows = q.order_by(AdCreative.fetched_at.desc()).limit(limit).all()
+        from shared.models import Competitor
+        # 拼竞品名
+        cid_map = {c.id: c.name for c in s.query(Competitor).all()}
+        return [
+            {
+                "id": r.id,
+                "ad_id": r.ad_id,
+                "competitor_id": r.competitor_id,
+                "competitor": cid_map.get(r.competitor_id),
+                "country": r.region_code,
+                "creative_text": r.text,
+                "media_type": r.platform or "image",
+            }
+            for r in rows
+        ]
+
+
+def update_selling(ad_creative_id: int, payload: dict) -> bool:
+    """payload: {selling_points, audience, tone, confidence}"""
+    if not _db.is_mysql_enabled():
+        return False
+    with _db.session() as s:
+        row = s.query(AdCreative).filter(AdCreative.id == ad_creative_id).first()
+        if not row:
+            return False
+        sp = payload.get("selling_points") or []
+        if not isinstance(sp, list):
+            sp = []
+        row.selling_points = json.dumps(sp, ensure_ascii=False)
+        row.audience = (payload.get("audience") or "")[:32] or None
+        row.tone = (payload.get("tone") or "")[:16] or None
+        try:
+            row.selling_confidence = float(payload.get("confidence") or 0)
+        except (TypeError, ValueError):
+            row.selling_confidence = None
+        row.selling_classified_at = datetime.utcnow()
+    return True

@@ -1,12 +1,13 @@
 """DAO: community_posts — Reddit + Twitter。
 
 调用方：
-- async_crawler/sources/reddit.py
-- async_crawler/sources/twitter.py
+- async_crawler/sources/reddit.py / twitter.py（抓取层 upsert_community_posts）
+- ai_tasks/post_topic.py（AI 层 update_topic / fetch_unclassified_topic）
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -109,3 +110,68 @@ def _to_dt(v):
         except Exception:
             return None
     return None
+
+
+# ─────────────────── AI v2 task #6 post_topic_classifier ───────────────────
+
+
+def fetch_unclassified_topic(*, limit: int = 200) -> list[dict]:
+    """topic_classified_at IS NULL 的帖子。"""
+    if not _db.is_mysql_enabled():
+        return []
+    import sqlalchemy as sa
+
+    blacklist: set[int] = set()
+    with _db.engine().connect() as c:
+        rows = c.execute(sa.text("""
+            SELECT DISTINCT JSON_EXTRACT(payload_json, '$.post_id') AS pid
+            FROM failed_ai_jobs
+            WHERE task_name = 'post_topic_classifier' AND resolved_at IS NULL
+        """)).fetchall()
+        for r in rows:
+            try:
+                blacklist.add(int(r[0]))
+            except (TypeError, ValueError):
+                pass
+
+    with _db.session() as s:
+        q = s.query(CommunityPost).filter(CommunityPost.topic_classified_at.is_(None))
+        if blacklist:
+            q = q.filter(~CommunityPost.id.in_(blacklist))
+        rows = q.order_by(CommunityPost.score.desc().nullslast(),
+                          CommunityPost.id.desc()).limit(limit).all()
+        return [
+            {
+                "id": r.id,
+                "post_id": r.post_id,
+                "source": r.source,
+                "subreddit": r.subreddit,
+                "title": r.title,
+                "body": r.selftext,
+                "score": r.score,
+                "url": r.url,
+            }
+            for r in rows
+        ]
+
+
+def update_topic(post_db_id: int, payload: dict) -> bool:
+    """payload: {primary_topic, secondary_topics, competitor_mentioned, confidence}"""
+    if not _db.is_mysql_enabled():
+        return False
+    with _db.session() as s:
+        row = s.query(CommunityPost).filter(CommunityPost.id == post_db_id).first()
+        if not row:
+            return False
+        row.primary_topic = (payload.get("primary_topic") or "")[:32] or None
+        sec = payload.get("secondary_topics") or []
+        if not isinstance(sec, list):
+            sec = []
+        row.secondary_topics = json.dumps(sec, ensure_ascii=False)
+        row.competitor_mentioned = (payload.get("competitor_mentioned") or "")[:64] or None
+        try:
+            row.topic_confidence = float(payload.get("confidence") or 0)
+        except (TypeError, ValueError):
+            row.topic_confidence = None
+        row.topic_classified_at = datetime.utcnow()
+    return True

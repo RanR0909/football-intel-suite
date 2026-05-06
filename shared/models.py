@@ -87,9 +87,19 @@ class AdCreative(Base):
     media_url = Column(String(1024))
     fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
+    # ---- AI v2 task #7 ad_selling_point（migration 0014）----
+    selling_points = Column(Text)                       # JSON array
+    audience = Column(String(32))                       # casual_fan / hardcore_fan / bettor / data_geek / local_fan
+    tone = Column(String(16))                           # urgent / narrative / comparative / numeric
+    selling_classified_at = Column(DateTime)            # NULL = 未分类
+    selling_confidence = Column(DECIMAL(3, 2))
+
     __table_args__ = (
         UniqueConstraint("competitor_id", "ad_id", name="uniq_ad_creative"),
         Index("idx_ad_comp_fetched", "competitor_id", "fetched_at"),
+        Index("idx_ad_audience", "audience"),
+        Index("idx_ad_tone", "tone"),
+        Index("idx_ad_selling_classified_at", "selling_classified_at"),
     )
 
 
@@ -151,9 +161,19 @@ class CommunityPost(Base):
     created_utc = Column(DateTime)
     fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
+    # ---- AI v2 task #6 post_topic_classifier（migration 0013）----
+    primary_topic = Column(String(32))              # 8 类之一
+    secondary_topics = Column(Text)                 # JSON array, 0-2 个
+    competitor_mentioned = Column(String(64))       # 标准化竞品名 / NULL
+    topic_classified_at = Column(DateTime)          # NULL = 未分类
+    topic_confidence = Column(DECIMAL(3, 2))
+
     __table_args__ = (
         UniqueConstraint("source", "post_id", name="uniq_post"),
         Index("idx_post_comp_created", "competitor_id", "created_utc"),
+        Index("idx_post_primary_topic", "primary_topic"),
+        Index("idx_post_competitor_mention", "competitor_mentioned"),
+        Index("idx_post_topic_classified_at", "topic_classified_at"),
     )
 
 
@@ -358,6 +378,70 @@ class SyncLog(Base):
     )
 
 
+# ---- v2 内容聚合相关 ----------------------------------------------------
+
+
+class NewsItem(Base):
+    """Google News RSS 抓回的商业新闻（migration 0012）。
+
+    抓取层（async_crawler/sources/google_news.py 写）+
+    AI 层（ai_tasks/news_classifier.py 写 is_business / business_category /
+    competitors_mentioned / classification_confidence / classified_at）。
+    """
+    __tablename__ = "news_items"
+
+    id = Column(PK_BigInt, primary_key=True, autoincrement=True)
+    title = Column(String(512), nullable=False)
+    snippet = Column(Text)
+    source = Column(String(128))
+    url = Column(String(1024), nullable=False)
+    published_at = Column(DateTime)
+    matched_keyword = Column(String(128))
+    app_name = Column(String(64))
+    fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # AI 层
+    is_business = Column(Boolean)
+    business_category = Column(String(32))
+    competitors_mentioned = Column(Text)            # JSON array
+    classification_confidence = Column(DECIMAL(3, 2))
+    classified_at = Column(DateTime)                # NULL = 未分类
+
+    __table_args__ = (
+        UniqueConstraint("url", name="uniq_news_url"),
+        Index("idx_news_published", "published_at"),
+        Index("idx_news_classified_at", "classified_at"),
+        Index("idx_news_business", "is_business", "business_category"),
+        Index("idx_news_app", "app_name", "published_at"),
+    )
+
+
+class AppVersion(Base):
+    """每个 app 的版本明细 + release notes（migration 0015）。
+
+    由 strategy_monitor 改造后从 iTunes Lookup API 的 releaseNotes 字段写入；
+    release_notes_translated_zh 由 comment_label 任务复用做翻译。
+    """
+    __tablename__ = "app_versions"
+
+    id = Column(PK_BigInt, primary_key=True, autoincrement=True)
+    competitor_id = Column(BigInteger, ForeignKey("competitors.id"), nullable=False)
+    platform = Column(Enum("ios", "gp", name="version_platform"), nullable=False)
+    version = Column(String(64), nullable=False)
+    release_notes = Column(Text)
+    release_notes_lang = Column(String(8))
+    release_notes_translated_zh = Column(Text)
+    translated_at = Column(DateTime)
+    released_at = Column(DateTime)
+    first_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("competitor_id", "platform", "version", name="uniq_app_version"),
+        Index("idx_app_versions_released_at", "released_at"),
+        Index("idx_app_versions_comp_released", "competitor_id", "released_at"),
+    )
+
+
 # 表名清单（dashboard 健康检查用）
 ALL_TABLES = [
     "competitors", "regions",
@@ -368,4 +452,6 @@ ALL_TABLES = [
     "entity_aliases", "comment_entities", "alerts", "failed_ai_jobs",
     "app_classifications",
     "sync_log",
+    # v2 内容聚合
+    "news_items", "app_versions",
 ]
