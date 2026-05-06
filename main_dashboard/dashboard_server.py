@@ -212,6 +212,21 @@ class APIHandler(BaseHTTPRequestHandler):
             if path == "/api/community":
                 return self.api_community()
 
+            # === Versions (spec: 后端协作清单 §4.2) ===
+            if path == "/api/versions":
+                return self.api_versions()
+            if path.startswith("/api/versions/") and path.endswith("/related-reviews"):
+                vid = path.split("/")[-2]
+                return self.api_version_related_reviews(vid)
+
+            # === Aggregated content endpoints (spec §4.2) ===
+            if path == "/api/reviews/aggregated":
+                return self.api_reviews_aggregated()
+            if path == "/api/community-posts/aggregated":
+                return self.api_community_aggregated()
+            if path == "/api/ads/aggregated":
+                return self.api_ads_aggregated()
+
             # === System ===
             if path == "/api/candidates":
                 return self.api_candidates()
@@ -704,45 +719,114 @@ class APIHandler(BaseHTTPRequestHandler):
         return self._send_json({"rankings": rows, "count": len(rows)})
 
     def api_news(self):
-        """GET /api/news?since=&limit= — 直接读 async_google_news.json + 关联 alerts"""
+        """GET /api/news?since=&category=&app=&business_only=&limit=
+        从 news_items 表读（task #5 news_classifier 写入分类字段）。
+        默认只返回 is_business=true 的条目；business_only=0 可看全部。
+        category= funding/acquisition/partnership/launch/strategy/hiring/legal/other
+        app= 9 竞品名 + AllFootball
+        """
+        q = self._qs()
+        since = q.get("since", "7d")
+        category = q.get("category", "")
+        app = q.get("app", "") or q.get("competitor", "")
+        business_only = q.get("business_only", "1") != "0"
+        limit = min(int(q.get("limit") or 200), 1000)
+
+        wheres = ["1=1"]
+        params = {"limit": limit}
+        if business_only:
+            wheres.append("is_business = 1")
+        if category:
+            wheres.append("business_category = :category")
+            params["category"] = category
+        if app:
+            wheres.append("app_name = :app")
+            params["app"] = app
+        cutoff = self._parse_since(since) if since else None
+        if cutoff:
+            wheres.append("published_at >= :cutoff")
+            params["cutoff"] = cutoff
+
+        sql = (
+            "SELECT id, title, snippet, source, url, published_at, "
+            "matched_keyword, app_name, fetched_at, "
+            "is_business, business_category, competitors_mentioned, "
+            "classification_confidence, classified_at "
+            "FROM news_items "
+            f"WHERE {' AND '.join(wheres)} "
+            "ORDER BY published_at DESC LIMIT :limit"
+        )
+        rows = _query(sql, **params)
+        # JSON 字段反序列化
+        for r in rows:
+            cm = r.get("competitors_mentioned")
+            try:
+                r["competitors_mentioned"] = json.loads(cm) if cm else []
+            except Exception:
+                r["competitors_mentioned"] = []
+            cc = r.get("classification_confidence")
+            if cc is not None:
+                try:
+                    r["classification_confidence"] = float(cc)
+                except (TypeError, ValueError):
+                    r["classification_confidence"] = None
+
+        # 兜底：表完全空 → 回退读 async_google_news.json
+        # （只发生在 google_news 抓过但还没跑过 news_classifier，且表本身也未 ingest 历史时）
+        if not rows:
+            rows = self._derive_news_from_json(cutoff, limit)
+
+        return self._send_json({"news": rows, "count": len(rows)})
+
+    @staticmethod
+    def _derive_news_from_json(cutoff, limit: int) -> list:
+        """news_items 表空时退化读 async_google_news.json（保持前端不空白）。"""
         path = DATA_DIR / "async_google_news.json"
         if not path.exists():
-            return self._send_json({"news": [], "count": 0})
+            return []
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            return self._send_json({"news": [], "count": 0})
-
-        q = self._qs()
-        since = q.get("since", "")
-        limit = min(int(q.get("limit") or 200), 1000)
-        cutoff = self._parse_since(since) if since else None
-
-        news = []
+            return []
+        out = []
+        cutoff_iso = cutoff.isoformat() if cutoff else None
         for rec in data:
             app = rec.get("competitor")
             for item in (rec.get("data") or {}).get("items", []):
                 pub_iso = item.get("pub_iso") or ""
-                if cutoff and pub_iso and pub_iso < cutoff.isoformat():
+                if cutoff_iso and pub_iso and pub_iso < cutoff_iso:
                     continue
-                news.append({
-                    "competitor": app,
+                out.append({
+                    "id": -1,
                     "title": item.get("title"),
-                    "link": item.get("link"),
+                    "snippet": item.get("desc"),
                     "source": item.get("source"),
-                    "desc": item.get("desc"),
-                    "pub_iso": pub_iso,
-                    "is_biz": bool(item.get("is_biz")),
+                    "url": item.get("link"),
+                    "published_at": pub_iso,
+                    "matched_keyword": "biz" if item.get("is_biz") else "broad",
+                    "app_name": app,
+                    "fetched_at": None,
+                    "is_business": bool(item.get("is_biz")),
+                    "business_category": None,
+                    "competitors_mentioned": [],
+                    "classification_confidence": None,
+                    "classified_at": None,
                 })
-        news.sort(key=lambda x: x.get("pub_iso") or "", reverse=True)
-        return self._send_json({"news": news[:limit], "count": min(len(news), limit)})
+        out.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+        return out[:limit]
 
     def api_ads(self):
-        """GET /api/ads?competitor=&country=&limit="""
+        """GET /api/ads?competitor=&country=&selling_point=&audience=&tone=&limit=
+        透传 task #7 ad_selling_point 写入的 selling_points / audience / tone 字段。
+        """
         q = self._qs()
         competitor = q.get("competitor", "")
         country = q.get("country", "") or q.get("region", "")
+        selling_point = q.get("selling_point", "")
+        audience = q.get("audience", "")
+        tone = q.get("tone", "")
         limit = min(int(q.get("limit") or 200), 1000)
+
         wheres = ["1=1"]
         params = {"limit": limit}
         if competitor:
@@ -751,15 +835,40 @@ class APIHandler(BaseHTTPRequestHandler):
         if country:
             wheres.append("a.region_code = :country")
             params["country"] = country
+        if audience:
+            wheres.append("a.audience = :audience")
+            params["audience"] = audience
+        if tone:
+            wheres.append("a.tone = :tone")
+            params["tone"] = tone
+        if selling_point:
+            # JSON_CONTAINS — MySQL 8 原生支持
+            wheres.append("JSON_CONTAINS(a.selling_points, JSON_QUOTE(:sp))")
+            params["sp"] = selling_point
+
         sql = (
             "SELECT a.id, c.name as competitor, a.region_code as region, a.ad_id, "
             "a.text as body_text, a.media_url, a.start_date, a.platform, a.page_name, "
-            "a.fetched_at "
+            "a.fetched_at, "
+            "a.selling_points, a.audience, a.tone, "
+            "a.selling_classified_at, a.selling_confidence "
             "FROM ad_creatives a JOIN competitors c ON c.id = a.competitor_id "
             f"WHERE {' AND '.join(wheres)} "
             "ORDER BY a.fetched_at DESC LIMIT :limit"
         )
         rows = _query(sql, **params)
+        for r in rows:
+            sp = r.get("selling_points")
+            try:
+                r["selling_points"] = json.loads(sp) if sp else []
+            except Exception:
+                r["selling_points"] = []
+            sc = r.get("selling_confidence")
+            if sc is not None:
+                try:
+                    r["selling_confidence"] = float(sc)
+                except (TypeError, ValueError):
+                    r["selling_confidence"] = None
         return self._send_json({"ads": rows, "count": len(rows)})
 
     def api_website(self):
@@ -799,12 +908,18 @@ class APIHandler(BaseHTTPRequestHandler):
         return self._send_json({"website": rows, "count": len(rows)})
 
     def api_community(self):
-        """GET /api/community?source=reddit|twitter&competitor=&limit= — Reddit / Twitter 帖子"""
+        """GET /api/community?source=&competitor=&topic=&mentioned=&since=&limit=
+        透传 task #6 post_topic_classifier 写入的 primary_topic / secondary_topics /
+        competitor_mentioned 字段。
+        """
         q = self._qs()
         source = q.get("source", "")
         competitor = q.get("competitor", "")
+        topic = q.get("topic", "")
+        mentioned = q.get("mentioned", "")
         since = q.get("since", "")
         limit = min(int(q.get("limit") or 50), 500)
+
         wheres = ["1=1"]
         params = {"limit": limit}
         if source:
@@ -813,21 +928,396 @@ class APIHandler(BaseHTTPRequestHandler):
         if competitor:
             wheres.append("c.name = :competitor")
             params["competitor"] = competitor
+        if topic:
+            wheres.append("p.primary_topic = :topic")
+            params["topic"] = topic
+        if mentioned:
+            wheres.append("p.competitor_mentioned = :mentioned")
+            params["mentioned"] = mentioned
         if since:
             cutoff = self._parse_since(since)
             if cutoff:
                 wheres.append("COALESCE(p.created_utc, p.fetched_at) >= :cutoff")
                 params["cutoff"] = cutoff
+
         sql = (
             "SELECT p.id, c.name as competitor, p.source, p.post_id, p.subreddit, "
             "p.title, p.selftext, p.score, p.num_comments, p.url, "
-            "p.created_utc, p.fetched_at "
+            "p.created_utc, p.fetched_at, "
+            "p.primary_topic, p.secondary_topics, p.competitor_mentioned, "
+            "p.topic_classified_at, p.topic_confidence "
             "FROM community_posts p JOIN competitors c ON c.id = p.competitor_id "
             f"WHERE {' AND '.join(wheres)} "
             "ORDER BY p.score DESC, p.created_utc DESC LIMIT :limit"
         )
         rows = _query(sql, **params)
+        for r in rows:
+            st = r.get("secondary_topics")
+            try:
+                r["secondary_topics"] = json.loads(st) if st else []
+            except Exception:
+                r["secondary_topics"] = []
+            tc = r.get("topic_confidence")
+            if tc is not None:
+                try:
+                    r["topic_confidence"] = float(tc)
+                except (TypeError, ValueError):
+                    r["topic_confidence"] = None
         return self._send_json({"posts": rows, "count": len(rows)})
+
+    # ─────────────── Versions (spec §4.2) ───────────────
+
+    def api_versions(self):
+        """GET /api/versions?competitor=&since=30d&limit= — app_versions 列表"""
+        q = self._qs()
+        competitor = q.get("competitor", "")
+        since = q.get("since", "30d")
+        limit = min(int(q.get("limit") or 200), 1000)
+
+        wheres = ["1=1"]
+        params = {"limit": limit}
+        if competitor:
+            wheres.append("c.name = :competitor")
+            params["competitor"] = competitor
+        cutoff = self._parse_since(since) if since else None
+        if cutoff:
+            wheres.append("v.released_at >= :cutoff")
+            params["cutoff"] = cutoff
+
+        sql = (
+            "SELECT v.id, c.name as competitor, v.platform, v.version, "
+            "v.release_notes, v.release_notes_lang, "
+            "v.release_notes_translated_zh as release_notes_zh, "
+            "v.translated_at, v.released_at, v.first_seen_at "
+            "FROM app_versions v JOIN competitors c ON c.id = v.competitor_id "
+            f"WHERE {' AND '.join(wheres)} "
+            "ORDER BY v.released_at DESC, v.id DESC LIMIT :limit"
+        )
+        rows = _query(sql, **params)
+        return self._send_json({"versions": rows, "count": len(rows)})
+
+    def api_version_related_reviews(self, version_id_str: str):
+        """GET /api/versions/:id/related-reviews — 该版本下评论统计 + 高频实体 Top"""
+        try:
+            vid = int(version_id_str)
+        except (TypeError, ValueError):
+            return self._send_json({"error": "invalid version id"}, status=400)
+
+        # 取版本元数据 + competitor_id
+        version_rows = _query(
+            "SELECT v.id, v.competitor_id, v.version, v.released_at, c.name as competitor "
+            "FROM app_versions v JOIN competitors c ON c.id = v.competitor_id "
+            "WHERE v.id = :vid",
+            vid=vid,
+        )
+        if not version_rows:
+            return self._send_json({"error": "version not found"}, status=404)
+        v = version_rows[0]
+
+        # 关联评论：reviews.version 字符串匹配
+        review_count_rows = _query(
+            "SELECT COUNT(*) as n FROM reviews "
+            "WHERE competitor_id = :cid AND version = :ver",
+            cid=v["competitor_id"], ver=v["version"],
+        )
+        review_count = (review_count_rows[0]["n"] if review_count_rows else 0)
+
+        # label 分布
+        label_dist_rows = _query(
+            "SELECT label, COUNT(*) as n FROM reviews "
+            "WHERE competitor_id = :cid AND version = :ver "
+            "AND label IS NOT NULL "
+            "GROUP BY label ORDER BY n DESC",
+            cid=v["competitor_id"], ver=v["version"],
+        )
+        label_distribution = {r["label"]: r["n"] for r in label_dist_rows}
+
+        # 高频实体（comment_entities 关联到该版本的 reviews）
+        top_entities_rows = _query("""
+            SELECT ce.canonical_id,
+                   ea.primary_name,
+                   ea.entity_type,
+                   COUNT(DISTINCT ce.review_id) as n
+            FROM comment_entities ce
+            JOIN reviews r ON r.id = ce.review_id
+            LEFT JOIN entity_aliases ea ON ea.canonical_id = ce.canonical_id
+            WHERE r.competitor_id = :cid AND r.version = :ver
+            GROUP BY ce.canonical_id, ea.primary_name, ea.entity_type
+            ORDER BY n DESC LIMIT 10
+        """, cid=v["competitor_id"], ver=v["version"])
+
+        # 评分变化（vs 上一版本）
+        rating_rows = _query(
+            "SELECT AVG(rating) as avg_rating FROM reviews "
+            "WHERE competitor_id = :cid AND version = :ver AND rating IS NOT NULL",
+            cid=v["competitor_id"], ver=v["version"],
+        )
+        rating_after = float(rating_rows[0]["avg_rating"]) if rating_rows and rating_rows[0]["avg_rating"] is not None else None
+
+        # 上一版本评分（先找 released_at < this 的最近一个 version）
+        rating_before = None
+        prev_version_rows = _query(
+            "SELECT version FROM app_versions "
+            "WHERE competitor_id = :cid AND released_at < :rel "
+            "ORDER BY released_at DESC LIMIT 1",
+            cid=v["competitor_id"],
+            rel=v["released_at"] or datetime.utcnow(),
+        )
+        if prev_version_rows:
+            prev_ver = prev_version_rows[0]["version"]
+            prev_rating_rows = _query(
+                "SELECT AVG(rating) as avg_rating FROM reviews "
+                "WHERE competitor_id = :cid AND version = :ver AND rating IS NOT NULL",
+                cid=v["competitor_id"], ver=prev_ver,
+            )
+            if prev_rating_rows and prev_rating_rows[0]["avg_rating"] is not None:
+                rating_before = float(prev_rating_rows[0]["avg_rating"])
+
+        return self._send_json({
+            "version_id": vid,
+            "competitor": v["competitor"],
+            "version": v["version"],
+            "review_count": review_count,
+            "label_distribution": label_distribution,
+            "rating_change": {
+                "before": rating_before,
+                "after": rating_after,
+                "delta": (rating_after - rating_before) if (rating_after is not None and rating_before is not None) else None,
+            },
+            "top_entities": [
+                {"canonical_id": r["canonical_id"],
+                 "primary_name": r.get("primary_name") or r["canonical_id"],
+                 "entity_type": r.get("entity_type"),
+                 "count": r["n"]}
+                for r in top_entities_rows
+            ],
+        })
+
+    # ─────────────── Aggregated content (spec §4.2) ───────────────
+
+    def api_reviews_aggregated(self):
+        """GET /api/reviews/aggregated?tab=problems|praise|localization|churn
+        按 entity 聚合的评论数据，给 GP 评论页 4 个 tab 用。
+
+        - problems     bug 实体 + complaint 标签
+        - praise       feature 实体 + positive 标签
+        - localization localization / language 实体
+        - churn        churn_signal 标签 + competitor 实体
+        """
+        q = self._qs()
+        tab = (q.get("tab") or "problems").lower()
+        limit = min(int(q.get("limit") or 50), 200)
+
+        if tab == "problems":
+            entity_filter = "ea.entity_type = 'bug'"
+            label_filter = "r.label = 'complaint'"
+        elif tab == "praise":
+            entity_filter = "ea.entity_type = 'feature'"
+            label_filter = "r.label = 'positive'"
+        elif tab == "localization":
+            entity_filter = "ea.entity_type IN ('localization', 'language')"
+            label_filter = "1=1"
+        elif tab == "churn":
+            entity_filter = "ea.entity_type = 'competitor'"
+            label_filter = "r.label = 'churn_signal'"
+        else:
+            return self._send_json({"error": f"invalid tab: {tab}"}, status=400)
+
+        # 主聚合：按 canonical_id 累计提及数 + 各竞品分布 + 各区域分布
+        rows = _query(f"""
+            SELECT ce.canonical_id,
+                   ea.primary_name,
+                   ea.entity_type,
+                   COUNT(DISTINCT ce.review_id) as total_mentions
+            FROM comment_entities ce
+            JOIN reviews r ON r.id = ce.review_id
+            LEFT JOIN entity_aliases ea ON ea.canonical_id = ce.canonical_id
+            WHERE {entity_filter} AND {label_filter}
+            GROUP BY ce.canonical_id, ea.primary_name, ea.entity_type
+            ORDER BY total_mentions DESC LIMIT :lim
+        """, lim=limit)
+
+        out = []
+        for r in rows:
+            cid = r["canonical_id"]
+            # 各竞品分布
+            by_comp_rows = _query(f"""
+                SELECT cp.name as competitor, COUNT(DISTINCT ce.review_id) as n
+                FROM comment_entities ce
+                JOIN reviews r ON r.id = ce.review_id
+                JOIN competitors cp ON cp.id = r.competitor_id
+                WHERE ce.canonical_id = :cid AND {label_filter}
+                GROUP BY cp.name ORDER BY n DESC LIMIT 10
+            """, cid=cid)
+            # 各区域分布
+            by_region_rows = _query(f"""
+                SELECT r.region_code as region, COUNT(*) as n
+                FROM comment_entities ce
+                JOIN reviews r ON r.id = ce.review_id
+                WHERE ce.canonical_id = :cid AND {label_filter}
+                GROUP BY r.region_code ORDER BY n DESC LIMIT 5
+            """, cid=cid)
+            # 代表评论
+            sample_rows = _query(f"""
+                SELECT r.id, COALESCE(r.translated_text, r.content) as text_zh,
+                       cp.name as competitor, r.region_code as region, r.rating as score
+                FROM comment_entities ce
+                JOIN reviews r ON r.id = ce.review_id
+                JOIN competitors cp ON cp.id = r.competitor_id
+                WHERE ce.canonical_id = :cid AND {label_filter}
+                ORDER BY r.posted_at DESC LIMIT 1
+            """, cid=cid)
+            out.append({
+                "canonical_id": cid,
+                "primary_name": r.get("primary_name") or cid,
+                "entity_type": r.get("entity_type"),
+                "total_mentions": r["total_mentions"],
+                "by_competitor": {x["competitor"]: x["n"] for x in by_comp_rows},
+                "by_region": {(x["region"] or "").upper(): x["n"] for x in by_region_rows},
+                "representative_review": sample_rows[0] if sample_rows else None,
+            })
+
+        return self._send_json({"tab": tab, "items": out, "count": len(out)})
+
+    def api_community_aggregated(self):
+        """GET /api/community-posts/aggregated?dim=topic|player|league|competitor
+        社媒帖子按维度聚合。
+        """
+        q = self._qs()
+        dim = (q.get("dim") or "topic").lower()
+        limit = min(int(q.get("limit") or 50), 200)
+        since = q.get("since", "30d")
+        cutoff = self._parse_since(since) if since else None
+
+        params = {"lim": limit}
+        time_clause = ""
+        if cutoff:
+            time_clause = "AND COALESCE(p.created_utc, p.fetched_at) >= :cutoff"
+            params["cutoff"] = cutoff
+
+        if dim == "topic":
+            rows = _query(f"""
+                SELECT p.primary_topic as topic,
+                       COUNT(*) as post_count,
+                       SUM(COALESCE(p.score, 0)) as total_score,
+                       COUNT(DISTINCT p.competitor_mentioned) as comp_count
+                FROM community_posts p
+                WHERE p.primary_topic IS NOT NULL {time_clause}
+                GROUP BY p.primary_topic
+                ORDER BY post_count DESC LIMIT :lim
+            """, **params)
+            return self._send_json({"dim": dim, "items": rows, "count": len(rows)})
+
+        if dim == "competitor":
+            # 按 competitor_mentioned 聚合 + 每个竞品的 Top 3 话题
+            rows = _query(f"""
+                SELECT p.competitor_mentioned as competitor,
+                       COUNT(*) as post_count,
+                       SUM(COALESCE(p.score, 0)) as total_score
+                FROM community_posts p
+                WHERE p.competitor_mentioned IS NOT NULL {time_clause}
+                GROUP BY p.competitor_mentioned
+                ORDER BY post_count DESC LIMIT :lim
+            """, **params)
+            for r in rows:
+                # 该竞品下 top topic
+                topics = _query(f"""
+                    SELECT p.primary_topic as topic, COUNT(*) as n
+                    FROM community_posts p
+                    WHERE p.competitor_mentioned = :c AND p.primary_topic IS NOT NULL {time_clause}
+                    GROUP BY p.primary_topic ORDER BY n DESC LIMIT 3
+                """, c=r["competitor"], **{k: v for k, v in params.items() if k != "lim"})
+                r["top_topics"] = topics
+            return self._send_json({"dim": dim, "items": rows, "count": len(rows)})
+
+        if dim in ("player", "league"):
+            # 通过 entity_aliases + comment_entities 找不到 — community_posts 没接 entity_extract。
+            # 退化：返回 dim, items=[] + hint
+            return self._send_json({
+                "dim": dim,
+                "items": [],
+                "count": 0,
+                "hint": "player/league dim requires entity_extract on community_posts (not yet wired)",
+            })
+
+        return self._send_json({"error": f"invalid dim: {dim}"}, status=400)
+
+    def api_ads_aggregated(self):
+        """GET /api/ads/aggregated?dim=selling_point|region|competitor
+        广告创意按维度聚合（task #7 ad_selling_point 输出）。
+        """
+        q = self._qs()
+        dim = (q.get("dim") or "selling_point").lower()
+        limit = min(int(q.get("limit") or 50), 200)
+
+        if dim == "selling_point":
+            # 用 JSON_TABLE 拆 selling_points 数组（MySQL 8）
+            rows = _query("""
+                SELECT jt.sp as selling_point,
+                       COUNT(*) as creative_count,
+                       COUNT(DISTINCT a.competitor_id) as comp_count
+                FROM ad_creatives a
+                JOIN JSON_TABLE(
+                    COALESCE(a.selling_points, '[]'),
+                    '$[*]' COLUMNS (sp VARCHAR(64) PATH '$')
+                ) jt
+                WHERE a.selling_classified_at IS NOT NULL
+                GROUP BY jt.sp
+                ORDER BY creative_count DESC LIMIT :lim
+            """, lim=limit)
+            for r in rows:
+                # 该卖点的 Top 竞品
+                tops = _query("""
+                    SELECT c.name as competitor, COUNT(*) as n
+                    FROM ad_creatives a
+                    JOIN competitors c ON c.id = a.competitor_id
+                    JOIN JSON_TABLE(
+                        COALESCE(a.selling_points, '[]'),
+                        '$[*]' COLUMNS (sp VARCHAR(64) PATH '$')
+                    ) jt
+                    WHERE jt.sp = :sp
+                    GROUP BY c.name ORDER BY n DESC LIMIT 3
+                """, sp=r["selling_point"])
+                r["top_competitors"] = tops
+            return self._send_json({"dim": dim, "items": rows, "count": len(rows)})
+
+        if dim == "region":
+            rows = _query("""
+                SELECT a.region_code as region,
+                       COUNT(*) as creative_count,
+                       COUNT(DISTINCT a.competitor_id) as comp_count
+                FROM ad_creatives a
+                GROUP BY a.region_code
+                ORDER BY creative_count DESC LIMIT :lim
+            """, lim=limit)
+            return self._send_json({"dim": dim, "items": rows, "count": len(rows)})
+
+        if dim == "competitor":
+            # 每个竞品的卖点构成
+            rows = _query("""
+                SELECT c.name as competitor,
+                       COUNT(*) as creative_count
+                FROM ad_creatives a
+                JOIN competitors c ON c.id = a.competitor_id
+                GROUP BY c.name ORDER BY creative_count DESC LIMIT :lim
+            """, lim=limit)
+            for r in rows:
+                # 拆 selling_points 算占比
+                sps = _query("""
+                    SELECT jt.sp as selling_point, COUNT(*) as n
+                    FROM ad_creatives a
+                    JOIN competitors c ON c.id = a.competitor_id
+                    JOIN JSON_TABLE(
+                        COALESCE(a.selling_points, '[]'),
+                        '$[*]' COLUMNS (sp VARCHAR(64) PATH '$')
+                    ) jt
+                    WHERE c.name = :c
+                    GROUP BY jt.sp ORDER BY n DESC LIMIT 8
+                """, c=r["competitor"])
+                r["selling_points_breakdown"] = sps
+            return self._send_json({"dim": dim, "items": rows, "count": len(rows)})
+
+        return self._send_json({"error": f"invalid dim: {dim}"}, status=400)
 
     def api_candidates(self):
         """GET /api/candidates?topic=&conf_min=&limit= — 候选 app（不含已 in competitors 的）"""
