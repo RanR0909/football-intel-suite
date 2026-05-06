@@ -80,7 +80,9 @@ def fetch_unclassified(*, limit: int = 200) -> list[dict]:
         q = s.query(NewsItem).filter(NewsItem.classified_at.is_(None))
         if blacklist:
             q = q.filter(~NewsItem.id.in_(blacklist))
-        rows = q.order_by(NewsItem.published_at.desc().nullslast(),
+        # MySQL 默认 ORDER BY DESC 时 NULL 排在末尾（与 nullslast 等效），
+        # 不能用 .nullslast() — 它生成 "NULLS LAST" 关键字 MySQL 不支持。
+        rows = q.order_by(NewsItem.published_at.desc(),
                           NewsItem.id.desc()).limit(limit).all()
         return [
             {

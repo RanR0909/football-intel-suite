@@ -138,7 +138,8 @@ def fetch_unclassified_topic(*, limit: int = 200) -> list[dict]:
         q = s.query(CommunityPost).filter(CommunityPost.topic_classified_at.is_(None))
         if blacklist:
             q = q.filter(~CommunityPost.id.in_(blacklist))
-        rows = q.order_by(CommunityPost.score.desc().nullslast(),
+        # MySQL DESC 默认 NULL 在末尾；不能用 .nullslast()（生成 "NULLS LAST" MySQL 不支持）
+        rows = q.order_by(CommunityPost.score.desc(),
                           CommunityPost.id.desc()).limit(limit).all()
         return [
             {

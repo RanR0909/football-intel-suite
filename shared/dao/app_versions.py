@@ -90,7 +90,8 @@ def fetch_untranslated(*, limit: int = 50) -> list[dict]:
             s.query(AppVersion)
             .filter(AppVersion.translated_at.is_(None))
             .filter(AppVersion.release_notes.isnot(None))
-            .order_by(AppVersion.released_at.desc().nullslast(), AppVersion.id.desc())
+            # MySQL DESC 默认 NULL 在末尾；.nullslast() 在 MySQL 报语法错
+            .order_by(AppVersion.released_at.desc(), AppVersion.id.desc())
             .limit(limit).all()
         )
         return [

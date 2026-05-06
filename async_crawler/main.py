@@ -40,7 +40,7 @@ def _all_sources():
     # storefront，改用 market_rank/scrape_qimai_iap.py（qimai.cn 周更）
     from async_crawler.sources import (
         appstore_rank, reviews,
-        androidrank, reddit, twitter, google_news,
+        androidrank, reddit, twitter, google_news, app_versions,
     )
     return [
         ("appstore_rank", "App Store 排名", appstore_rank),
@@ -49,6 +49,8 @@ def _all_sources():
         ("reddit",        "Reddit 舆情",    reddit),
         ("twitter",       "X (Twitter)",    twitter),
         ("google_news",   "Google 商业新闻", google_news),
+        # app_versions: iTunes Lookup → app_versions 表（spec §3.2）
+        ("app_versions",  "App 版本 + releaseNotes", app_versions),
     ]
 
 
