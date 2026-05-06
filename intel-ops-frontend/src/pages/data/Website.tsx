@@ -121,50 +121,28 @@ export default function Website() {
         </div>
       )}
 
-      {/* 长尾：top countries / similar sites */}
+      {/* 长尾：Top Countries（Similar Sites 已删除 — 实际用处不大） */}
       {rows.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-          <section className="border border-border-soft rounded-md bg-card overflow-hidden">
-            <header className="px-3 h-8 bg-muted/30 border-b border-border-soft flex items-center">
-              <span className="text-sm font-medium">Top Countries</span>
-            </header>
-            <div className="p-3 text-xs space-y-2">
-              {rows.filter((r) => r.top_countries?.length).map((r) => (
-                <div key={r.id}>
-                  <div className="font-medium mb-1">{r.competitor}</div>
-                  <div className="flex flex-wrap gap-1">
-                    {r.top_countries.slice(0, 5).map((c, i) => (
-                      <span key={i} className="px-1.5 h-5 inline-flex items-center gap-1 rounded bg-muted/40 text-2xs">
-                        <span>{c.country}</span>
-                        <span className="tabular-nums text-muted-foreground">{formatPct(c.share)}</span>
-                      </span>
-                    ))}
-                  </div>
+        <section className="mt-4 border border-border-soft rounded-md bg-card overflow-hidden">
+          <header className="px-3 h-8 bg-muted/30 border-b border-border-soft flex items-center">
+            <span className="text-sm font-medium">Top Countries</span>
+          </header>
+          <div className="p-3 text-xs space-y-2">
+            {rows.filter((r) => r.top_countries?.length).map((r) => (
+              <div key={r.id}>
+                <div className="font-medium mb-1">{r.competitor}</div>
+                <div className="flex flex-wrap gap-1">
+                  {r.top_countries.slice(0, 5).map((c, i) => (
+                    <span key={i} className="px-1.5 h-5 inline-flex items-center gap-1 rounded bg-muted/40 text-2xs">
+                      <span>{c.country}</span>
+                      <span className="tabular-nums text-muted-foreground">{formatPct(c.share)}</span>
+                    </span>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
-          <section className="border border-border-soft rounded-md bg-card overflow-hidden">
-            <header className="px-3 h-8 bg-muted/30 border-b border-border-soft flex items-center">
-              <span className="text-sm font-medium">Similar Sites</span>
-            </header>
-            <div className="p-3 text-xs space-y-2">
-              {rows.filter((r) => r.similar_sites?.length).map((r) => (
-                <div key={r.id}>
-                  <div className="font-medium mb-1">{r.competitor}</div>
-                  <div className="flex flex-wrap gap-1">
-                    {r.similar_sites.slice(0, 6).map((s, i) => (
-                      <span key={i} className="px-1.5 h-5 inline-flex items-center gap-1 rounded bg-muted/40 text-2xs">
-                        <span className="font-mono">{s.domain}</span>
-                        <span className="tabular-nums text-muted-foreground">{formatPct(s.affinity)}</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   )
