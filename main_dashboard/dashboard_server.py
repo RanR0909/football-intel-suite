@@ -1483,10 +1483,15 @@ class APIHandler(BaseHTTPRequestHandler):
         return out
 
     def api_failed_ai_jobs(self):
-        """GET /api/failed-ai-jobs?resolved=false&task=&limit="""
+        """GET /api/failed-ai-jobs?resolved=false&task=&latest_round=true&limit=
+
+        latest_round=true (默认): 每个 task 只返回距其最近一次失败 6h 内的记录。
+        把"上轮已死信、本轮没新错"的老条目从默认视图隐藏，避免持续累加观感。
+        """
         q = self._qs()
         resolved = q.get("resolved", "false").lower()
         task = q.get("task", "")
+        latest_round = q.get("latest_round", "true").lower() in ("1", "true", "yes")
         limit = min(int(q.get("limit") or 100), 500)
         wheres = []
         params = {"limit": limit}
@@ -1499,13 +1504,27 @@ class APIHandler(BaseHTTPRequestHandler):
             params["task"] = task
         if not wheres:
             wheres.append("1=1")
-        sql = (
-            "SELECT id, task_name, payload_json, error_msg, error_kind, "
-            "attempts, first_failed_at, last_attempt_at, resolved_at "
-            "FROM failed_ai_jobs "
-            f"WHERE {' AND '.join(wheres)} "
-            "ORDER BY last_attempt_at DESC LIMIT :limit"
-        )
+        where_sql = " AND ".join(wheres)
+        if latest_round:
+            sql = (
+                "SELECT id, task_name, payload_json, error_msg, error_kind, "
+                "attempts, first_failed_at, last_attempt_at, resolved_at "
+                "FROM failed_ai_jobs f "
+                f"WHERE {where_sql} "
+                "  AND last_attempt_at >= ("
+                "    SELECT MAX(last_attempt_at) - INTERVAL 6 HOUR "
+                f"    FROM failed_ai_jobs WHERE task_name = f.task_name AND ({where_sql})"
+                "  ) "
+                "ORDER BY last_attempt_at DESC LIMIT :limit"
+            )
+        else:
+            sql = (
+                "SELECT id, task_name, payload_json, error_msg, error_kind, "
+                "attempts, first_failed_at, last_attempt_at, resolved_at "
+                "FROM failed_ai_jobs "
+                f"WHERE {where_sql} "
+                "ORDER BY last_attempt_at DESC LIMIT :limit"
+            )
         rows = _query(sql, **params)
         for r in rows:
             v = r.pop("payload_json", None)

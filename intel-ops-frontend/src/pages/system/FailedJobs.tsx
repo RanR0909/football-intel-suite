@@ -12,8 +12,12 @@ import type { FailedAiJob } from "@/types/api"
 
 const TASK_OPTIONS = [
   { value: "", label: "全部" },
-  { value: "comment_label", label: "comment_label" },
+  { value: "ad_selling_point", label: "ad_selling_point" },
   { value: "entity_extract", label: "entity_extract" },
+  { value: "post_entity_extract", label: "post_entity_extract" },
+  { value: "comment_label", label: "comment_label" },
+  { value: "news_classifier", label: "news_classifier" },
+  { value: "post_topic", label: "post_topic" },
   { value: "alert_title", label: "alert_title" },
   { value: "app_classifier", label: "app_classifier" },
 ]
@@ -24,15 +28,23 @@ const STATUS_OPTIONS = [
   { value: "", label: "全部" },
 ]
 
+const SCOPE_OPTIONS = [
+  { value: "true",  label: "最近一轮 (6h)" },
+  { value: "false", label: "全部历史" },
+]
+
 export default function FailedJobs() {
-  const { value, setValue } = useUrlFilters({ task: "", resolved: "false" })
+  const { value, setValue } = useUrlFilters({ task: "", resolved: "false", scope: "true" })
   const task = value("task")
   const resolved = value("resolved") as "true" | "false" | ""
+  const scope = value("scope") as "true" | "false"
+  const latestRound = scope !== "false"
 
   const [activeId, setActiveId] = useState<number | null>(null)
 
   const { data, isLoading, isError, refetch } = useFailedAiJobs({
-    task, resolved: resolved || undefined, limit: 500,
+    task, resolved: resolved || undefined,
+    latest_round: latestRound, limit: 500,
   })
   const { mutate: retry, isPending } = useRetryAiJob()
   const all = data?.jobs || []
@@ -40,12 +52,8 @@ export default function FailedJobs() {
   const kpi = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const j of all) counts[j.task_name] = (counts[j.task_name] || 0) + 1
-    return {
-      total: all.length,
-      comment_label: counts.comment_label || 0,
-      entity_extract: counts.entity_extract || 0,
-      other: all.length - (counts.comment_label || 0) - (counts.entity_extract || 0),
-    }
+    const top3 = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    return { total: all.length, top3 }
   }, [all])
 
   const active = activeId ? all.find((j) => j.id === activeId) : null
@@ -54,17 +62,34 @@ export default function FailedJobs() {
     <div>
       <PageHeader
         title="AI 失败队列"
-        subtitle="重试耗尽的 AI 任务（4 个 task × 4 种 error_kind）"
+        subtitle={
+          latestRound
+            ? "重试耗尽的 AI 任务 · 默认只看每个 task 最近 6h 内的失败（切换“全部历史”看全量）"
+            : "重试耗尽的 AI 任务 · 全部历史"
+        }
       />
 
       <KpiRow>
-        <KpiCard label="未解决总数" value={kpi.total} />
-        <KpiCard label="comment_label" value={kpi.comment_label} />
-        <KpiCard label="entity_extract" value={kpi.entity_extract} />
-        <KpiCard label="其他" value={kpi.other} hint="alert_title / app_classifier" />
+        <KpiCard
+          label={latestRound ? "本轮未解决" : "未解决总数"}
+          value={kpi.total}
+        />
+        <KpiCard
+          label={kpi.top3[0]?.[0] || "—"}
+          value={kpi.top3[0]?.[1] ?? "—"}
+        />
+        <KpiCard
+          label={kpi.top3[1]?.[0] || "—"}
+          value={kpi.top3[1]?.[1] ?? "—"}
+        />
+        <KpiCard
+          label={kpi.top3[2]?.[0] || "—"}
+          value={kpi.top3[2]?.[1] ?? "—"}
+        />
       </KpiRow>
 
       <div className="space-y-2 mb-3">
+        <FilterChips label="范围" options={SCOPE_OPTIONS} value={scope} onChange={(v) => setValue("scope", v)} />
         <FilterChips label="task" options={TASK_OPTIONS} value={task} onChange={(v) => setValue("task", v)} />
         <FilterChips label="状态" options={STATUS_OPTIONS} value={resolved} onChange={(v) => setValue("resolved", v)} />
       </div>

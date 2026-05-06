@@ -5,6 +5,7 @@ import type { FailedAiJobsResponse } from "@/types/api"
 interface Params {
   resolved?: "true" | "false"
   task?: string
+  latest_round?: boolean
   limit?: number
 }
 
