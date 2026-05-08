@@ -830,10 +830,19 @@ class APIHandler(BaseHTTPRequestHandler):
             params["date"] = date
         else:
             wheres.append("m.snapshot_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)")
+        # week_ago_rank: 最近 ≤ 6 天前的同 (source, name, platform, region) 的 rank_value
+        # 用 <=> NULL-safe equality 处理 platform / region_code 可能为 NULL 的情况
         sql = (
             "SELECT m.id, m.source, m.platform, m.region_code, c.name as competitor, "
             "m.name, m.rank_value, m.delta, m.downloads, m.downloads_num, "
-            "m.revenue_num, m.snapshot_date, m.fetched_at "
+            "m.revenue_num, m.snapshot_date, m.fetched_at, "
+            "(SELECT m2.rank_value FROM market_rank_snapshots m2 "
+            " WHERE m2.source = m.source AND m2.name = m.name "
+            "   AND m2.platform <=> m.platform "
+            "   AND m2.region_code <=> m.region_code "
+            "   AND m2.snapshot_date <= DATE_SUB(m.snapshot_date, INTERVAL 6 DAY) "
+            " ORDER BY m2.snapshot_date DESC LIMIT 1"
+            ") as week_ago_rank "
             "FROM market_rank_snapshots m "
             "LEFT JOIN competitors c ON c.id = m.competitor_id "
             f"WHERE {' AND '.join(wheres)} "

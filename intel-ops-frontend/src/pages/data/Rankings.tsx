@@ -23,15 +23,30 @@ const SOURCE_OPTIONS = [
 
 const MONITORED = new Set<string>([...COMPETITORS, BASELINE_APP])
 
+/** 周变化 = week_ago_rank - rank_value（正数=进步/升、负数=退步/降）
+ *  跟 reviews.delta 字段同方向语义。week_ago_rank 为 NULL 时返 null。 */
+function weeklyDelta(r: { rank_value: number | null; week_ago_rank: number | null }): number | null {
+  if (r.rank_value == null || r.week_ago_rank == null) return null
+  return r.week_ago_rank - r.rank_value
+}
+
+const SORT_OPTIONS = [
+  { value: "rank",       label: "按当前排名" },
+  { value: "weekly_up",  label: "周变↑（进步多的优先）" },
+  { value: "weekly_down", label: "周变↓（退步多的优先）" },
+]
+type SortBy = "rank" | "weekly_up" | "weekly_down"
+
 export default function Rankings() {
   const { value, setValue } = useUrlFilters({
-    source: "appmagic", region: "global", competitor: "",
+    source: "appmagic", region: "global", competitor: "", sort: "rank",
   })
   const [showBaseline, setShowBaseline] = useState(true)
 
   const source = value("source")
   const region = value("region")
   const competitor = value("competitor")
+  const sortBy = (value("sort") || "rank") as SortBy
 
   // appstore_rank 只有 US 数据 → 强制 us，UI 不展示国家筛选；
   // appmagic 默认 global（region_code IS NULL 的总榜）
@@ -43,39 +58,62 @@ export default function Rankings() {
   const rows = data?.rankings || []
 
   // 标准化每行的"展示名"（监控竞品取 competitor，其它取 r.name）
-  // + 是否监控竞品（含 AllFootball baseline）的标识
+  // + 是否监控竞品（含 AllFootball baseline）的标识 + weekly_delta
   const normalized = useMemo(() => {
     return rows.map((r) => {
       const displayName = r.competitor || r.name || "—"
       const isMonitored = !!r.competitor && MONITORED.has(r.competitor)
       const isBaseline = r.competitor === BASELINE_APP
-      return { ...r, displayName, isMonitored, isBaseline }
+      return { ...r, displayName, isMonitored, isBaseline, weekly_delta: weeklyDelta(r) }
     })
   }, [rows])
 
-  // KPI 计算（基于全榜 + 监控视角）
+  // KPI（去掉"榜单深度"；24h 异动 → 周变化 ≥5）
   const kpi = useMemo(() => {
     const tracked = new Set(normalized.filter((r) => r.isMonitored).map((r) => r.competitor))
-    const movers = normalized.filter((r) => r.delta != null && Math.abs(r.delta) >= 5)
     const monitoredInTop50 = normalized.filter(
       (r) => r.isMonitored && r.rank_value != null && r.rank_value <= 50
     )
+    const weeklyMovers = normalized.filter(
+      (r) => r.weekly_delta != null && Math.abs(r.weekly_delta) >= 5
+    )
     return {
       tracked: tracked.size,
-      total: normalized.length,
-      movers: movers.length,
       top50: monitoredInTop50.length,
+      weeklyMovers: weeklyMovers.length,
     }
   }, [normalized])
 
-  // 表格行 — AF 第一 + 全 Top 榜按 rank 升序
+  // 表格行 — AF 第一 + 其他按 sortBy 排
   const sorted = useMemo(() => {
     const af = normalized.find((r) => r.isBaseline)
-    const others = normalized
-      .filter((r) => !r.isBaseline)
-      .sort((a, b) => (a.rank_value ?? 9999) - (b.rank_value ?? 9999))
+    const others = normalized.filter((r) => !r.isBaseline)
+    if (sortBy === "weekly_up") {
+      // 周变↑：weekly_delta 大的优先；NULL 排到最后
+      others.sort((a, b) => {
+        const da = a.weekly_delta
+        const db = b.weekly_delta
+        if (da == null && db == null) return (a.rank_value ?? 9999) - (b.rank_value ?? 9999)
+        if (da == null) return 1
+        if (db == null) return -1
+        return db - da
+      })
+    } else if (sortBy === "weekly_down") {
+      // 周变↓：weekly_delta 小（负多）的优先；NULL 排到最后
+      others.sort((a, b) => {
+        const da = a.weekly_delta
+        const db = b.weekly_delta
+        if (da == null && db == null) return (a.rank_value ?? 9999) - (b.rank_value ?? 9999)
+        if (da == null) return 1
+        if (db == null) return -1
+        return da - db
+      })
+    } else {
+      // 默认 — 按当前排名升序
+      others.sort((a, b) => (a.rank_value ?? 9999) - (b.rank_value ?? 9999))
+    }
     return { af, others }
-  }, [normalized])
+  }, [normalized, sortBy])
   const afRank = sorted.af?.rank_value ?? null
 
   return (
@@ -86,10 +124,9 @@ export default function Rankings() {
       />
 
       <KpiRow>
-        <KpiCard label="榜单深度" value={kpi.total} hint="本国 Top 排名总数" />
         <KpiCard label="监控覆盖" value={kpi.tracked} hint={`${kpi.tracked} 个监控竞品上榜`} />
         <KpiCard label="进 Top 50" value={kpi.top50} hint="监控竞品" />
-        <KpiCard label="24h 异动 ≥5" value={kpi.movers} hint="rank 变 ≥ 5 名" />
+        <KpiCard label="一周异动 ≥5" value={kpi.weeklyMovers} hint="周排名变 ≥ 5 名" />
       </KpiRow>
 
       <div className="space-y-2 mb-3">
@@ -106,6 +143,12 @@ export default function Rankings() {
             showGlobal
           />
         )}
+        <FilterChips
+          label="排序"
+          options={SORT_OPTIONS}
+          value={sortBy}
+          onChange={(v) => setValue("sort", v)}
+        />
         <div className="flex items-center justify-between">
           <span className="text-2xs text-muted-foreground">竞品筛选：</span>
           <div className="flex items-center gap-3">
@@ -134,7 +177,7 @@ export default function Rankings() {
                 <th className="text-left px-3 h-8">产品</th>
                 <th className="text-left px-3 h-8">国家</th>
                 <th className="text-right px-3 h-8">当前排名</th>
-                <th className="text-right px-3 h-8">24h 变化</th>
+                <th className="text-right px-3 h-8" title="本期 vs 一周前的同源 + 同区域 + 同平台 rank 差值">周变化</th>
                 <th className="text-right px-3 h-8">下载估算</th>
                 {showBaseline && (
                   <th className="text-right px-3 h-8">vs AF</th>
@@ -153,7 +196,7 @@ export default function Rankings() {
                     {sorted.af.rank_value != null ? `#${sorted.af.rank_value}` : "—"}
                   </td>
                   <td className="px-3 h-9 text-right">
-                    {renderDelta(sorted.af.delta)}
+                    {renderDelta(sorted.af.weekly_delta)}
                   </td>
                   <td className="px-3 h-9 text-right tabular-nums">
                     {sorted.af.downloads || "—"}
@@ -182,7 +225,7 @@ export default function Rankings() {
                     {r.rank_value != null ? `#${r.rank_value}` : "—"}
                   </td>
                   <td className="px-3 h-9 text-right">
-                    {renderDelta(r.delta)}
+                    {renderDelta(r.weekly_delta)}
                   </td>
                   <td className="px-3 h-9 text-right tabular-nums">
                     {r.downloads || "—"}
