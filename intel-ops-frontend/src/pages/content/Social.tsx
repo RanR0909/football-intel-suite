@@ -58,8 +58,9 @@ export default function Social() {
   const since = value("since")
 
   // 总览原始帖（KPI + 底部下钻 + 产品信号 tab 的数据源）
+  // 之前漏了 since — 导致 KPI 卡上写"近 ${since}"但实际是全时间窗口的 200 条
   const { data: rawPosts } = useCommunity({
-    source: source || undefined, competitor, limit: 200,
+    source: source || undefined, competitor, since, limit: 200,
   })
   const filteredPosts = useMemo(() => rawPosts?.posts || [], [rawPosts])
 

@@ -108,7 +108,11 @@ export default function News() {
         <KpiCard label="涉及竞品" value={kpi.apps} />
         <KpiCard label="高优类别" value={kpi.high}
                  hint="融资 / 收购 / 合作" />
-        <KpiCard label="7d 增量" value={kpi.total} hint="近窗口内" />
+        <KpiCard label="AI 分类率"
+                 value={allNews.length
+                   ? `${Math.round(allNews.filter((n) => n.business_category).length / allNews.length * 100)}%`
+                   : "—"}
+                 hint={`${allNews.filter((n) => n.business_category).length}/${allNews.length}`} />
       </KpiRow>
 
       <div className="space-y-2 mb-3">

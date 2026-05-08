@@ -18,23 +18,6 @@ const STATUS_OPTIONS = [
   { value: "fail", label: "失败" },
 ]
 
-const SOURCE_OPTIONS = [
-  { value: "", label: "全部" },
-  { value: "appstore_rank", label: "appstore_rank" },
-  { value: "androidrank", label: "androidrank" },
-  { value: "comment_fetch", label: "comment_fetch" },
-  { value: "reddit", label: "reddit" },
-  { value: "twitter", label: "twitter" },
-  { value: "iap_pricing", label: "iap_pricing" },
-  { value: "google_news", label: "google_news" },
-  { value: "strategy_monitor", label: "strategy_monitor" },
-  { value: "appmagic", label: "appmagic" },
-  { value: "fb_adlib", label: "fb_adlib" },
-  { value: "sensor_tower", label: "sensor_tower" },
-  { value: "similarweb_traffic", label: "similarweb" },
-  { value: "ai_pipeline", label: "ai_pipeline" },
-]
-
 export default function SyncLog() {
   const { value, setValue } = useUrlFilters({ source: "", status: "" })
   const source = value("source")
@@ -44,9 +27,27 @@ export default function SyncLog() {
   const { data, isLoading, isError, refetch } = useSyncLog({
     source, status, limit: 100,
   })
+  // 拉一份不带 source 过滤的 logs，用于组装下拉的 SOURCE_OPTIONS。
+  // 否则用户一旦选了某 source，下拉会塌缩到只剩那一个选项 — 没法切回别的。
+  const { data: allSourcesData } = useSyncLog({ status: "", limit: 200 })
   const { data: statusData } = useStatus()
   const all = data?.logs || []
   const active = activeId ? all.find((l) => l.id === activeId) : null
+
+  // 动态 source 列表：sync_log.script ∪ status.sources keys（覆盖最近没跑过的源）
+  const SOURCE_OPTIONS = useMemo(() => {
+    const set = new Set<string>()
+    for (const l of allSourcesData?.logs || []) {
+      if (l.script) set.add(l.script)
+    }
+    for (const k of Object.keys(statusData?.sources || {})) {
+      set.add(k)
+    }
+    return [
+      { value: "", label: "全部" },
+      ...Array.from(set).sort().map((s) => ({ value: s, label: s })),
+    ]
+  }, [allSourcesData, statusData])
 
   const kpi = useMemo(() => {
     const ok = all.filter((l) => l.success).length
