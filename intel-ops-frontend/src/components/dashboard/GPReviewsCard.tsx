@@ -1,59 +1,81 @@
+import { useMemo } from "react"
 import DigestCard from "@/components/shared/DigestCard"
 import Pill from "@/components/shared/Pill"
-import { useReviews } from "@/hooks/api/useReviews"
+import { useReviewsAggregated } from "@/hooks/api/useAggregated"
 import { Skeleton } from "@/components/shared/Skeleton"
-import { REVIEW_LABEL_DISPLAY } from "@/types/domain"
-import type { ReviewLabel } from "@/types/api"
 
-function relTime(s: string | null): string {
-  if (!s) return ""
-  const d = new Date(s)
-  if (!Number.isFinite(d.valueOf())) return ""
-  const h = Math.floor((Date.now() - d.valueOf()) / 3600_000)
-  if (h < 1) return "刚刚"
-  if (h < 24) return `${h}h`
-  return `${Math.floor(h / 24)}d`
-}
-
-/** 总览·GP 评论 — 3 条带标签的代表性评论 */
+/**
+ * 总览·GP 评论 — "讨论 Top" 前 3：problems + praise 合并按提及数降序。
+ * 跟 GPReviews 页 "讨论 Top" tab 同源同序。
+ */
 export default function GPReviewsCard() {
-  const { data, isLoading } = useReviews({ since: "30d", limit: 8 })
-  const rows = (data?.reviews || []).slice(0, 3)
+  const { data: probs, isLoading: l1 } = useReviewsAggregated("problems", 10)
+  const { data: praise, isLoading: l2 } = useReviewsAggregated("praise", 10)
+  const isLoading = l1 || l2
+
+  const top3 = useMemo(() => {
+    const merged: Array<{
+      canonical_id: string
+      chinese_name: string | null
+      primary_name: string
+      total_mentions: number
+      kind: "problem" | "praise"
+      top_competitor: string | null
+    }> = []
+    for (const it of probs?.items || []) {
+      const top = Object.entries(it.by_competitor || {}).sort((a, b) => b[1] - a[1])[0]
+      merged.push({
+        canonical_id: it.canonical_id,
+        chinese_name: it.chinese_name,
+        primary_name: it.primary_name,
+        total_mentions: it.total_mentions,
+        kind: "problem",
+        top_competitor: top?.[0] || null,
+      })
+    }
+    for (const it of praise?.items || []) {
+      const top = Object.entries(it.by_competitor || {}).sort((a, b) => b[1] - a[1])[0]
+      merged.push({
+        canonical_id: it.canonical_id,
+        chinese_name: it.chinese_name,
+        primary_name: it.primary_name,
+        total_mentions: it.total_mentions,
+        kind: "praise",
+        top_competitor: top?.[0] || null,
+      })
+    }
+    merged.sort((a, b) => b.total_mentions - a.total_mentions)
+    return merged.slice(0, 3)
+  }, [probs, praise])
 
   return (
-    <DigestCard title="GP 评论" detailHref="/content/gp-reviews">
+    <DigestCard title="GP 评论" detailHref="/content/gp-reviews?tab=top">
       {isLoading && <Skeleton className="h-20" />}
-      {!isLoading && rows.length === 0 && (
-        <div className="text-xs text-muted-foreground py-2">暂无已标评论</div>
+      {!isLoading && top3.length === 0 && (
+        <div className="text-xs text-muted-foreground py-2">暂无聚合主题</div>
       )}
-      {rows.length > 0 && (
+      {top3.length > 0 && (
         <ul className="space-y-2">
-          {rows.map((r) => {
-            const labelMeta = r.label ? REVIEW_LABEL_DISPLAY[r.label as ReviewLabel] : null
-            const variant = labelMeta?.color.replace("pill-", "") as
-              | "purple" | "teal" | "amber" | "blue" | "pink" | "red" | "green" | "gray"
-              | undefined
-            const text = r.translated_text || r.content || ""
-            const region = (r.region_code || "").toUpperCase()
-            return (
-              <li key={r.id} className="text-xs">
-                <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                  <span className="font-medium">{r.competitor}</span>
-                  {labelMeta && variant && <Pill variant={variant}>{labelMeta.text}</Pill>}
-                  {region && <Pill variant="gray">{region}</Pill>}
-                  {r.score != null && (
-                    <span className="text-2xs text-muted-foreground font-mono tabular-nums">
-                      {"★".repeat(r.score)}{"☆".repeat(5 - r.score)}
-                    </span>
-                  )}
-                  <span className="ml-auto text-2xs text-muted-foreground font-mono tabular-nums">
-                    {relTime(r.at)}
-                  </span>
+          {top3.map((it) => (
+            <li key={`${it.kind}:${it.canonical_id}`} className="text-xs">
+              <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                <Pill variant={it.kind === "problem" ? "red" : "green"}>
+                  {it.kind === "problem" ? "问题" : "好评"}
+                </Pill>
+                <span className="font-medium truncate">
+                  {it.chinese_name || it.primary_name}
+                </span>
+                <span className="ml-auto text-2xs text-muted-foreground font-mono tabular-nums">
+                  {it.total_mentions} 提及
+                </span>
+              </div>
+              {it.top_competitor && (
+                <div className="text-2xs text-muted-foreground pl-2">
+                  主要竞品：{it.top_competitor}
                 </div>
-                <div className="line-clamp-2 leading-snug">{text}</div>
-              </li>
-            )
-          })}
+              )}
+            </li>
+          ))}
         </ul>
       )}
     </DigestCard>
