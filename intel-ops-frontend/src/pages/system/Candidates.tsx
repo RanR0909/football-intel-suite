@@ -9,38 +9,17 @@ import { useCandidates } from "@/hooks/api/useCandidates"
 import { useUrlFilters } from "@/hooks/useUrlFilters"
 import { TOPIC_LABELS, CATEGORY_LABELS } from "@/types/domain"
 import type { Candidate, Topic, Category } from "@/types/api"
-import { Copy, Check, X, Eye } from "lucide-react"
+import { Copy, X, Eye } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
-type ReviewStatus = "pending" | "accepted" | "rejected"
-
-interface ReviewState {
-  status: ReviewStatus
-  reviewed_at: string
-}
-
-const STORAGE_KEY = "intel-ops:candidate-reviewed"
-
-function loadReviewed(): Record<string, ReviewState> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
-}
-function saveReviewed(map: Record<string, ReviewState>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
-}
-
 export default function Candidates() {
   const { value, setValue } = useUrlFilters({
-    topic: "", conf: "0.85", status: "pending",
+    topic: "", conf: "0.85",
   })
   const topic = value("topic")
   const conf = parseFloat(value("conf")) || 0.85
-  const statusFilter = value("status") as ReviewStatus | "all" | ""
 
-  const [reviewed, setReviewed] = useState<Record<string, ReviewState>>(() => loadReviewed())
   const [activeId, setActiveId] = useState<string | null>(null)
 
   const { data, isLoading, isError, refetch } = useCandidates({
@@ -48,30 +27,12 @@ export default function Candidates() {
   })
   const all = data?.candidates || []
 
-  const filtered = useMemo(() => {
-    return all.filter((c) => {
-      const r = reviewed[c.app_id]?.status || "pending"
-      if (statusFilter && statusFilter !== "all") {
-        return r === statusFilter
-      }
-      return true
-    })
-  }, [all, reviewed, statusFilter])
-
   const kpi = useMemo(() => ({
     total: all.length,
-    pending: all.filter((c) => (reviewed[c.app_id]?.status || "pending") === "pending").length,
-    accepted: all.filter((c) => reviewed[c.app_id]?.status === "accepted").length,
-    rejected: all.filter((c) => reviewed[c.app_id]?.status === "rejected").length,
-  }), [all, reviewed])
-
-  function setStatus(c: Candidate, s: ReviewStatus | null) {
-    const next = { ...reviewed }
-    if (s) next[c.app_id] = { status: s, reviewed_at: new Date().toISOString() }
-    else delete next[c.app_id]
-    setReviewed(next)
-    saveReviewed(next)
-  }
+    highConf: all.filter((c) => c.confidence >= 0.95).length,
+    football: all.filter((c) => c.topic === "football").length,
+    multiSport: all.filter((c) => c.topic === "multi_sport").length,
+  }), [all])
 
   function copyJsonSnippet(c: Candidate) {
     const snippet = {
@@ -93,14 +54,14 @@ export default function Candidates() {
     <div>
       <PageHeader
         title="候选发现"
-        subtitle="AI 分类的潜在新竞品 · 审阅状态仅本地存储（换设备会丢失）"
+        subtitle="AI 自动发现的潜在新竞品（不含博彩类） · 详情 + 复制 JSON 后人工贴入 data/competitors.json"
       />
 
       <KpiRow>
-        <KpiCard label="本周新增" value={kpi.total} hint="符合门槛的候选" />
-        <KpiCard label="待审阅" value={kpi.pending} />
-        <KpiCard label="已采纳" value={kpi.accepted} />
-        <KpiCard label="已拒绝" value={kpi.rejected} />
+        <KpiCard label="候选总数" value={kpi.total} hint="符合门槛的候选" />
+        <KpiCard label="高置信" value={kpi.highConf} hint="≥ 0.95" />
+        <KpiCard label="足球" value={kpi.football} />
+        <KpiCard label="综合体育" value={kpi.multiSport} />
       </KpiRow>
 
       <div className="space-y-2 mb-3">
@@ -124,28 +85,13 @@ export default function Candidates() {
           value={String(conf)}
           onChange={(v) => setValue("conf", v)}
         />
-        <FilterChips
-          label="状态"
-          options={[
-            { value: "pending", label: "待审阅" },
-            { value: "accepted", label: "已采纳" },
-            { value: "rejected", label: "已拒绝" },
-            { value: "all", label: "全部" },
-          ]}
-          value={statusFilter}
-          onChange={(v) => setValue("status", v)}
-        />
-      </div>
-
-      <div className="px-3 py-2 mb-3 text-2xs text-muted-foreground bg-pill-amber-bg/30 border border-pill-amber-bg rounded-md">
-        审阅状态仅本地保存。采纳后请用 [复制] 按钮把 JSON 片段贴入 <code className="font-mono">data/competitors.json</code>，由后端开发执行 migration。
       </div>
 
       {isLoading && <SkeletonTable rows={6} />}
       {isError && <EmptyState type="error" onRetry={() => refetch()} />}
-      {!isLoading && !isError && filtered.length === 0 && <EmptyState type="empty" />}
+      {!isLoading && !isError && all.length === 0 && <EmptyState type="empty" />}
 
-      {filtered.length > 0 && (
+      {all.length > 0 && (
         <div className="border border-border-soft rounded-md bg-card overflow-hidden">
           <table className="w-full text-xs">
             <thead className="bg-muted/30 text-2xs uppercase tracking-wider text-muted-foreground">
@@ -155,82 +101,61 @@ export default function Candidates() {
                 <th className="text-left px-3 h-8">topic</th>
                 <th className="text-left px-3 h-8">categories</th>
                 <th className="text-right px-3 h-8">conf</th>
-                <th className="text-right px-3 h-8">状态</th>
                 <th className="text-right px-3 h-8">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-soft">
-              {filtered.map((c) => {
-                const status = reviewed[c.app_id]?.status || "pending"
-                return (
-                  <tr key={c.app_id} className="hover:bg-muted/30">
-                    <td className="px-3 h-9">
+              {all.map((c) => (
+                <tr key={c.app_id} className="hover:bg-muted/30">
+                  <td className="px-3 h-9">
+                    <button
+                      onClick={() => setActiveId(c.app_id)}
+                      className="font-medium hover:text-brand-700 text-left"
+                    >
+                      {c.name}
+                    </button>
+                    <div className="text-2xs text-muted-foreground font-mono">
+                      {c.platform}:{c.app_id}
+                    </div>
+                  </td>
+                  <td className="px-3 h-9 text-muted-foreground truncate max-w-[120px]">
+                    {c.publisher || "—"}
+                  </td>
+                  <td className="px-3 h-9">
+                    <Pill variant="blue">{TOPIC_LABELS[c.topic as Topic] || c.topic}</Pill>
+                  </td>
+                  <td className="px-3 h-9">
+                    <div className="flex gap-1 flex-wrap">
+                      {(c.categories as Category[]).slice(0, 4).map((cat) => (
+                        <Pill key={cat} variant="gray">
+                          {CATEGORY_LABELS[cat] || cat}
+                        </Pill>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 h-9 text-right tabular-nums font-mono">
+                    {c.confidence.toFixed(2)}
+                  </td>
+                  <td className="px-3 h-9 text-right">
+                    <div className="inline-flex gap-1">
                       <button
                         onClick={() => setActiveId(c.app_id)}
-                        className="font-medium hover:text-brand-700 text-left"
+                        className="p-1 rounded hover:bg-muted text-muted-foreground"
+                        title="详情"
                       >
-                        {c.name}
+                        <Eye className="w-3 h-3" />
                       </button>
-                      <div className="text-2xs text-muted-foreground font-mono">
-                        {c.platform}:{c.app_id}
-                      </div>
-                    </td>
-                    <td className="px-3 h-9 text-muted-foreground truncate max-w-[120px]">
-                      {c.publisher || "—"}
-                    </td>
-                    <td className="px-3 h-9">
-                      <Pill variant="blue">{TOPIC_LABELS[c.topic as Topic] || c.topic}</Pill>
-                    </td>
-                    <td className="px-3 h-9">
-                      <div className="flex gap-1 flex-wrap">
-                        {(c.categories as Category[]).slice(0, 4).map((cat) => (
-                          <Pill key={cat} variant="gray">
-                            {CATEGORY_LABELS[cat] || cat}
-                          </Pill>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 h-9 text-right tabular-nums font-mono">
-                      {c.confidence.toFixed(2)}
-                    </td>
-                    <td className="px-3 h-9 text-right">
-                      <Pill variant={status === "accepted" ? "green" : status === "rejected" ? "red" : "amber"}>
-                        {status === "pending" ? "待审" : status === "accepted" ? "已采纳" : "已拒绝"}
-                      </Pill>
-                    </td>
-                    <td className="px-3 h-9 text-right">
-                      <div className="inline-flex gap-1">
-                        <button onClick={() => setActiveId(c.app_id)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="详情">
-                          <Eye className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => setStatus(c, "accepted")}
-                          className={cn("p-1 rounded hover:bg-pill-green-bg text-muted-foreground hover:text-pill-green-fg",
-                            status === "accepted" && "bg-pill-green-bg text-pill-green-fg")}
-                          title="标记已采纳"
-                        >
-                          <Check className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => setStatus(c, "rejected")}
-                          className={cn("p-1 rounded hover:bg-pill-red-bg text-muted-foreground hover:text-pill-red-fg",
-                            status === "rejected" && "bg-pill-red-bg text-pill-red-fg")}
-                          title="标记已拒绝"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => copyJsonSnippet(c)}
-                          className="p-1 rounded hover:bg-brand-50 text-muted-foreground hover:text-brand-700"
-                          title="复制 competitors.json 片段"
-                        >
-                          <Copy className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
+                      <button
+                        onClick={() => copyJsonSnippet(c)}
+                        className="p-1 rounded hover:bg-brand-50 text-muted-foreground hover:text-brand-700"
+                        title="复制 competitors.json 片段"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
