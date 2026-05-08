@@ -4,6 +4,8 @@ import type { RankResponse } from "@/types/api"
 
 interface RankParams {
   source?: string
+  /** 'ios' | 'android' — 仅 sensor_tower / androidrank 区分 */
+  platform?: "ios" | "android"
   region?: string
   competitor?: string
   date?: string

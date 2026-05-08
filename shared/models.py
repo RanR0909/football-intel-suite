@@ -128,6 +128,9 @@ class MarketRankSnapshot(Base):
     source = Column(Enum("appmagic", "appstore_rank", "sensor_tower", "androidrank",
                          name="rank_source"),
                     nullable=False)
+    # platform：sensor_tower 用（区分 ios/android），androidrank 永远 'android'，
+    # appmagic/appstore_rank 留 NULL（这两源本身就是单平台榜单）
+    platform = Column(String(8))
     region_code = Column(String(8))   # NULL = worldwide
     competitor_id = Column(BigInteger, ForeignKey("competitors.id"))  # NULL = 非 tracked
     name = Column(String(128))
@@ -141,6 +144,7 @@ class MarketRankSnapshot(Base):
 
     __table_args__ = (
         Index("idx_rank_source_region_date", "source", "region_code", "snapshot_date"),
+        Index("idx_rank_source_platform_date", "source", "platform", "snapshot_date"),
         Index("idx_rank_comp_date", "competitor_id", "snapshot_date"),
     )
 
@@ -242,12 +246,14 @@ class EntityAlias(Base):
 
     canonical_id = Column(String(64), primary_key=True)
     entity_type = Column(String(32), nullable=False)            # 9 类：competitor / feature / league / player / device / bug / localization / payment / language
-    primary_name = Column(String(255), nullable=False)          # 主名（中文优先）
+    primary_name = Column(String(255), nullable=False)          # 主名（实际是 entity_extract AI 抽出的原文，多语言混杂 — 通过 chinese_name 翻译展示）
     english_name = Column(String(255))                          # 英文名（可选，便于交叉查找）
+    chinese_name = Column(String(255))                          # 中文翻译（≤10字名词性短语）— ai_tasks/translate_entity_names.py 写入
     aliases = Column(Text)                                       # JSON list（[" 别名 1", "alias 2", ...]）— 用 Text 而非 JSON 以兼容 SQLite
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     reviewed = Column(Boolean, nullable=False, default=False)
     reviewed_at = Column(DateTime)
+    translated_at = Column(DateTime)                             # chinese_name 写入时间；NULL = 还没翻译过
 
     __table_args__ = (
         Index("idx_entity_aliases_type_reviewed", "entity_type", "reviewed"),

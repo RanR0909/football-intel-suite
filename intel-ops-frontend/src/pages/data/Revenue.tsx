@@ -3,11 +3,13 @@
  * 用户视角："大概看个趋势" — 不要 source 切换，把 2 个源的数据并排展示。
  *
  * 数据现实：
- *   sensor_tower → us 1 国 · 下载 + 收入 + 排名 (10/10 竞品)
- *   androidrank  → 全球总 · 仅下载 (8/8 竞品，无收入)
+ *   sensor_tower → us 1 国 · 下载 + 收入 + 排名（按 platform 拆 ios / android）
+ *   androidrank  → 全球总 · 仅下载（永远 Android · 无收入数据）
  *
  * 表格 6 列：
  *   产品 | ST · 月下载(US) vs AF | ST · 月收入(US) vs AF | AR · 全球下载 vs AF
+ *
+ * platform toggle 切换 ST 数据源；AR 永远是 Android 全球（不动）。
  *
  * AF 永远固定第一行高亮，其他竞品按 ST 月收入降序（同样保留 baseline 比较）。
  */
@@ -17,6 +19,7 @@ import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
 import BaselineToggle from "@/components/shared/BaselineToggle"
 import BaselineDeltaCell from "@/components/shared/BaselineDeltaCell"
 import EmptyState from "@/components/shared/EmptyState"
+import FilterChips from "@/components/shared/FilterChips"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useRank } from "@/hooks/api/useRank"
 import { computeNumericDelta } from "@/lib/baseline"
@@ -31,11 +34,19 @@ interface MergedRow {
   ar_dl: number | null      // Androidrank 全球总下载
 }
 
+const ST_PLATFORM_OPTIONS = [
+  { value: "ios", label: "iOS" },
+  { value: "android", label: "Android" },
+]
+
 export default function Revenue() {
   const [showBaseline, setShowBaseline] = useState(true)
+  const [stPlatform, setStPlatform] = useState<"ios" | "android">("ios")
 
   // 两个源并发拉
-  const stQ = useRank({ source: "sensor_tower", region: "us", limit: 100 })
+  // ST 按 platform 切（默认 ios，与 0017 migration 历史回填一致）
+  const stQ = useRank({ source: "sensor_tower", platform: stPlatform, region: "us", limit: 100 })
+  // AR 永远 Android 全球（源本身就 Android-only）
   const arQ = useRank({ source: "androidrank", limit: 100 })
 
   const isLoading = stQ.isLoading || arQ.isLoading
@@ -93,19 +104,19 @@ export default function Revenue() {
     <div>
       <PageHeader
         title="收入下载"
-        subtitle="Sensor Tower (US 月估算) + Androidrank (全球·Android) · 以 AF 为基准"
+        subtitle={`Sensor Tower ${stPlatform === "ios" ? "iOS" : "Android"} (US 月估算) + Androidrank (全球·Android) · 以 AF 为基准`}
       />
 
       <KpiRow>
         <KpiCard
           label="AF 月下载"
           value={kpi.afDl != null ? formatCompactNumber(kpi.afDl) : "—"}
-          hint="US (Sensor Tower)"
+          hint={`US · ST ${stPlatform === "ios" ? "iOS" : "Android"}`}
         />
         <KpiCard
           label="AF 月收入"
           value={kpi.afRev != null ? "$" + formatCompactNumber(kpi.afRev) : "—"}
-          hint="US (Sensor Tower)"
+          hint={`US · ST ${stPlatform === "ios" ? "iOS" : "Android"}`}
         />
         <KpiCard
           label="AF US 排名"
@@ -119,7 +130,13 @@ export default function Revenue() {
         />
       </KpiRow>
 
-      <div className="flex justify-end mb-3">
+      <div className="flex items-center justify-between mb-3 gap-3">
+        <FilterChips
+          label="ST 平台"
+          options={ST_PLATFORM_OPTIONS}
+          value={stPlatform}
+          onChange={(v) => setStPlatform(v as "ios" | "android")}
+        />
         <BaselineToggle show={showBaseline} onChange={setShowBaseline} />
       </div>
 
@@ -148,7 +165,7 @@ export default function Revenue() {
                   colSpan={showBaseline ? 4 : 2}
                   className="text-center px-3 pt-1.5 pb-0.5 border-l border-border-soft text-muted-foreground/80 font-mono"
                 >
-                  Sensor Tower (US 月估算)
+                  Sensor Tower {stPlatform === "ios" ? "iOS" : "Android"} (US 月估算)
                 </th>
                 <th
                   colSpan={showBaseline && arHasAf ? 2 : 1}

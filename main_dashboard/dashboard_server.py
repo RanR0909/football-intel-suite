@@ -795,9 +795,14 @@ class APIHandler(BaseHTTPRequestHandler):
         return self._send_json({"iap_items": rows, "count": len(rows)})
 
     def api_rank(self):
-        """GET /api/rank?source=&region=&competitor=&date="""
+        """GET /api/rank?source=&platform=&region=&competitor=&date=
+
+        platform: 'ios' | 'android' — 仅 sensor_tower / androidrank 区分；
+                  其他 source 该字段是 NULL，传 platform 过滤会得到空结果。
+        """
         q = self._qs()
         source = q.get("source", "")
+        platform = q.get("platform", "")
         region = q.get("region", "")
         competitor = q.get("competitor", "")
         date = q.get("date", "")
@@ -807,6 +812,9 @@ class APIHandler(BaseHTTPRequestHandler):
         if source:
             wheres.append("m.source = :source")
             params["source"] = source
+        if platform:
+            wheres.append("m.platform = :platform")
+            params["platform"] = platform
         if region == "global":
             wheres.append("m.region_code IS NULL")
         elif region:
@@ -821,7 +829,7 @@ class APIHandler(BaseHTTPRequestHandler):
         else:
             wheres.append("m.snapshot_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)")
         sql = (
-            "SELECT m.id, m.source, m.region_code, c.name as competitor, "
+            "SELECT m.id, m.source, m.platform, m.region_code, c.name as competitor, "
             "m.name, m.rank_value, m.delta, m.downloads, m.downloads_num, "
             "m.revenue_num, m.snapshot_date, m.fetched_at "
             "FROM market_rank_snapshots m "
@@ -1262,13 +1270,14 @@ class APIHandler(BaseHTTPRequestHandler):
         rows = _query(f"""
             SELECT ce.canonical_id,
                    ea.primary_name,
+                   ea.chinese_name,
                    ea.entity_type,
                    COUNT(DISTINCT {DEDUP_KEY}) as total_mentions
             FROM comment_entities ce
             JOIN reviews r ON r.id = ce.review_id
             LEFT JOIN entity_aliases ea ON ea.canonical_id = ce.canonical_id
             WHERE {entity_filter} AND {label_filter}
-            GROUP BY ce.canonical_id, ea.primary_name, ea.entity_type
+            GROUP BY ce.canonical_id, ea.primary_name, ea.chinese_name, ea.entity_type
             ORDER BY total_mentions DESC LIMIT :lim
         """, lim=limit)
 
@@ -1306,6 +1315,7 @@ class APIHandler(BaseHTTPRequestHandler):
             out.append({
                 "canonical_id": cid,
                 "primary_name": r.get("primary_name") or cid,
+                "chinese_name": r.get("chinese_name"),  # 可能 NULL（task 8 还没翻译过）
                 "entity_type": r.get("entity_type"),
                 "total_mentions": r["total_mentions"],
                 "by_competitor": {x["competitor"]: x["n"] for x in by_comp_rows},
@@ -1372,13 +1382,14 @@ class APIHandler(BaseHTTPRequestHandler):
             rows = _query(f"""
                 SELECT ea.canonical_id,
                        ea.primary_name,
+                       ea.chinese_name,
                        COUNT(DISTINCT cpe.post_id) as post_count,
                        SUM(COALESCE(p.score, 0)) as total_score
                 FROM community_post_entities cpe
                 JOIN community_posts p ON p.id = cpe.post_id
                 JOIN entity_aliases ea ON ea.canonical_id = cpe.canonical_id
                 WHERE ea.entity_type = :etype {time_clause}
-                GROUP BY ea.canonical_id, ea.primary_name
+                GROUP BY ea.canonical_id, ea.primary_name, ea.chinese_name
                 ORDER BY post_count DESC, total_score DESC LIMIT :lim
             """, etype=entity_type, **params)
             # 每行附带 Top 3 提及该实体的竞品 + 几个高频共现实体

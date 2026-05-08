@@ -29,6 +29,9 @@ def bulk_insert_rank_snapshots(
     rows 元素：{
       "name": str,            # 应用名（competitor 也可能是 None）
       "competitor": str,      # 已知 tracked competitor 的 name；非 tracked 传 None
+      "platform": str,        # 可选；"ios"/"android" — sensor_tower 必填，androidrank
+                              #         调用方不填则 DAO 自动设 "android"，
+                              #         appmagic / appstore_rank 留 NULL（不区分）
       "region": str,          # "us" / "gb" / None=worldwide
       "rank": int,
       "delta": int,
@@ -50,8 +53,13 @@ def bulk_insert_rank_snapshots(
             for r in rows:
                 comp_name = r.get("competitor")
                 cid = resolve_competitor_id(comp_name, sess=s) if comp_name else None
+                # platform 推导：调用方传了就用；没传时 androidrank 兜底为 'android'，其它源 None
+                platform = r.get("platform")
+                if platform is None and source == "androidrank":
+                    platform = "android"
                 mappings.append({
                     "source": source,
+                    "platform": platform,
                     "region_code": r.get("region"),
                     "competitor_id": cid,
                     "name": (r.get("name") or "")[:128] or None,

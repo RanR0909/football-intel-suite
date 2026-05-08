@@ -90,8 +90,13 @@ PHASE_1_FETCHERS = [
         ["-m", "market_rank.scrape_fb_adlib", "scrape", "--country", "DE"], 600, "playwright"),
     ("fb_adlib_jp", "Meta 广告 · 日本",
         ["-m", "market_rank.scrape_fb_adlib", "scrape", "--country", "JP"], 600, "playwright"),
-    ("sensor_tower", "Sensor Tower",
-        ["-m", "market_rank.scrape_sensor_tower", "scrape"], 300, "playwright"),
+    # Sensor Tower 拆 ios / android 两个独立 task — 失败隔离 + SyncStatusBar 分别可视
+    ("sensor_tower_ios", "Sensor Tower · iOS",
+        ["-m", "market_rank.scrape_sensor_tower", "scrape", "--platform", "ios"],
+        300, "playwright"),
+    ("sensor_tower_android", "Sensor Tower · Android",
+        ["-m", "market_rank.scrape_sensor_tower", "scrape", "--platform", "android"],
+        300, "playwright"),
 ]
 
 # Phase 2：AI 重活（串行；失败不阻塞下一个）

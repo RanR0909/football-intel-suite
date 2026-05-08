@@ -114,6 +114,8 @@ export type RankSource = "appmagic" | "appstore_rank" | "sensor_tower" | "androi
 export interface RankSnapshot {
   id: number
   source: RankSource
+  /** 'ios' | 'android' — sensor_tower / androidrank 填充；appmagic / appstore_rank 为 null */
+  platform: "ios" | "android" | null
   region_code: string | null
   competitor: string | null
   name: string | null
@@ -299,6 +301,8 @@ export type ReviewsAggregatedTab = "problems" | "praise" | "localization" | "chu
 export interface ReviewsAggregatedItem {
   canonical_id: string
   primary_name: string
+  /** 中文翻译（task 8 entity_translate 写入）；NULL = 还没翻译过 */
+  chinese_name: string | null
   entity_type: EntityType | null
   total_mentions: number
   by_competitor: Record<string, number>
@@ -339,6 +343,8 @@ export interface CommunityAggCompetitorRow {
 export interface CommunityAggEntityRow {
   canonical_id: string
   primary_name: string
+  /** 中文翻译（task 8 entity_translate 写入）；NULL = 还没翻译过 */
+  chinese_name: string | null
   post_count: number
   total_score: number
   top_competitors: Array<{ competitor: string; n: number }>
