@@ -108,16 +108,64 @@ def _query(sql: str, **params) -> list[dict]:
         return []
 
 
-def _execute(sql: str, **params) -> bool:
+def _execute(sql: str, **params) -> int:
+    """Execute UPDATE/INSERT/DELETE; returns rowcount (-1 on error, 0 on no-op).
+
+    Callers can distinguish "no rows matched" (return 0) from "DB error" (return -1)
+    from "ok and affected N rows" (return N>0). Old call sites using `if _execute(...)`
+    still work because both -1 and 0 are falsy in the boolean sense — but rowcount-aware
+    paths (alert ack on derived id<0, retry on missing job) get to choose the right HTTP code.
+    """
     if _db is None or _sql_text is None or not _db.is_mysql_enabled():
-        return False
+        return -1
     try:
         with _db.session() as s:
-            s.execute(_sql_text(sql), params)
-        return True
+            res = s.execute(_sql_text(sql), params)
+            return res.rowcount if res.rowcount is not None else 0
     except Exception as e:
         log.warning(f"_execute failed: {e}")
-        return False
+        return -1
+
+
+# ─────────────────────────── Param parsing ──────────────────────────
+
+
+class BadRequest(Exception):
+    """Raised when a query/path param fails validation. do_GET / do_POST translate
+    this to HTTP 400 with a clean message — no Python internals leak to the frontend."""
+
+
+def _parse_int(q: dict, name: str, default: int, max_: int | None = None,
+               min_: int | None = None) -> int:
+    raw = q.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        v = int(raw)
+    except (ValueError, TypeError):
+        raise BadRequest(f"invalid {name}: must be integer (got {raw!r})")
+    if min_ is not None and v < min_:
+        v = min_
+    if max_ is not None and v > max_:
+        v = max_
+    return v
+
+
+def _parse_float(q: dict, name: str, default: float) -> float:
+    raw = q.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        raise BadRequest(f"invalid {name}: must be number (got {raw!r})")
+
+
+def _parse_path_id(raw: str, name: str = "id") -> int:
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        raise BadRequest(f"invalid {name}: {raw!r}")
 
 
 # ─────────────────────────── HTTP handler ──────────────────────────
@@ -143,6 +191,9 @@ class APIHandler(BaseHTTPRequestHandler):
         self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_400(self, msg):
+        self._send_json({"error": msg}, status=400)
 
     def _send_404(self, msg="Not Found"):
         self._send_json({"error": msg}, status=404)
@@ -241,6 +292,8 @@ class APIHandler(BaseHTTPRequestHandler):
                                         "ts": datetime.utcnow().isoformat()})
 
             self._send_404(f"Unknown GET path: {path}")
+        except BadRequest as e:
+            self._send_400(str(e))
         except Exception as e:
             log.exception("GET handler error")
             self._send_500(str(e))
@@ -257,6 +310,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 jid = path.split("/")[-2]
                 return self.api_failed_ai_retry(jid)
             self._send_404(f"Unknown POST path: {path}")
+        except BadRequest as e:
+            self._send_400(str(e))
         except Exception as e:
             log.exception("POST handler error")
             self._send_500(str(e))
@@ -276,15 +331,42 @@ class APIHandler(BaseHTTPRequestHandler):
             return self._send_500(f"failed to read dashboard_data.json: {e}")
 
     def api_status(self):
-        """GET /api/status — 各源最近抓取 / retry queue / AI 失败队列 / 候选数"""
-        # 各源 last_success
-        sources_status = {}
+        """GET /api/status — 各源最近抓取 / retry queue / AI 失败队列 / 候选数
+
+        sources schema 对前端的形状（与 types/api.ts StatusResponse 对齐）：
+            sources: Record<source_name, {
+                last_success, last_attempt, last_failure,
+                failure_kind, failure_msg, cookie_status,
+                consecutive_failures,
+                status: "ok" | "fail" | "pending"   # 后端派生的简化标记
+            }>
+        sync_state.snapshot() 原生形状是 {version: 1, sources: {...}}，这里展平后再
+        往每个 source 插入派生 status，让 SyncStatusBar 直接读 sources[k].status。
+        """
+        sources_status: dict = {}
         if _sync_state:
             try:
                 snap = _sync_state.snapshot() or {}
-                sources_status = snap
+                inner = snap.get("sources") if isinstance(snap, dict) else None
+                # 兼容老/新形状：snap 可能是 {version, sources} 也可能直接是 sources map
+                if isinstance(inner, dict):
+                    sources_status = inner
+                elif isinstance(snap, dict):
+                    sources_status = snap
             except Exception:
                 pass
+
+        # 派生每个 source 的 status badge — SyncStatusBar 用它决定颜色
+        for name, s in list(sources_status.items()):
+            if not isinstance(s, dict):
+                continue
+            cf = int(s.get("consecutive_failures") or 0)
+            if cf > 0:
+                s["status"] = "fail"
+            elif s.get("last_success"):
+                s["status"] = "ok"
+            else:
+                s["status"] = "pending"
 
         # retry queue
         retry_size = 0
@@ -349,7 +431,7 @@ class APIHandler(BaseHTTPRequestHandler):
         atype = q.get("type", "")
         sev = q.get("severity", "")
         since = q.get("since", "")  # ISO 或 24h / 7d / 30d 简写
-        limit = min(int(q.get("limit") or 200), 1000)
+        limit = _parse_int(q, "limit", default=200, max_=1000, min_=1)
 
         wheres = ["1=1"]
         params = {}
@@ -594,10 +676,21 @@ class APIHandler(BaseHTTPRequestHandler):
         return out
 
     def api_alert_ack(self, alert_id: str):
-        """POST /api/alerts/:id/ack — 标记预警已读"""
-        ok = _execute("UPDATE alerts SET status = 'ack' WHERE id = :id",
-                      id=int(alert_id))
-        return self._send_json({"ok": ok, "id": alert_id})
+        """POST /api/alerts/:id/ack — 标记预警已读
+
+        派生 alert (id<0) 来自 JSON fallback，不在 alerts 表里 — 直接 ack 不会持久化，
+        重新加载就会再次出现。这里返 400 让前端显示"该预警来自 JSON fallback，无法标记"。
+        DB 中真实存在的 id 但本次 UPDATE 影响 0 行（已被 ack 或 dismiss）→ 200，幂等。
+        """
+        aid = _parse_path_id(alert_id, "alert id")
+        if aid < 0:
+            raise BadRequest("derived alert (id<0) cannot be acked — it is regenerated from JSON fallback each request")
+        rc = _execute("UPDATE alerts SET status = 'ack' WHERE id = :id", id=aid)
+        if rc < 0:
+            return self._send_500("DB error while updating alert")
+        if rc == 0:
+            return self._send_404(f"alert {aid} not found")
+        return self._send_json({"ok": True, "id": aid, "affected": rc})
 
     def api_reviews(self):
         """GET /api/reviews?competitor=&label=&region=&since=&limit="""
@@ -606,7 +699,7 @@ class APIHandler(BaseHTTPRequestHandler):
         label = q.get("label", "")
         region = q.get("region", "")
         since = q.get("since", "")
-        limit = min(int(q.get("limit") or 100), 500)
+        limit = _parse_int(q, "limit", default=100, max_=500, min_=1)
 
         wheres = ["r.labeled_at IS NOT NULL"]
         params = {}
@@ -682,7 +775,7 @@ class APIHandler(BaseHTTPRequestHandler):
         q = self._qs()
         competitor = q.get("competitor", "")
         region = q.get("region", "")
-        limit = min(int(q.get("limit") or 500), 5000)
+        limit = _parse_int(q, "limit", default=500, max_=5000, min_=1)
         wheres = ["1=1"]
         params = {"limit": limit}
         if competitor:
@@ -708,7 +801,7 @@ class APIHandler(BaseHTTPRequestHandler):
         region = q.get("region", "")
         competitor = q.get("competitor", "")
         date = q.get("date", "")
-        limit = min(int(q.get("limit") or 200), 2000)
+        limit = _parse_int(q, "limit", default=200, max_=2000, min_=1)
         wheres = ["1=1"]
         params = {"limit": limit}
         if source:
@@ -751,7 +844,7 @@ class APIHandler(BaseHTTPRequestHandler):
         category = q.get("category", "")
         app = q.get("app", "") or q.get("competitor", "")
         business_only = q.get("business_only", "1") != "0"
-        limit = min(int(q.get("limit") or 200), 1000)
+        limit = _parse_int(q, "limit", default=200, max_=1000, min_=1)
 
         wheres = ["1=1"]
         params = {"limit": limit}
@@ -859,7 +952,7 @@ class APIHandler(BaseHTTPRequestHandler):
         selling_point = q.get("selling_point", "")
         audience = q.get("audience", "")
         tone = q.get("tone", "")
-        limit = min(int(q.get("limit") or 200), 1000)
+        limit = _parse_int(q, "limit", default=200, max_=1000, min_=1)
 
         wheres = ["1=1"]
         params = {"limit": limit}
@@ -952,7 +1045,7 @@ class APIHandler(BaseHTTPRequestHandler):
         topic = q.get("topic", "")
         mentioned = q.get("mentioned", "")
         since = q.get("since", "")
-        limit = min(int(q.get("limit") or 50), 500)
+        limit = _parse_int(q, "limit", default=50, max_=500, min_=1)
 
         wheres = ["1=1"]
         params = {"limit": limit}
@@ -1006,7 +1099,7 @@ class APIHandler(BaseHTTPRequestHandler):
         q = self._qs()
         competitor = q.get("competitor", "")
         since = q.get("since", "30d")
-        limit = min(int(q.get("limit") or 200), 1000)
+        limit = _parse_int(q, "limit", default=200, max_=1000, min_=1)
 
         wheres = ["1=1"]
         params = {"limit": limit}
@@ -1140,7 +1233,7 @@ class APIHandler(BaseHTTPRequestHandler):
         """
         q = self._qs()
         tab = (q.get("tab") or "problems").lower()
-        limit = min(int(q.get("limit") or 50), 200)
+        limit = _parse_int(q, "limit", default=50, max_=200, min_=1)
 
         if tab == "problems":
             entity_filter = "ea.entity_type = 'bug'"
@@ -1228,7 +1321,7 @@ class APIHandler(BaseHTTPRequestHandler):
         """
         q = self._qs()
         dim = (q.get("dim") or "topic").lower()
-        limit = min(int(q.get("limit") or 50), 200)
+        limit = _parse_int(q, "limit", default=50, max_=200, min_=1)
         since = q.get("since", "30d")
         cutoff = self._parse_since(since) if since else None
 
@@ -1324,7 +1417,7 @@ class APIHandler(BaseHTTPRequestHandler):
         """
         q = self._qs()
         dim = (q.get("dim") or "selling_point").lower()
-        limit = min(int(q.get("limit") or 50), 200)
+        limit = _parse_int(q, "limit", default=50, max_=200, min_=1)
 
         if dim == "selling_point":
             # 用 JSON_TABLE 拆 selling_points 数组（MySQL 8）
@@ -1399,8 +1492,8 @@ class APIHandler(BaseHTTPRequestHandler):
         """GET /api/candidates?topic=&conf_min=&limit= — 候选 app（不含已 in competitors 的）"""
         q = self._qs()
         topic = q.get("topic", "")
-        conf_min = float(q.get("conf_min") or 0.85)
-        limit = min(int(q.get("limit") or 100), 500)
+        conf_min = _parse_float(q, "conf_min", default=0.85)
+        limit = _parse_int(q, "limit", default=100, max_=500, min_=1)
 
         wheres = ["a.is_relevant = 1", "a.confidence >= :cmin"]
         params = {"cmin": conf_min, "limit": limit}
@@ -1498,7 +1591,7 @@ class APIHandler(BaseHTTPRequestHandler):
         resolved = q.get("resolved", "false").lower()
         task = q.get("task", "")
         latest_round = q.get("latest_round", "true").lower() in ("1", "true", "yes")
-        limit = min(int(q.get("limit") or 100), 500)
+        limit = _parse_int(q, "limit", default=100, max_=500, min_=1)
         wheres = []
         params = {"limit": limit}
         if resolved == "false":
@@ -1545,15 +1638,22 @@ class APIHandler(BaseHTTPRequestHandler):
 
         实际重试由 ai_pipeline 的下次运行处理（若 task 实现了从失败队列回拉的逻辑）。
         当前简化：只重置标记，让人手动重跑。
+        不存在的 job_id 返 404 — 之前会假成功导致前端 UI 误导。
         """
-        ok = _execute(
+        jid = _parse_path_id(job_id, "job id")
+        rc = _execute(
             "UPDATE failed_ai_jobs SET resolved_at = NULL, attempts = 0, "
             "last_attempt_at = NOW() WHERE id = :id",
-            id=int(job_id),
+            id=jid,
         )
+        if rc < 0:
+            return self._send_500("DB error while resetting job")
+        if rc == 0:
+            return self._send_404(f"failed_ai_job {jid} not found")
         return self._send_json({
-            "ok": ok,
-            "id": job_id,
+            "ok": True,
+            "id": jid,
+            "affected": rc,
             "note": "标记已重置；下次 ai_pipeline 跑会重新拉这条。如需立即重试，请手动跑 python3 -m ai_tasks.run_pipeline",
         })
 
@@ -1562,7 +1662,7 @@ class APIHandler(BaseHTTPRequestHandler):
         q = self._qs()
         source = q.get("source", "")
         status = q.get("status", "")
-        limit = min(int(q.get("limit") or 50), 500)
+        limit = _parse_int(q, "limit", default=50, max_=500, min_=1)
         wheres = ["1=1"]
         params = {"limit": limit}
         if source:
