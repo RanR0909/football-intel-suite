@@ -82,28 +82,51 @@ def update_translation(version_id: int, translated_zh: str) -> bool:
 
 
 def fetch_untranslated(*, limit: int = 50) -> list[dict]:
-    """release_notes 已抓但未翻译的版本（translated_at IS NULL & release_notes IS NOT NULL）。"""
+    """release_notes 已抓但未翻译的版本（translated_at IS NULL & release_notes IS NOT NULL）。
+
+    排除 failed_ai_jobs 里 task_name='version_translate' 的 version_id。
+    JOIN competitors 取 name 给 prompt 用。
+    """
     if not _db.is_mysql_enabled():
         return []
+    import sqlalchemy as sa
+    from shared.models import Competitor
+
+    blacklist: set[int] = set()
+    with _db.engine().connect() as c:
+        rows = c.execute(sa.text("""
+            SELECT DISTINCT JSON_EXTRACT(payload_json, '$.version_id') AS vid
+            FROM failed_ai_jobs
+            WHERE task_name = 'version_translate' AND resolved_at IS NULL
+        """)).fetchall()
+        for r in rows:
+            try:
+                blacklist.add(int(r[0]))
+            except (TypeError, ValueError):
+                pass
+
     with _db.session() as s:
-        rows = (
-            s.query(AppVersion)
+        q = (
+            s.query(AppVersion, Competitor.name)
+            .join(Competitor, Competitor.id == AppVersion.competitor_id)
             .filter(AppVersion.translated_at.is_(None))
             .filter(AppVersion.release_notes.isnot(None))
-            # MySQL DESC 默认 NULL 在末尾；.nullslast() 在 MySQL 报语法错
-            .order_by(AppVersion.released_at.desc(), AppVersion.id.desc())
-            .limit(limit).all()
         )
+        if blacklist:
+            q = q.filter(~AppVersion.id.in_(blacklist))
+        rows = q.order_by(AppVersion.released_at.desc(),
+                          AppVersion.id.desc()).limit(limit).all()
         return [
             {
                 "id": r.id,
+                "competitor": comp_name,
                 "competitor_id": r.competitor_id,
                 "platform": r.platform,
                 "version": r.version,
                 "release_notes": r.release_notes,
                 "release_notes_lang": r.release_notes_lang,
             }
-            for r in rows
+            for r, comp_name in rows
         ]
 
 
@@ -162,3 +185,74 @@ def get_by_id(version_id: int) -> dict | None:
             "release_notes_zh": r.release_notes_translated_zh,
             "released_at": r.released_at.isoformat() if r.released_at else None,
         }
+
+
+# ─────────────── version_classify (migration 0020 / task 11) ─────────────────
+
+
+def fetch_unclassified(*, limit: int = 50) -> list[dict]:
+    """classified_at IS NULL 的版本（task 11 还没跑过）。
+
+    排除 failed_ai_jobs 里 task_name='version_classify' 的 version_id。
+    """
+    if not _db.is_mysql_enabled():
+        return []
+    import json as _json
+    import sqlalchemy as sa
+    from shared.models import Competitor
+
+    blacklist: set[int] = set()
+    with _db.engine().connect() as c:
+        rows = c.execute(sa.text("""
+            SELECT DISTINCT JSON_EXTRACT(payload_json, '$.version_id') AS vid
+            FROM failed_ai_jobs
+            WHERE task_name = 'version_classify' AND resolved_at IS NULL
+        """)).fetchall()
+        for r in rows:
+            try:
+                blacklist.add(int(r[0]))
+            except (TypeError, ValueError):
+                pass
+
+    with _db.session() as s:
+        q = (
+            s.query(AppVersion, Competitor.name)
+            .join(Competitor, Competitor.id == AppVersion.competitor_id)
+            .filter(AppVersion.classified_at.is_(None))
+            .filter(AppVersion.release_notes.isnot(None))
+        )
+        if blacklist:
+            q = q.filter(~AppVersion.id.in_(blacklist))
+        rows = q.order_by(AppVersion.released_at.desc(),
+                          AppVersion.id.desc()).limit(limit).all()
+        return [
+            {
+                "id": r.id,
+                "competitor": comp_name,
+                "platform": r.platform,
+                "version": r.version,
+                "release_notes": r.release_notes,
+            }
+            for r, comp_name in rows
+        ]
+
+
+def update_classification(
+    version_id: int, *,
+    version_type: str,
+    key_changes: list[str],
+    is_significant: bool,
+) -> bool:
+    """task 11 version_classify 写回。"""
+    if not _db.is_mysql_enabled():
+        return False
+    import json as _json
+    with _db.session() as s:
+        row = s.query(AppVersion).filter(AppVersion.id == version_id).first()
+        if not row:
+            return False
+        row.version_type = (version_type or "")[:16] or None
+        row.key_changes_json = _json.dumps(key_changes or [], ensure_ascii=False)
+        row.is_significant = bool(is_significant)
+        row.classified_at = datetime.utcnow()
+    return True

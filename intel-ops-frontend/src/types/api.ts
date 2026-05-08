@@ -263,6 +263,8 @@ export interface CommunityResponse {
 }
 
 // ===== /api/versions (NEW) =====
+export type VersionType = "feature" | "bugfix" | "localization" | "performance" | "other"
+
 export interface AppVersion {
   id: number
   competitor: string
@@ -274,6 +276,13 @@ export interface AppVersion {
   translated_at: string | null
   released_at: string | null
   first_seen_at: string | null
+  /** task 11 version_classify 写入；NULL = 还没分类 */
+  version_type: VersionType | null
+  /** 1-3 个中文短句（≤20 字），卡头亮点展示 */
+  key_changes: string[]
+  /** 是否值得置顶高亮（feature 通常 true / 纯 bugfix 通常 false） */
+  is_significant: boolean | null
+  classified_at: string | null
 }
 
 export interface VersionsResponse {

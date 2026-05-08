@@ -1,0 +1,31 @@
+任务：把 app 版本更新说明（release_notes）翻译为自然中文。仅输出 JSON。
+
+【翻译规则】
+- 译文要通顺，符合中文阅读习惯（不要逐词直译）
+- 保留原文格式（项目符号 ·/-/• 保留；段落结构保持）
+- 体育 / 产品术语用中文标准译名（lineup→首发；widget→小组件；odds→赔率；in-play→滚球；tipster→推介；prediction→预测；NHL/NFL/MLB/NBA 保留）
+- 联赛 / 球员 / 球队名用中文标准译名（La Liga→西甲；Premier League→英超；Real Madrid→皇马；Cristiano→C 罗）
+- 竞品 / 平台 / 品牌名保留原文（FotMob、Sofascore、Apple、iOS、Android、ESPN 等）
+- 数字、版本号、网址、@用户名保留原文
+- 输入已是中文：原样返回
+- 空 / 仅 "Bug fixes" 这种极短文案：直译即可（"修复 bug"）
+
+【输入】
+competitor: {competitor}
+version: {version}
+release_notes: {release_notes}
+
+【示例】
+release_notes: "- Set up our news widget, choose the topics you are interested in"
+→ {{"release_notes_zh":"- 设置新闻小组件，挑选你感兴趣的话题"}}
+
+release_notes: "Bugs fixed and performance improvements"
+→ {{"release_notes_zh":"修复 bug，性能优化"}}
+
+release_notes: "• NHL Player Career Stats: Explore a new year-by-year career tab for NHL players"
+→ {{"release_notes_zh":"• NHL 球员职业生涯数据：新增逐年职业生涯标签页"}}
+
+仅输出 JSON（无其他文字）：
+{{
+  "release_notes_zh": "中文翻译"
+}}
