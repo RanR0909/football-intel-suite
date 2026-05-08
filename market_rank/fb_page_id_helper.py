@@ -76,10 +76,13 @@ def main() -> int:
         if existing:
             print(f"[{app_name}] 已有 fb_page_id={existing}，跳过")
             continue
-        # 构造 URL — search_type=page 是 advertiser search
+        # 构造 URL — 用 ad_type=all 显式声明非政治广告（不然 Meta 默认走 political_and_issue_ads
+        # 模式，搜出来全是无关政治议题广告）。不传 search_type，让默认行为返回 ad 卡片，
+        # 用户在卡片头部点击广告主名字（带蓝色 checkmark 的）→ 跳到该 page 的全部广告页
+        # （URL 自带 view_all_page_id=N）。
         url = (
             "https://www.facebook.com/ads/library/"
-            f"?active_status=all&country=ALL&q={quote(app_name)}&search_type=page"
+            f"?active_status=all&ad_type=all&country=ALL&q={quote(app_name)}"
         )
         print()
         print(f"━━━ [{app_name}] ━━━")
