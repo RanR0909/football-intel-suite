@@ -15,7 +15,7 @@ export interface BaselineDelta {
   color: BaselineColor
 }
 
-/** 数值型（下载 / 收入 / 访问量）— 越大越强 */
+/** 数值型（下载 / 收入 / 访问量）— 越大越强；以百分比展示增长率 */
 export function computeNumericDelta(
   competitor: number | null | undefined,
   af: number | null | undefined
@@ -30,6 +30,26 @@ export function computeNumericDelta(
     display: `${sign}${(delta * 100).toFixed(1)}%`,
     color: delta > 0.01 ? "danger" : delta < -0.01 ? "success" : "neutral",
   }
+}
+
+/** 数值型倍数 — 收入下载页 vs AF 列用：以"竞品是 AF 的 N 倍"展示，不是增长率
+ *  例: 200K / 5K = 40x；5K / 5K = 1.0x；2.5K / 5K = 0.50x
+ *  ratio > 1 = 竞品领先 AF（danger 红）；ratio < 1 = AF 领先（success 绿）。 */
+export function computeNumericRatio(
+  competitor: number | null | undefined,
+  af: number | null | undefined
+): BaselineDelta {
+  if (competitor == null || af == null || af === 0) {
+    return { value: null, display: "—", color: "neutral" }
+  }
+  const ratio = competitor / af
+  const color = ratio > 1.01 ? "danger" : ratio < 0.99 ? "success" : "neutral"
+  let display: string
+  if (ratio >= 100) display = `${ratio.toFixed(0)}x`
+  else if (ratio >= 10) display = `${ratio.toFixed(1)}x`
+  else if (ratio >= 1) display = `${ratio.toFixed(2)}x`
+  else display = `${ratio.toFixed(2)}x`   // <1 也保 2 位（0.50x / 0.05x）
+  return { value: ratio, display, color }
 }
 
 /** 排名型 — 数小=好（AF 排名 - 竞品排名）*/
