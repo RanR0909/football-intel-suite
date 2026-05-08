@@ -97,7 +97,7 @@ export default function Revenue() {
   }
   const compCount = rows.filter((r) => r.competitor !== BASELINE_APP).length
 
-  // AR 块特殊提示：AF 不在 Androidrank 索引（区域市场），导致 vs AF 列全空
+  // AR 块：AF 不在 Androidrank 索引（区域市场），AF 没数据时 vs AF 列直接隐藏
   const arHasAf = af?.ar_dl != null
 
   return (
@@ -141,16 +141,6 @@ export default function Revenue() {
       {isError && <EmptyState type="error" onRetry={refetch} />}
       {!isLoading && !isError && rows.length === 0 && <EmptyState type="empty" />}
 
-      {rows.length > 0 && !arHasAf && (
-        <div className="mb-2 px-3 py-2 rounded-md border border-semantic-warning/30 bg-semantic-warning/5 text-xs text-muted-foreground">
-          ⚠ <span className="font-mono">Androidrank</span> 不收录{" "}
-          <span className="font-mono text-foreground">AllFootball</span>（区域市场）
-          {" "}和{" "}
-          <span className="font-mono text-foreground">310Scores</span>（app 太新），
-          故 vs AF 列仅展示 Sensor Tower 块。
-        </div>
-      )}
-
       {rows.length > 0 && (
         <div className="border border-border-soft rounded-md bg-card overflow-x-auto">
           <table className="w-full text-xs">
@@ -169,11 +159,6 @@ export default function Revenue() {
                   className="text-center px-3 pt-1.5 pb-0.5 border-l border-border-soft text-muted-foreground/80 font-mono"
                 >
                   Androidrank (全球·Android)
-                  {!arHasAf && (
-                    <span className="ml-1 normal-case font-sans text-2xs text-semantic-warning">
-                      · AF 不在此源
-                    </span>
-                  )}
                 </th>
                 <th rowSpan={2} className="text-right px-3 align-bottom pb-1.5 pt-2 border-l border-border-soft">
                   US 排名
