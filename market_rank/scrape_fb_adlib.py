@@ -375,6 +375,8 @@ async def cmd_scrape(headed: bool = False, countries: list[str] | None = None) -
                         cards = kept
                     for c in cards:
                         c["country"] = country.lower()
+                        if fb_page_id and not c.get("page_id"):
+                            c["page_id"] = fb_page_id
                     rec = {
                         "source": "fb_adlib",
                         "competitor": app_name,
