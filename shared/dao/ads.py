@@ -21,7 +21,7 @@ log = logging.getLogger("shared.dao.ads")
 def upsert_ad_creatives(competitor_name: str, region: str, ads: list[dict]) -> int:
     """对每条 ad 按 (competitor_id, ad_id) UPSERT；同一广告多次抓刷新 fetched_at。
 
-    ads 元素：{ad_id, text, start_date, platform, page_name, media_url}
+    ads 元素：{ad_id, text, start_date, platform, page_name, page_id, media_url}
     """
     if not _db.is_mysql_enabled() or not ads:
         return 0
@@ -49,6 +49,7 @@ def upsert_ad_creatives(competitor_name: str, region: str, ads: list[dict]) -> i
                     "start_date": a.get("start_date"),
                     "platform": a.get("platform"),
                     "page_name": a.get("page_name"),
+                    "page_id": (a.get("page_id") or None),     # migration 0021 新加
                     "media_url": a.get("media_url"),
                     "fetched_at": now,
                 })
@@ -64,6 +65,7 @@ def upsert_ad_creatives(competitor_name: str, region: str, ads: list[dict]) -> i
                     start_date=stmt.inserted.start_date,
                     platform=stmt.inserted.platform,
                     page_name=stmt.inserted.page_name,
+                    page_id=stmt.inserted.page_id,
                     media_url=stmt.inserted.media_url,
                     fetched_at=stmt.inserted.fetched_at,
                 )
@@ -77,6 +79,7 @@ def upsert_ad_creatives(competitor_name: str, region: str, ads: list[dict]) -> i
                         start_date=stmt.excluded.start_date,
                         platform=stmt.excluded.platform,
                         page_name=stmt.excluded.page_name,
+                        page_id=stmt.excluded.page_id,
                         media_url=stmt.excluded.media_url,
                         fetched_at=stmt.excluded.fetched_at,
                     ),

@@ -84,6 +84,7 @@ class AdCreative(Base):
     start_date = Column(String(64))
     platform = Column(String(64))
     page_name = Column(String(128))
+    page_id = Column(String(32))                        # 实际命中的广告主 FB page_id (migration 0021)
     media_url = Column(String(1024))
     fetched_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
