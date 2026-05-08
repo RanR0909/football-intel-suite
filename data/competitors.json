@@ -4,63 +4,72 @@
     "ios": 1176147574,
     "app_id": "1176147574",
     "bundle_id": "com.SofaScore.iOS",
-    "website": "sofascore.com"
+    "website": "sofascore.com",
+    "fb_page_id": "242327635878763"
   },
   "FlashScore": {
     "gp": "eu.livesport.FlashScore_com",
     "ios": 766443283,
     "app_id": "766443283",
     "bundle_id": "eu.livesport.FlashScore-com",
-    "website": "flashscore.com"
+    "website": "flashscore.com",
+    "fb_page_id": "108750148802229"
   },
   "OneFootball": {
     "gp": "de.motain.iliga",
     "ios": 382002079,
     "app_id": "382002079",
     "bundle_id": "de.motain.iliga",
-    "website": "onefootball.com"
+    "website": "onefootball.com",
+    "fb_page_id": "247792341912718"
   },
   "365Scores": {
     "gp": "com.scores365",
     "ios": 571801488,
     "app_id": "571801488",
     "bundle_id": "com.365scores.365scroesapp",
-    "website": "365scores.com"
+    "website": "365scores.com",
+    "fb_page_id": "1426961470857148"
   },
   "Fotmob": {
     "gp": "com.mobilefootie.wc2010",
     "ios": 488575683,
     "app_id": "488575683",
     "bundle_id": "com.mobilefootie.fotmobpro",
-    "website": "fotmob.com"
+    "website": "fotmob.com",
+    "fb_page_id": "113669748660016"
   },
   "LiveScore": {
     "gp": "com.livescore",
     "ios": 356928178,
     "app_id": "356928178",
     "bundle_id": "com.livescore.ios",
-    "website": "livescore.com"
+    "website": "livescore.com",
+    "fb_page_id": "92449401987"
   },
   "AiScore": {
     "gp": "com.onesports.score",
     "ios": 1477171291,
     "app_id": "1477171291",
     "bundle_id": "com.onesports.score",
-    "website": "aiscore.com"
+    "website": "aiscore.com",
+    "fb_page_id": "2201249916765483"
   },
   "BeSoccer": {
     "gp": "com.resultadosfutbol.mobile",
     "ios": 550928207,
     "app_id": "550928207",
     "bundle_id": "com.resultadosfutbol.resultadosfutboliphone",
-    "website": "besoccer.com"
+    "website": "besoccer.com",
+    "fb_page_id": "207013372805"
   },
   "310Scores": {
     "gp": "com.scores.tfz",
     "ios": 6449077229,
     "app_id": "6449077229",
     "bundle_id": "com.scores.tfz",
-    "website": "310scores.com"
+    "website": "310scores.com",
+    "fb_page_id": "121445214384263"
   },
   "AllFootball": {
     "gp": "com.allfootball.news",
