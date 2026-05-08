@@ -1,10 +1,11 @@
-/** 产品动态页（spec 前端实现文档 §9.7 + wireframe 03）
+/** 产品动态页（spec 前端实现文档 §9.7 + wireframe 03 升级版）
  *
- * 改造点 vs v1:
- *  · 数据源：app_versions 表（iTunes Lookup → /api/versions），不再用 alerts
- *  · 每条版本一张卡片：release_notes 中文翻译 + 评分变化 + 高频实体 Top
- *  · 点击卡片展开 → 异步拉 /api/versions/:id/related-reviews
- *  · 高频实体 chip 来自 comment_entities（按版本聚合）
+ * 改造（task 10/11 上线后）:
+ *  · 卡头直接展示价值信号：版本类型 Pill + 1-3 个中文亮点 + ⭐ 重要标
+ *  · 重要更新（is_significant=true）默认置顶；普通 bugfix 下沉
+ *  · KPI 用 version_type 真统计（不再 regex 命中"new"/"feature"虚高）
+ *  · 展开后 release_notes 优先显示中文翻译
+ *  · 修了 related_reviews rating_change SQL bug (reviews.rating → score)
  */
 import { useMemo, useState } from "react"
 import PageHeader from "@/components/shared/PageHeader"
@@ -19,8 +20,16 @@ import {
   BASELINE_APP, COMPETITORS,
   ENTITY_TYPE_DISPLAY, REVIEW_LABEL_DISPLAY,
 } from "@/types/domain"
-import type { AppVersion } from "@/types/api"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import type { AppVersion, VersionType } from "@/types/api"
+import { ChevronDown, ChevronRight, Star } from "lucide-react"
+
+const VERSION_TYPE_DISPLAY: Record<VersionType, { label: string; variant: "green" | "amber" | "blue" | "gray" | "purple" }> = {
+  feature:      { label: "新功能",   variant: "green" },
+  bugfix:       { label: "Bug 修复", variant: "gray" },
+  localization: { label: "本地化",   variant: "blue" },
+  performance: { label: "性能优化", variant: "amber" },
+  other:        { label: "其他",     variant: "purple" },
+}
 
 export default function Releases() {
   const { value, setValue } = useUrlFilters({ since: "30d", competitor: "" })
@@ -34,25 +43,39 @@ export default function Releases() {
   })
   const versions = useMemo(() => data?.versions || [], [data])
 
+  // 排序：is_significant=true 先；同级按 released_at desc（后端已经按这逻辑排了，这里 useMemo 仅为防御）
+  const sorted = useMemo(() => {
+    return [...versions].sort((a, b) => {
+      const sa = a.is_significant ? 1 : 0
+      const sb = b.is_significant ? 1 : 0
+      if (sa !== sb) return sb - sa
+      return (b.released_at || "").localeCompare(a.released_at || "")
+    })
+  }, [versions])
+
+  const significant = useMemo(() => sorted.filter((v) => v.is_significant), [sorted])
+  const others = useMemo(() => sorted.filter((v) => !v.is_significant), [sorted])
+
   const kpi = useMemo(() => {
     const apps = new Set(versions.map((v) => v.competitor))
-    const localized = versions.filter((v) =>
-      (v.release_notes || "").match(/local|spanish|arabic|japanese|french|portuguese|本地化|语言|翻译/i)
-    ).length
-    const featured = versions.filter((v) =>
-      (v.release_notes || "").match(/new|added|feature|introduc|新增|上线|新功能/i)
-    ).length
-    return { total: versions.length, apps: apps.size, localized, featured }
+    const featureCount = versions.filter((v) => v.version_type === "feature").length
+    const localizationCount = versions.filter((v) => v.version_type === "localization").length
+    return {
+      total: versions.length,
+      apps: apps.size,
+      feature: featureCount,
+      localization: localizationCount,
+    }
   }, [versions])
 
   return (
     <div>
       <PageHeader
         title="产品动态"
-        subtitle="每个版本改了什么 + 用户怎么反应"
+        subtitle="每个版本改了什么 + 用户怎么反应 · ⭐ 重要更新置顶（含新功能 / 本地化 / 重大改版）"
         right={
           <span className="text-xs text-muted-foreground tabular-nums">
-            {versions.length} 个版本
+            {versions.length} 个版本 · ⭐ {significant.length}
           </span>
         }
       />
@@ -60,8 +83,8 @@ export default function Releases() {
       <KpiRow>
         <KpiCard label="发版数" value={kpi.total} hint={`近 ${since}`} />
         <KpiCard label="涉及竞品" value={kpi.apps} />
-        <KpiCard label="含本地化" value={kpi.localized} hint="release notes 提及" />
-        <KpiCard label="含新功能" value={kpi.featured} hint="release notes 提及" />
+        <KpiCard label="新功能" value={kpi.feature} hint="version_type=feature" />
+        <KpiCard label="本地化" value={kpi.localization} hint="新语言 / 区域支持" />
       </KpiRow>
 
       <div className="space-y-2 mb-3">
@@ -94,12 +117,29 @@ export default function Releases() {
         <EmptyState type="empty" hint="近窗口内无版本变更（app_versions 表可能未抓取）" />
       )}
 
-      {versions.length > 0 && (
-        <div className="space-y-2">
-          {versions.map((v) => (
-            <VersionCard key={v.id} v={v} />
-          ))}
-        </div>
+      {significant.length > 0 && (
+        <section className="mb-4">
+          <div className="flex items-center gap-2 px-1 mb-2 text-2xs uppercase tracking-wider text-semantic-warning">
+            <Star className="w-3 h-3 fill-semantic-warning text-semantic-warning" />
+            重要更新 ({significant.length})
+          </div>
+          <div className="space-y-2">
+            {significant.map((v) => <VersionCard key={v.id} v={v} highlight />)}
+          </div>
+        </section>
+      )}
+
+      {others.length > 0 && (
+        <section>
+          {significant.length > 0 && (
+            <div className="px-1 mb-2 text-2xs uppercase tracking-wider text-muted-foreground">
+              其他更新 ({others.length})
+            </div>
+          )}
+          <div className="space-y-2">
+            {others.map((v) => <VersionCard key={v.id} v={v} />)}
+          </div>
+        </section>
       )}
     </div>
   )
@@ -107,7 +147,7 @@ export default function Releases() {
 
 // ─────────── 版本卡 ───────────
 
-function VersionCard({ v }: { v: AppVersion }) {
+function VersionCard({ v, highlight }: { v: AppVersion; highlight?: boolean }) {
   const [open, setOpen] = useState(false)
   const isBaseline = v.competitor === BASELINE_APP
   const notesZh = v.release_notes_zh
@@ -115,25 +155,41 @@ function VersionCard({ v }: { v: AppVersion }) {
   const dateStr = v.released_at
     ? new Date(v.released_at).toLocaleDateString("zh-CN", { month: "short", day: "numeric" })
     : "—"
+  const typeMeta = v.version_type ? VERSION_TYPE_DISPLAY[v.version_type] : null
 
   return (
-    <article className="border border-border-soft rounded-md bg-card overflow-hidden">
+    <article className={
+      "border rounded-md bg-card overflow-hidden " +
+      (highlight ? "border-semantic-warning/40" : "border-border-soft")
+    }>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-3 h-10 text-left hover:bg-muted/30 transition-colors duration-150"
+        className="w-full px-3 py-2 text-left hover:bg-muted/30 transition-colors duration-150"
       >
-        {open ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
-        <span className="text-sm font-medium">
-          {v.competitor}
-          {isBaseline && (
-            <Pill variant="blue" className="ml-2">baseline</Pill>
+        {/* 第一行：基本信息 */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {open ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
+          <span className="text-sm font-medium">{v.competitor}</span>
+          {isBaseline && <Pill variant="blue">baseline</Pill>}
+          <span className="text-xs font-mono text-muted-foreground">{v.version}</span>
+          <Pill variant="gray" className="font-mono">{v.platform.toUpperCase()}</Pill>
+          {typeMeta && <Pill variant={typeMeta.variant}>{typeMeta.label}</Pill>}
+          {highlight && (
+            <Star className="w-3 h-3 fill-semantic-warning text-semantic-warning shrink-0" />
           )}
-        </span>
-        <span className="text-xs font-mono text-muted-foreground">{v.version}</span>
-        <Pill variant="gray" className="font-mono">{v.platform.toUpperCase()}</Pill>
-        <span className="ml-auto text-2xs text-muted-foreground tabular-nums">
-          {dateStr}
-        </span>
+          <span className="ml-auto text-2xs text-muted-foreground tabular-nums shrink-0">
+            {dateStr}
+          </span>
+        </div>
+
+        {/* 第二行：key_changes 中文亮点（卡头直接展示，不需展开） */}
+        {(v.key_changes || []).length > 0 && (
+          <div className="mt-1.5 ml-6 flex flex-wrap gap-1">
+            {(v.key_changes || []).map((c, i) => (
+              <Pill key={i} variant="amber">{c}</Pill>
+            ))}
+          </div>
+        )}
       </button>
 
       {open && (

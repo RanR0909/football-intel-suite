@@ -467,15 +467,22 @@ class AppVersion(Base):
     version = Column(String(64), nullable=False)
     release_notes = Column(Text)
     release_notes_lang = Column(String(8))
-    release_notes_translated_zh = Column(Text)
+    release_notes_translated_zh = Column(Text)            # task 10 version_translate 写入
     translated_at = Column(DateTime)
     released_at = Column(DateTime)
     first_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # ---- task 11 version_classify (migration 0020) — 产品动态卡头价值信号 ----
+    version_type = Column(String(16))                     # feature/bugfix/localization/performance/other
+    key_changes_json = Column(Text)                       # JSON array of 中文短句 (1-3 个，≤20 字)
+    is_significant = Column(Boolean)                      # 是否值得卡片置顶高亮（feature 默认 true、纯 bugfix 默认 false）
+    classified_at = Column(DateTime)                      # 写入时间；NULL = 还没分类
 
     __table_args__ = (
         UniqueConstraint("competitor_id", "platform", "version", name="uniq_app_version"),
         Index("idx_app_versions_released_at", "released_at"),
         Index("idx_app_versions_comp_released", "competitor_id", "released_at"),
+        Index("idx_app_versions_classified", "classified_at"),
     )
 
 

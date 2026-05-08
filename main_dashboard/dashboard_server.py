@@ -1126,12 +1126,25 @@ class APIHandler(BaseHTTPRequestHandler):
             "SELECT v.id, c.name as competitor, v.platform, v.version, "
             "v.release_notes, v.release_notes_lang, "
             "v.release_notes_translated_zh as release_notes_zh, "
-            "v.translated_at, v.released_at, v.first_seen_at "
+            "v.translated_at, v.released_at, v.first_seen_at, "
+            "v.version_type, v.key_changes_json, v.is_significant, v.classified_at "
             "FROM app_versions v JOIN competitors c ON c.id = v.competitor_id "
             f"WHERE {' AND '.join(wheres)} "
-            "ORDER BY v.released_at DESC, v.id DESC LIMIT :limit"
+            # 重要更新置顶：is_significant=1 → 2 (排在第一)；is_significant=0 → 1；NULL（还没分类）→ 0
+            "ORDER BY COALESCE(v.is_significant, 0) DESC, "
+            "         v.released_at DESC, v.id DESC LIMIT :limit"
         )
         rows = _query(sql, **params)
+        # JSON 字段反序列化 + bool 强转（MySQL TINYINT(1) → int 0/1，前端期望 boolean | null）
+        for r in rows:
+            kc = r.get("key_changes_json")
+            try:
+                r["key_changes"] = json.loads(kc) if kc else []
+            except Exception:
+                r["key_changes"] = []
+            r.pop("key_changes_json", None)
+            sig = r.get("is_significant")
+            r["is_significant"] = bool(sig) if sig is not None else None
         return self._send_json({"versions": rows, "count": len(rows)})
 
     def api_version_related_reviews(self, version_id_str: str):
@@ -1185,9 +1198,11 @@ class APIHandler(BaseHTTPRequestHandler):
         """, cid=v["competitor_id"], ver=v["version"])
 
         # 评分变化（vs 上一版本）
+        # 注意：reviews 表的列名是 `score`（1-5 星），不是 `rating` — 之前 SQL 错误导致前端
+        # rating_change.before / after 永远是 null。
         rating_rows = _query(
-            "SELECT AVG(rating) as avg_rating FROM reviews "
-            "WHERE competitor_id = :cid AND version = :ver AND rating IS NOT NULL",
+            "SELECT AVG(score) as avg_rating FROM reviews "
+            "WHERE competitor_id = :cid AND version = :ver AND score IS NOT NULL",
             cid=v["competitor_id"], ver=v["version"],
         )
         rating_after = float(rating_rows[0]["avg_rating"]) if rating_rows and rating_rows[0]["avg_rating"] is not None else None
@@ -1204,8 +1219,8 @@ class APIHandler(BaseHTTPRequestHandler):
         if prev_version_rows:
             prev_ver = prev_version_rows[0]["version"]
             prev_rating_rows = _query(
-                "SELECT AVG(rating) as avg_rating FROM reviews "
-                "WHERE competitor_id = :cid AND version = :ver AND rating IS NOT NULL",
+                "SELECT AVG(score) as avg_rating FROM reviews "
+                "WHERE competitor_id = :cid AND version = :ver AND score IS NOT NULL",
                 cid=v["competitor_id"], ver=prev_ver,
             )
             if prev_rating_rows and prev_rating_rows[0]["avg_rating"] is not None:

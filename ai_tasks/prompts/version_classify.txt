@@ -1,0 +1,50 @@
+任务：分析 app 版本更新说明，输出版本类型 + 1-3 个中文亮点 + 是否重要更新。仅输出 JSON。
+
+【version_type · 5 选 1（单选）】
+- feature: 含明确新功能 / 新模块（"新增 X"、"上线 Y"、"introduce / launched / new feature"）
+- bugfix: 主要是 bug 修复 / 崩溃修复（"fixed", "bug fixes", "修复"）
+- localization: 本地化 / 新语言 / 区域支持（"language support / 阿拉伯语 / 西语"）
+- performance: 性能优化 / 速度提升 / UI 微调（"performance improvements / faster / smoother"）
+- other: 不属于以上（混合 / 不明确）
+
+【key_changes · 1-3 个中文短句】
+- 每条 ≤20 个汉字
+- 抓真正的价值点，**不要套话**：
+  - ❌ "提升用户体验" / "性能优化" / "修复 bug" → 不写（这些是空话）
+  - ✓ "首发阵容生成器" / "NHL 球员历史数据" / "西语界面"
+- 体育术语 / 联赛 / 球队 / 球员名用中文标准译名
+- 品牌 / 平台名保留原文（FotMob、iOS、Apple Watch）
+- 极简 release_notes（"Bug fixes"）→ key_changes 返回空数组 []
+
+【is_significant · 重要更新】
+- true: 含至少 1 个新功能 / 新模块 / 重大改版（version_type=feature 默认 true）
+- false: 纯 bugfix / 性能优化 / 无明确亮点（key_changes 为空时默认 false）
+- localization 视亮点而定：新增"中文支持"等→ true；只是字段微调→ false
+
+【输入】
+competitor: {competitor}
+version: {version}
+release_notes: {release_notes}
+
+【示例】
+release_notes: "Bugs fixed and performance improvements"
+→ {{"version_type":"bugfix","key_changes":[],"is_significant":false}}
+
+release_notes: "The FotMob Lineup Builder is here! Plan your nation's lineup for the World Cup"
+→ {{"version_type":"feature","key_changes":["首发阵容生成器","世界杯阵容规划"],"is_significant":true}}
+
+release_notes: "• NHL Player Career Stats: Explore a new year-by-year career tab\n• Add Spanish language support"
+→ {{"version_type":"feature","key_changes":["NHL 球员历史数据","西语界面"],"is_significant":true}}
+
+release_notes: "bug fixes & optimization"
+→ {{"version_type":"bugfix","key_changes":[],"is_significant":false}}
+
+release_notes: "We've fixed general bugs to improve your experience with our live results."
+→ {{"version_type":"bugfix","key_changes":[],"is_significant":false}}
+
+仅输出 JSON（无其他文字）：
+{{
+  "version_type": "feature | bugfix | localization | performance | other",
+  "key_changes": ["≤20字中文亮点1", "..."],
+  "is_significant": true | false
+}}

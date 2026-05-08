@@ -136,6 +136,28 @@
       "prompt": {
         "file": "ai_tasks/prompts/post_translate.txt"
       }
+    },
+    "version_translate": {
+      "_doc": "任务 10 — app_versions.release_notes (英/葡/西) → 中文，存 release_notes_translated_zh。产品动态页展开看完整版本说明用。",
+      "model": "haiku_4_5",
+      "output_format": "json",
+      "json_strip_markdown": true,
+      "max_tokens": 1024,
+      "temperature": 0.1,
+      "prompt": {
+        "file": "ai_tasks/prompts/version_translate.txt"
+      }
+    },
+    "version_classify": {
+      "_doc": "任务 11 — app_versions.release_notes → version_type + key_changes (1-3 个中文短句) + is_significant。产品动态页卡头价值信号 + 重要更新置顶用。",
+      "model": "haiku_4_5",
+      "output_format": "json",
+      "json_strip_markdown": true,
+      "max_tokens": 256,
+      "temperature": 0.0,
+      "prompt": {
+        "file": "ai_tasks/prompts/version_classify.txt"
+      }
     }
   }
 }
