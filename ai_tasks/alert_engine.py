@@ -3,7 +3,7 @@
 Spec: AI_tasks_spec_v1_1.md（任务 3 上层）
 
 每日 02:30 跑一次（在 daily_sync 之后），扫各 fact 表找符合 7 类规则的事件：
-  ranking    · 排名突变（24h 内 ↑/↓ ≥ 5 名）
+  ranking    · 排名突变（7 天内 ↑/↓ ≥ 5 名）
   commercial · IAP 价格变动（涨跌 ≥ ±10% 且影响 ≥ 5 区）
   news       · Google News business keyword 命中
   release    · 新版本发布（version 字符串变化）
@@ -56,32 +56,47 @@ VALID_TYPES = ["ranking", "commercial", "news", "release", "rating", "churn", "a
 # ---- 规则 1: ranking ----------------------------------------------------------
 
 def rule_ranking() -> list[dict]:
-    """24h 内 rank 变动 ≥ 5 名（任意方向）。
+    """7 天内 rank 变动 ≥ 5 名（任意方向）。
 
-    数据源：market_rank_snapshots（appstore_rank / appmagic / sensor_tower）
+    数据源：market_rank_snapshots（appstore_rank / appmagic / sensor_tower / androidrank）
+
+    历史：原版规则用相邻 1 天 self-join，但实际 cron 频率非每日（手动周更），导致永远
+    匹配不到相邻日。改成"取最新 snapshot vs ≤ 6 天前最近的 snapshot"，跟 Rankings 页
+    KPI / 表格"周变化"列保持口径一致。
+
+    匹配维度对齐 /api/rank：(source, name/competitor_id, platform, region_code) 四元组。
+    platform / region_code 用 NULL-safe equality (<=>) 处理 appmagic global / 不区分
+    平台的源。
     """
     if not _db.is_mysql_enabled():
         return []
     out: list[dict] = []
     with _db.session() as s:
         rows = s.execute(text("""
-            SELECT t.competitor_id,
-                   c.name as app_name,
-                   t.region_code,
-                   t.source,
+            SELECT t.competitor_id, c.name as app_name,
+                   t.region_code, t.source, t.platform,
                    t.rank_value as new_rank,
-                   y.rank_value as old_rank
+                   t.snapshot_date as new_date,
+                   (SELECT m2.rank_value FROM market_rank_snapshots m2
+                    WHERE m2.competitor_id = t.competitor_id
+                      AND m2.region_code <=> t.region_code
+                      AND m2.platform    <=> t.platform
+                      AND m2.source       = t.source
+                      AND m2.snapshot_date <= DATE_SUB(t.snapshot_date, INTERVAL 6 DAY)
+                    ORDER BY m2.snapshot_date DESC LIMIT 1) as old_rank
             FROM market_rank_snapshots t
-            JOIN market_rank_snapshots y
-              ON y.competitor_id = t.competitor_id
-             AND y.region_code   <=> t.region_code
-             AND y.source        = t.source
-             AND y.snapshot_date = DATE_SUB(t.snapshot_date, INTERVAL 1 DAY)
             JOIN competitors c ON c.id = t.competitor_id
-            WHERE t.snapshot_date = CURDATE()
+            WHERE t.snapshot_date = (
+                SELECT MAX(m3.snapshot_date) FROM market_rank_snapshots m3
+                WHERE m3.competitor_id = t.competitor_id
+                  AND m3.region_code <=> t.region_code
+                  AND m3.platform    <=> t.platform
+                  AND m3.source       = t.source
+            )
               AND t.rank_value IS NOT NULL
-              AND y.rank_value IS NOT NULL
-              AND ABS(t.rank_value - y.rank_value) >= 5
+              AND t.snapshot_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+            HAVING old_rank IS NOT NULL
+               AND ABS(new_rank - old_rank) >= 5
         """)).fetchall()
         for r in rows:
             change = int(r.old_rank - r.new_rank)   # 正数 = ↑（数字下降 = 排名上升）
@@ -93,12 +108,13 @@ def rule_ranking() -> list[dict]:
                 "metadata": {
                     "region": r.region_code or "global",
                     "source": r.source,
+                    "platform": r.platform,
                     "old_rank": int(r.old_rank),
                     "new_rank": int(r.new_rank),
                     "change": change,
-                    "rule_triggered": "rank_delta_5plus_24h",
+                    "rule_triggered": "rank_delta_5plus_7d",
                 },
-                "rule_triggered": "rank_delta_5plus_24h",
+                "rule_triggered": "rank_delta_5plus_7d",
             })
     return out
 

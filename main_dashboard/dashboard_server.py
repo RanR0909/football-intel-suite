@@ -537,18 +537,46 @@ class APIHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _derive_ranking_alerts_from_db(limit: int) -> list:
-        """从 market_rank_snapshots 直接派生 ranking alerts（最近一天 |delta|≥10）。"""
+        """从 market_rank_snapshots 直接派生 ranking alerts（alerts 表为空时 fallback）。
+
+        口径与 ai_tasks/alert_engine.rule_ranking 对齐：
+          · 取每个 (source, name, platform, region) 的最新 snapshot
+          · vs 最近 ≤ 6 天前的同维度 snapshot
+          · |周变化| ≥ 10 触发 alert（warn/danger 阈值跟原 |delta|≥10 一致）
+        """
         try:
             rows = _query("""
-                SELECT m.source, m.region_code, COALESCE(c.name, m.name) AS app,
-                       m.rank_value, m.delta, m.snapshot_date
-                FROM market_rank_snapshots m
-                LEFT JOIN competitors c ON c.id = m.competitor_id
-                WHERE m.snapshot_date = CURDATE()
-                  AND m.delta IS NOT NULL
-                  AND ABS(m.delta) >= 10
-                ORDER BY ABS(m.delta) DESC LIMIT :lim
+                SELECT t.source, t.region_code, t.platform,
+                       COALESCE(c.name, t.name) AS app,
+                       t.rank_value, t.snapshot_date,
+                       (SELECT m2.rank_value FROM market_rank_snapshots m2
+                        WHERE m2.source = t.source
+                          AND COALESCE(m2.name, '') = COALESCE(t.name, '')
+                          AND m2.platform <=> t.platform
+                          AND m2.region_code <=> t.region_code
+                          AND m2.snapshot_date <= DATE_SUB(t.snapshot_date, INTERVAL 6 DAY)
+                        ORDER BY m2.snapshot_date DESC LIMIT 1) as old_rank
+                FROM market_rank_snapshots t
+                LEFT JOIN competitors c ON c.id = t.competitor_id
+                WHERE t.snapshot_date = (
+                    SELECT MAX(m3.snapshot_date) FROM market_rank_snapshots m3
+                    WHERE m3.source = t.source
+                      AND COALESCE(m3.name, '') = COALESCE(t.name, '')
+                      AND m3.platform <=> t.platform
+                      AND m3.region_code <=> t.region_code
+                )
+                  AND t.rank_value IS NOT NULL
+                  AND t.snapshot_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                HAVING old_rank IS NOT NULL
+                   AND ABS(rank_value - old_rank) >= 10
+                ORDER BY ABS(rank_value - old_rank) DESC LIMIT :lim
             """, lim=limit)
+            # 把"派生 delta"塞回行里，下面循环用
+            for r in rows or []:
+                if r.get("old_rank") is not None and r.get("rank_value") is not None:
+                    r["delta"] = int(r["old_rank"] - r["rank_value"])
+                else:
+                    r["delta"] = None
         except Exception:
             return []
         out = []
