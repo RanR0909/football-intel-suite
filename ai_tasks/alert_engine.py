@@ -203,6 +203,7 @@ def rule_news() -> list[dict]:
     """Google News business keyword 命中（is_biz=true）当周。
 
     数据源：data/async_google_news.json（每周 RSS 抓取产物）
+    去重：alerts 表里已发过的 (app, link) 直接跳过，避免重复入库。
     """
     p = _PROJECT_ROOT / "data" / "async_google_news.json"
     if not p.exists():
@@ -211,6 +212,16 @@ def rule_news() -> list[dict]:
         data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return []
+    # 拉出 alerts 表里已存在的 news 链接（按 app + link）
+    already: set[tuple[str, str]] = set()
+    if _db.is_mysql_enabled():
+        with _db.session() as s:
+            rows = s.execute(text("""
+                SELECT app_name,
+                       JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.link')) AS link
+                FROM alerts WHERE alert_type='news'
+            """)).fetchall()
+            already = {(r.app_name, r.link) for r in rows if r.link}
     out: list[dict] = []
     seen: set[tuple] = set()
     for rec in data:
@@ -221,7 +232,7 @@ def rule_news() -> list[dict]:
                 continue
             link = it.get("link") or ""
             key = (app, link)
-            if key in seen:
+            if key in seen or (app, link[:512]) in already:
                 continue
             seen.add(key)
             out.append({
@@ -245,12 +256,14 @@ def rule_release() -> list[dict]:
     """同竞品同区在 7 天内出现新 version 字符串（之前没见过）。
 
     数据源：reviews 表 version 字段 — 评论里的 app version 暴露上线节奏
+    去重：alerts 表里已发过的 (app, version) 直接跳过，避免重复入库。
     """
     if not _db.is_mysql_enabled():
         return []
     out: list[dict] = []
     with _db.session() as s:
         # 严格条件：每个 (app, version) 只取首次出现日 = 今日 - 14d 内 + 之前 60d 没见过 + obs ≥ 5
+        # AND alerts 表里没发过同 (app, version)
         rows = s.execute(text("""
             SELECT c.name as app_name,
                    r.version,
@@ -267,6 +280,12 @@ def rule_release() -> list[dict]:
                   AND r2.version = r.version
                   AND r2.fetched_at < DATE_SUB(NOW(), INTERVAL 14 DAY)
                   AND r2.fetched_at >= DATE_SUB(NOW(), INTERVAL 75 DAY)
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM alerts a
+                WHERE a.alert_type = 'release'
+                  AND a.app_name = c.name
+                  AND JSON_UNQUOTE(JSON_EXTRACT(a.metadata_json, '$.version')) = r.version
               )
             GROUP BY c.name, r.version
             HAVING COUNT(*) >= 5
@@ -409,7 +428,7 @@ def rule_ads() -> list[dict]:
                    SUM(CASE WHEN a.fetched_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) as new_count,
                    SUM(CASE WHEN a.fetched_at <  DATE_SUB(NOW(), INTERVAL 7 DAY)
                               AND a.fetched_at >= DATE_SUB(NOW(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) as old_count,
-                   COUNT(DISTINCT a.region) as regions_concentrated
+                   COUNT(DISTINCT a.region_code) as regions_concentrated
             FROM ad_creatives a
             JOIN competitors c ON c.id = a.competitor_id
             WHERE a.fetched_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
