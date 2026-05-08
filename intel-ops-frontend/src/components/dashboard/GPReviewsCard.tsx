@@ -17,7 +17,7 @@ function relTime(s: string | null): string {
 
 /** 总览·GP 评论 — 3 条带标签的代表性评论 */
 export default function GPReviewsCard() {
-  const { data, isLoading } = useReviews({ since: "3d", limit: 8 })
+  const { data, isLoading } = useReviews({ since: "30d", limit: 8 })
   const rows = (data?.reviews || []).slice(0, 3)
 
   return (

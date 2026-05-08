@@ -17,7 +17,7 @@ function hostOf(url: string | null): string {
 
 /** 总览·商业新闻 — 3 条最新商业事件 */
 export default function NewsCard() {
-  const { data, isLoading } = useNews({ since: "7d", limit: 10 })
+  const { data, isLoading } = useNews({ since: "30d", limit: 10 })
   const top = (data?.news || []).slice(0, 3)
 
   return (
