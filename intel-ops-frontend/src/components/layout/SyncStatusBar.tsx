@@ -14,7 +14,7 @@ const STATUS_STYLE: Record<Status, { icon: React.ElementType; color: string }> =
 /** fb_adlib_us / fb_adlib_gb / ... 折叠成单个 fb_adlib bucket — 每国一行徽章太挤。
  *  sensor_tower_ios / sensor_tower_android 同理 → 折叠成 sensor_tower。
  *  bucket status = 任一失败 → fail；全 ok → ok；其它 → pending。 */
-const PER_COUNTRY_PREFIXES = ["fb_adlib_", "sensor_tower_"]
+const PER_COUNTRY_PREFIXES = ["fb_adlib_", "sensor_tower_", "iap_pricing_"]
 
 /** 从 sources map 折叠 per-country bucket，并按状态/字母序排序。 */
 function collapseAndSort(sources: Record<string, { status?: string; last_success?: string | null }>) {

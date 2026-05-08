@@ -8,12 +8,22 @@ import { useIap } from "@/hooks/api/useIap"
 import { useUrlFilters } from "@/hooks/useUrlFilters"
 import { COMPETITORS, REGION_LABELS, type Region } from "@/types/domain"
 
+// IAP 抓 4 区：US / ID / MY / CA（CN 已废弃）
+const REGION_OPTIONS = [
+  { value: "",   label: "全部" },
+  { value: "us", label: REGION_LABELS.us },
+  { value: "id", label: REGION_LABELS.id },
+  { value: "my", label: REGION_LABELS.my },
+  { value: "ca", label: REGION_LABELS.ca },
+]
+
 export default function IAP() {
-  const { value, setValue } = useUrlFilters({ competitor: "" })
+  const { value, setValue } = useUrlFilters({ competitor: "", region: "" })
   const competitor = value("competitor")
+  const region = value("region")
 
   const { data, isLoading, isError, refetch } = useIap({
-    competitor, limit: 1000,
+    competitor, region, limit: 1000,
   })
   // 按 spec：IAP 页只展示 9 竞品，AF 不渲染
   const all = (data?.iap_items || []).filter((it) => COMPETITORS.includes(it.competitor as typeof COMPETITORS[number]))
@@ -53,7 +63,13 @@ export default function IAP() {
         <KpiCard label="价格记录" value={kpi.records} hint="原始行数" />
       </KpiRow>
 
-      <div className="mb-3">
+      <div className="mb-3 space-y-2">
+        <FilterChips
+          label="区域"
+          options={REGION_OPTIONS}
+          value={region}
+          onChange={(v) => setValue("region", v)}
+        />
         <FilterChips
           label="竞品"
           options={[
