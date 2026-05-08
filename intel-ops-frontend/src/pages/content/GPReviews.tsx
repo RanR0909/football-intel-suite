@@ -23,11 +23,13 @@ import {
 } from "@/types/domain"
 import type { ReviewLabel, ReviewsAggregatedTab, ReviewsAggregatedResponse } from "@/types/api"
 
-/** "raw_problems" 是非聚合 tab — 直接列 complaint 评论原文（≤2 星优先）。
- *  其他 4 个走 useReviewsAggregated。 */
-type GPTab = ReviewsAggregatedTab | "raw_problems"
+/** "top" = 前端合成 (problems + praise 按 total_mentions desc)；
+ *  "raw_problems" = 非聚合 tab，直接列 complaint 评论原文（≤2 星优先）；
+ *  其他 4 个直接走 useReviewsAggregated。 */
+type GPTab = "top" | ReviewsAggregatedTab | "raw_problems"
 
 const TABS: Array<{ value: GPTab; label: string }> = [
+  { value: "top",           label: "讨论 Top" },   // 问题 + 好评 合并按提及降序
   { value: "problems",      label: "问题 Top" },
   { value: "raw_problems",  label: "问题原文" },   // 用户重点：直接读差评原文
   { value: "praise",        label: "好评 Top" },
@@ -42,15 +44,29 @@ const LABEL_KEYS: ReviewLabel[] = [
 
 export default function GPReviews() {
   const { value, setValue } = useUrlFilters({
-    tab: "problems", competitor: "", since: "7d",
+    tab: "top", competitor: "", since: "7d",
   })
-  const tab = (value("tab") || "problems") as GPTab
+  const tab = (value("tab") || "top") as GPTab
   const competitor = value("competitor")
   const since = value("since")
 
-  // 主聚合数据（每个聚合 tab；raw_problems tab 不用）
-  const aggTab: ReviewsAggregatedTab = tab === "raw_problems" ? "problems" : tab
+  // 主聚合数据。
+  // top tab 合成自 problems + praise 两份；raw_problems tab 不用单独聚合（走 raw reviews）；
+  // 其他 4 个 tab 直接拉对应的 aggregated。
+  const aggTab: ReviewsAggregatedTab =
+    tab === "raw_problems" ? "problems" :
+    tab === "top" ? "problems" : tab
   const { data: agg, isLoading, isError, refetch } = useReviewsAggregated(aggTab, 30)
+  // top tab 额外拿 praise（problems 已经走 agg；二者合并）
+  const { data: aggPraiseForTop } = useReviewsAggregated("praise", 30)
+  const topItems = useMemo(() => {
+    if (tab !== "top") return [] as Array<ReviewsAggregatedResponse["items"][number] & { _kind: "problem" | "praise" }>
+    const merged: Array<ReviewsAggregatedResponse["items"][number] & { _kind: "problem" | "praise" }> = []
+    for (const it of agg?.items || []) merged.push({ ...it, _kind: "problem" })
+    for (const it of aggPraiseForTop?.items || []) merged.push({ ...it, _kind: "praise" })
+    merged.sort((a, b) => b.total_mentions - a.total_mentions)
+    return merged.slice(0, 30)
+  }, [tab, agg, aggPraiseForTop])
 
   // 用于 KPI 计算和底部矩阵的原始 reviews
   // raw_problems tab 同时拿 label='complaint' 的全量原文（最多 500 条）
@@ -122,6 +138,15 @@ export default function GPReviews() {
 
       {tab === "raw_problems" ? (
         <RawProblemsTab reviews={allReviews} />
+      ) : tab === "top" ? (
+        <>
+          {isLoading && <SkeletonTable rows={6} />}
+          {isError && <EmptyState type="error" onRetry={() => refetch()} />}
+          {!isLoading && !isError && topItems.length === 0 && (
+            <EmptyState type="empty" hint="entity_extract 还未产出 problem / praise 主题" />
+          )}
+          {topItems.length > 0 && <AggregatedList items={topItems} tab="problems" showKind />}
+        </>
       ) : (
         <>
           {isLoading && <SkeletonTable rows={6} />}
@@ -161,13 +186,22 @@ function KpiTopEntity({ label, resp, prefix = "" }: {
 }
 
 function AggregatedList({
-  items, tab,
-}: { items: ReviewsAggregatedResponse["items"]; tab: ReviewsAggregatedTab }) {
+  items, tab, showKind = false,
+}: {
+  items: Array<ReviewsAggregatedResponse["items"][number] & { _kind?: "problem" | "praise" }>;
+  tab: ReviewsAggregatedTab;
+  showKind?: boolean;
+}) {
   return (
     <div className="space-y-2">
       {items.map((it) => (
-        <article key={it.canonical_id} className="border border-border-soft rounded-md bg-card overflow-hidden">
+        <article key={`${it._kind ?? ""}:${it.canonical_id}`} className="border border-border-soft rounded-md bg-card overflow-hidden">
           <header className="flex items-baseline gap-2 px-3 h-9 bg-muted/30 border-b border-border-soft">
+            {showKind && it._kind && (
+              <Pill variant={it._kind === "problem" ? "red" : "green"}>
+                {it._kind === "problem" ? "问题" : "好评"}
+              </Pill>
+            )}
             {/* 中文翻译优先；翻译过的同时把原文小字附在后面便于交叉确认 */}
             <span className="text-sm font-medium">
               {it.chinese_name || it.primary_name}
@@ -222,7 +256,7 @@ function AggregatedList({
       ))}
       {items.length === 30 && (
         <div className="text-2xs text-center text-muted-foreground py-2">
-          已显示前 30 个 {tab} 主题
+          已显示前 30 个{showKind ? "讨论" : tab}主题
         </div>
       )}
     </div>
