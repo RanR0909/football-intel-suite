@@ -294,10 +294,16 @@ class APIHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        # failed_ai_jobs (unresolved)
+        # failed_ai_jobs (unresolved) — 与 /api/failed-ai-jobs 的 latest_round 口径对齐：
+        # 每个 task 只算其最近一次失败 6h 内的记录，避免上轮老死信永远把侧栏徽章顶到 99+
         failed_ai = _query(
-            "SELECT task_name, COUNT(*) as n FROM failed_ai_jobs "
-            "WHERE resolved_at IS NULL GROUP BY task_name"
+            "SELECT f.task_name, COUNT(*) as n FROM failed_ai_jobs f "
+            "WHERE f.resolved_at IS NULL "
+            "  AND f.last_attempt_at >= ("
+            "    SELECT MAX(last_attempt_at) - INTERVAL 6 HOUR "
+            "    FROM failed_ai_jobs WHERE task_name = f.task_name AND resolved_at IS NULL"
+            "  ) "
+            "GROUP BY f.task_name"
         )
 
         # candidates (待审阅 = is_relevant=true + reviewed=false 不直接存，前端 localStorage 判定)
