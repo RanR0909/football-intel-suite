@@ -47,7 +47,7 @@ DATA_OUT = _PROJECT_ROOT / "data" / "async_sensor_tower.json"
 
 PAGE_TIMEOUT_SEC = 30
 SCRAPE_REGION = "US"   # 概览页默认市场（免费账号能切其他国家）
-SCRAPE_PLATFORM = "ios"
+DEFAULT_PLATFORM = "ios"   # 通过 --platform CLI 切换；daily_sync 拆 ios/android 两个 task
 
 
 # ---- DOM 提取（基于全文 regex — 比 element walking 更可靠）-----------------
@@ -173,12 +173,12 @@ async def _wait_overview_ready(page, timeout_s: int = PAGE_TIMEOUT_SEC) -> None:
     raise TimeoutError(f"Sensor Tower 概览页未在 {timeout_s}s 内加载完成")
 
 
-async def _fetch_app(page, app_name: str, app_id: str) -> dict:
+async def _fetch_app(page, app_name: str, app_id: str, platform: str) -> dict:
     url = (
         f"https://app.sensortower.com/overview/{app_id}"
-        f"?country={SCRAPE_REGION}&os={SCRAPE_PLATFORM}"
+        f"?country={SCRAPE_REGION}&os={platform}"
     )
-    print(f"[{app_name}] {url}")
+    print(f"[{app_name}] [{platform}] {url}")
     await page.goto(url, wait_until="domcontentloaded")
     await _wait_overview_ready(page)
     # 给 SPA 异步刷数据一点时间
@@ -226,12 +226,14 @@ async def cmd_login() -> None:
 
 # ---- 命令：scrape ---------------------------------------------------------
 
-async def cmd_scrape(headed: bool = False) -> Path:
+async def cmd_scrape(headed: bool = False, platform: str = DEFAULT_PLATFORM) -> Path:
     if not PROFILE_DIR.exists():
         raise LoginRequired(
             f"找不到 {PROFILE_DIR}。请先跑：\n"
             f"  python3 -m market_rank.scrape_sensor_tower login"
         )
+    if platform not in ("ios", "android"):
+        raise ValueError(f"--platform 必须是 ios / android，收到: {platform!r}")
 
     competitors = get_comment_competitors()
     results: list[dict] = []
@@ -247,12 +249,16 @@ async def cmd_scrape(headed: bool = False) -> Path:
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
             for app_name, comp in competitors.items():
-                ios_id = str(comp.get("ios") or comp.get("app_id") or "")
-                if not ios_id:
-                    print(f"[{app_name}] 没有 ios id，跳过", file=sys.stderr)
+                # iOS 用 ios numeric id；Android 用 gp_package（com.xxx.yyy 字符串）
+                if platform == "ios":
+                    app_id = str(comp.get("ios") or comp.get("app_id") or "")
+                else:
+                    app_id = str(comp.get("gp_package") or comp.get("android") or "")
+                if not app_id:
+                    print(f"[{app_name}] 没有 {platform} id，跳过", file=sys.stderr)
                     continue
                 try:
-                    data = await _fetch_app(page, app_name, ios_id)
+                    data = await _fetch_app(page, app_name, app_id, platform)
                 except LoginRequired:
                     raise
                 except Exception as e:
@@ -260,6 +266,7 @@ async def cmd_scrape(headed: bool = False) -> Path:
                     data = {"error": str(e)}
                 rec = {
                     "source": "sensor_tower",
+                    "platform": platform,
                     "competitor": app_name,
                     "region": SCRAPE_REGION.lower(),
                     "timestamp": now_iso,
@@ -273,10 +280,17 @@ async def cmd_scrape(headed: bool = False) -> Path:
             except Exception:
                 pass
 
-    DATA_OUT.parent.mkdir(parents=True, exist_ok=True)
-    DATA_OUT.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    # JSON 输出按 platform 拆：
+    #   ios     -> async_sensor_tower.json     （保持原路径，data_pipeline.aggregator 在读）
+    #   android -> async_sensor_tower_android.json
+    if platform == "ios":
+        out_path = DATA_OUT
+    else:
+        out_path = _PROJECT_ROOT / "data" / f"async_sensor_tower_{platform}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     ok = sum(1 for r in results if not (r.get("data") or {}).get("error"))
-    print(f"\n保存完成 -> {DATA_OUT}（{len(results)} record，{ok} 条有数据）")
+    print(f"\n保存完成 -> {out_path}（{len(results)} record，{ok} 条有数据）")
 
     # 双写 MySQL: market_rank_snapshots
     db_rows = []
@@ -291,6 +305,7 @@ async def cmd_scrape(headed: bool = False) -> Path:
         db_rows.append({
             "name": r.get("competitor"),
             "competitor": r.get("competitor"),     # 都是 tracked
+            "platform": r.get("platform") or platform,
             "region": r.get("region", "us").lower(),
             "rank": int(rk) if rk else None,
             "delta": None,
@@ -301,8 +316,8 @@ async def cmd_scrape(headed: bool = False) -> Path:
     if db_rows:
         n_db = dao_rank.bulk_insert_rank_snapshots("sensor_tower", db_rows)
         if n_db:
-            print(f"  MySQL: 写入 {n_db} 条 rank_snapshot（含 downloads_num + revenue_num）")
-    return DATA_OUT
+            print(f"  MySQL: 写入 {n_db} 条 rank_snapshot ({platform})")
+    return out_path
 
 
 # ---- main -----------------------------------------------------------------
@@ -311,13 +326,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=["login", "scrape"], nargs="?", default="scrape")
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--platform", choices=["ios", "android"], default=DEFAULT_PLATFORM,
+                    help=f"抓 ios 或 android 平台（默认 {DEFAULT_PLATFORM}）")
     args = ap.parse_args()
 
     if args.command == "login":
         asyncio.run(cmd_login())
     else:
         try:
-            asyncio.run(cmd_scrape(headed=args.headed))
+            asyncio.run(cmd_scrape(headed=args.headed, platform=args.platform))
         except LoginRequired as e:
             print(f"❌ {e}", file=sys.stderr)
             sys.exit(2)

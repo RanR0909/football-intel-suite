@@ -371,7 +371,10 @@ function AggregatedTab({ dim, since }: { dim: CommunityAggregatedDim; since: str
             {rows.map((r) => (
               <tr key={r.canonical_id} className="border-t border-border-soft hover:bg-muted/30">
                 <td className="px-3 py-2">
-                  <span className="font-medium">{r.primary_name}</span>
+                  <span className="font-medium">{r.chinese_name || r.primary_name}</span>
+                  {r.chinese_name && r.chinese_name !== r.primary_name && (
+                    <span className="ml-1 italic text-2xs text-muted-foreground">({r.primary_name})</span>
+                  )}
                   <span className="ml-1 font-mono text-2xs text-muted-foreground">{r.canonical_id}</span>
                 </td>
                 <td className="text-right px-3 py-2 tabular-nums font-mono">{r.post_count}</td>

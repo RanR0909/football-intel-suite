@@ -56,8 +56,9 @@ DATA_OUT = _PROJECT_ROOT / "data" / "async_iap_pricing.json"
 RAW_OUT = _PROJECT_ROOT / "data" / "raw" / "iap_pricing.json"
 
 QIMAI_URL = "https://www.qimai.cn/app/baseinfo/appid/{appid}/country/{country}"
-# qimai 默认看 cn 区，价格币种就是 CNY（其它 region Apple IP redirect 也躲不过）
-DEFAULT_COUNTRY = "cn"
+# 默认抓美区 — 价格 USD，对全球订阅定价的参考意义最强
+# (历史曾用 cn，2026-05 改为 us 因 cn 价格 CNY 单一区参考价值低)
+DEFAULT_COUNTRY = "us"
 
 # Vue historyData 提取（来源：qimai_iap_scraper/qimai_iap.py）
 EXTRACT_JS = r"""
@@ -264,7 +265,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("command", nargs="?", default="scrape", choices=["login", "scrape"])
     p.add_argument("--headed", action="store_true", help="抓取时显示浏览器（调试）")
-    p.add_argument("--country", default=DEFAULT_COUNTRY, help="qimai country 参数（默认 cn）")
+    p.add_argument("--country", default=DEFAULT_COUNTRY, help="qimai country 参数（默认 us）")
     args = p.parse_args()
     if args.command == "login":
         asyncio.run(login_flow())
