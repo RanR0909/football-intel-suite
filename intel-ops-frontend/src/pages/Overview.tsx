@@ -11,8 +11,10 @@ import NewsCard from "@/components/dashboard/NewsCard"
 import AdsCard from "@/components/dashboard/AdsCard"
 
 /**
- * 总览看点 — 30 秒扫读 9 个板块今天有什么
- * 页面 spec：INTEL-OPS_前端实现文档_v2.md §9.1
+ * 总览看点 — 内容主导（竞品在做什么 / 用户怎么反应）
+ *  · 主视图（5 内容卡）：产品动态 / GP 评论 / 社媒评论 / 商业新闻 / 广告投放（双列）
+ *  · 副视图（4 数据卡，4 列紧凑）：排名异动 / 收入下载 / IAP 内购 / 网站数据
+ *  · 自家 AF 数据不在总览展示（参考 spec：总览以竞品信号为主）
  */
 export default function Overview() {
   return (
@@ -23,26 +25,24 @@ export default function Overview() {
         <SyncStatusBar />
       </div>
 
-      {/* 数据类（4 卡 · 2×2） */}
-      <section className="mb-4">
-        <h2 className="text-2xs uppercase tracking-wider text-muted-foreground mb-2">数据类</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <RankingsCard />
-          <RevenueCard />
-          <IapCard />
-          <WebsiteCard />
-        </div>
-      </section>
-
-      {/* 内容类（5 卡 · 2×2 + 1 跨双列） */}
-      <section>
-        <h2 className="text-2xs uppercase tracking-wider text-muted-foreground mb-2">内容类</h2>
+      {/* 主视图 · 内容类（5 卡 · 2 列 · AdsCard 占双列） */}
+      <section className="mb-5">
         <div className="grid grid-cols-2 gap-3">
           <ReleasesCard />
           <GPReviewsCard />
           <SocialCard />
           <NewsCard />
           <AdsCard />
+        </div>
+      </section>
+
+      {/* 副视图 · 数据类（4 卡 · 4 列 · 紧凑；无数据时折叠成单行） */}
+      <section>
+        <div className="grid grid-cols-4 gap-3">
+          <RankingsCard />
+          <RevenueCard />
+          <IapCard />
+          <WebsiteCard />
         </div>
       </section>
     </div>

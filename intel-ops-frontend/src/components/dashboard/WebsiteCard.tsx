@@ -1,67 +1,69 @@
 import DigestCard from "@/components/shared/DigestCard"
 import { useWebsite } from "@/hooks/api/useWebsite"
 import { Skeleton } from "@/components/shared/Skeleton"
-import { formatCompactNumber, formatPct } from "@/lib/utils"
+import { formatCompactNumber } from "@/lib/utils"
 import { BASELINE_APP } from "@/types/domain"
 
-/** 总览·网站数据 — AF 4 核心指标 + 竞品 Top 1（按月访问量）*/
+/**
+ * 总览·网站数据（仅竞品冠军，AF 数据不展示）
+ *  · 访问冠军 / 停留冠军 / 全球排名 Top
+ */
 export default function WebsiteCard() {
   const { data, isLoading } = useWebsite({})
   const rows = data?.website || []
-  const af = rows.find((r) => r.competitor === BASELINE_APP)
   const competitors = rows.filter((r) => r.competitor !== BASELINE_APP)
-  const top = [...competitors].sort(
-    (a, b) => (b.monthly_visits_num || 0) - (a.monthly_visits_num || 0)
-  )[0]
+
+  const visitsChamp = [...competitors]
+    .filter((r) => r.monthly_visits_num != null)
+    .sort((a, b) => (b.monthly_visits_num || 0) - (a.monthly_visits_num || 0))[0]
+  const durationChamp = [...competitors]
+    .filter((r) => r.avg_visit_duration_sec != null)
+    .sort((a, b) => (b.avg_visit_duration_sec || 0) - (a.avg_visit_duration_sec || 0))[0]
+  const rankChamp = [...competitors]
+    .filter((r) => r.global_rank != null)
+    .sort((a, b) => (a.global_rank || Infinity) - (b.global_rank || Infinity))[0]
+
+  const noData = !isLoading && !visitsChamp && !durationChamp && !rankChamp
+  if (noData) {
+    return (
+      <DigestCard
+        title="网站数据"
+        detailHref="/data/website"
+        collapsed
+        emptyMsg="暂无 Similarweb 数据"
+      />
+    )
+  }
 
   return (
-    <DigestCard
-      title="网站数据"
-      category="data"
-      detailHref="/data/website"
-      meta={af ? `${af.snapshot_month} · Similarweb` : "—"}
-    >
-      {isLoading && <Skeleton className="h-20" />}
-      {!isLoading && af && (
-        <div className="text-xs space-y-1">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <div className="text-2xs text-muted-foreground">月访问</div>
-              <div className="font-mono tabular-nums">
-                {af.monthly_visits || formatCompactNumber(af.monthly_visits_num)}
-              </div>
+    <DigestCard title="网站数据" detailHref="/data/website">
+      {isLoading && <Skeleton className="h-16" />}
+      {!isLoading && (
+        <div className="text-xs">
+          {visitsChamp && (
+            <div className="flex items-baseline gap-2 py-1 border-b border-border-soft last:border-0">
+              <span className="text-muted-foreground text-2xs w-16 shrink-0">访问冠军</span>
+              <span className="font-medium truncate flex-1">{visitsChamp.competitor}</span>
+              <span className="font-mono tabular-nums">
+                {visitsChamp.monthly_visits || formatCompactNumber(visitsChamp.monthly_visits_num)}
+              </span>
             </div>
-            <div>
-              <div className="text-2xs text-muted-foreground">平均停留</div>
-              <div className="font-mono tabular-nums">{af.avg_visit_duration || "—"}</div>
+          )}
+          {durationChamp && (
+            <div className="flex items-baseline gap-2 py-1 border-b border-border-soft last:border-0">
+              <span className="text-muted-foreground text-2xs w-16 shrink-0">停留冠军</span>
+              <span className="font-medium truncate flex-1">{durationChamp.competitor}</span>
+              <span className="font-mono tabular-nums">{durationChamp.avg_visit_duration || "—"}</span>
             </div>
-            <div>
-              <div className="text-2xs text-muted-foreground">跳出率</div>
-              <div className="font-mono tabular-nums">{formatPct(af.bounce_rate)}</div>
+          )}
+          {rankChamp && rankChamp.global_rank != null && (
+            <div className="flex items-baseline gap-2 py-1">
+              <span className="text-muted-foreground text-2xs w-16 shrink-0">全球排名</span>
+              <span className="font-medium truncate flex-1">{rankChamp.competitor}</span>
+              <span className="font-mono tabular-nums">#{rankChamp.global_rank.toLocaleString()}</span>
             </div>
-            <div>
-              <div className="text-2xs text-muted-foreground">全球排名</div>
-              <div className="font-mono tabular-nums">
-                {af.global_rank != null ? `#${af.global_rank.toLocaleString()}` : "—"}
-              </div>
-            </div>
-          </div>
-          {top && (
-            <>
-              <div className="h-px bg-border-soft my-1" />
-              <div className="flex items-center gap-2">
-                <span className="text-2xs text-muted-foreground w-16 shrink-0">竞品 Top1</span>
-                <span className="font-medium truncate">{top.competitor}</span>
-                <span className="ml-auto font-mono tabular-nums">
-                  {top.monthly_visits || formatCompactNumber(top.monthly_visits_num)}
-                </span>
-              </div>
-            </>
           )}
         </div>
-      )}
-      {!isLoading && !af && (
-        <div className="text-xs text-muted-foreground py-3">暂无 AF 网站数据</div>
       )}
     </DigestCard>
   )
