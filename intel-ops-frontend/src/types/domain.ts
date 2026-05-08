@@ -15,10 +15,10 @@ export const COMPETITORS = [
 export const BASELINE_APP = "AllFootball" as const
 export type CompetitorName = (typeof COMPETITORS)[number] | typeof BASELINE_APP
 
-// 与 data/regions.json 保持一致（项目实际抓取的 12 国）
+// 与 data/regions.json 保持一致（项目实际抓取的 12 国 + fb_adlib_de 跑出来的德国）
 export const REGIONS = [
   "us", "ng", "my", "id", "sa", "ae",
-  "jp", "ca", "vn", "gb", "br", "ru",
+  "jp", "ca", "vn", "gb", "br", "ru", "de",
 ] as const
 
 export type Region = (typeof REGIONS)[number]
@@ -36,6 +36,7 @@ export const REGION_LABELS: Record<Region, string> = {
   gb: "英国 🇬🇧",
   br: "巴西 🇧🇷",
   ru: "俄罗斯 🇷🇺",
+  de: "德国 🇩🇪",
 }
 
 export const ALERT_TYPE_LABELS: Record<AlertType, string> = {

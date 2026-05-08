@@ -110,8 +110,9 @@ export default function IAP() {
                           <div className="flex flex-wrap gap-1">
                             {regions.slice(0, 12).map((r) => (
                               <span key={r.id} className="inline-flex items-center gap-1 px-1.5 h-5 rounded bg-muted/40 text-2xs font-mono">
-                                <span className="uppercase text-muted-foreground">
-                                  {REGION_LABELS[r.region_code as Region] ? r.region_code : r.region_code}
+                                <span className="uppercase text-muted-foreground"
+                                  title={REGION_LABELS[r.region_code as Region] || r.region_code}>
+                                  {r.region_code}
                                 </span>
                                 <span className="tabular-nums">{r.price || "—"}</span>
                               </span>

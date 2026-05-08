@@ -31,12 +31,14 @@ const TABS = [
 ] as const
 type Tab = typeof TABS[number]["value"]
 
+// 与 fb_adlib_* cron 跑的国家保持一致：us / gb / br / de / jp（5 国）
+// 老版还列了 ng 但 fb_adlib_ng 已没在跑，保留也是 0 行
 const COUNTRY_OPTIONS = [
   { value: "", label: "全部" },
   { value: "us", label: REGION_LABELS.us },
   { value: "gb", label: REGION_LABELS.gb },
   { value: "br", label: REGION_LABELS.br },
-  { value: "ng", label: REGION_LABELS.ng },
+  { value: "de", label: REGION_LABELS.de },
   { value: "jp", label: REGION_LABELS.jp },
 ]
 

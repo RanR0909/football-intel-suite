@@ -5,13 +5,21 @@
  */
 
 // ===== /api/status =====
+/** 单个抓取源的运行状态（后端 shared/sync_state.py snapshot 形状 + 派生 status badge） */
+export interface SyncSourceState {
+  last_success: string | null
+  last_attempt: string | null
+  last_failure: string | null
+  failure_kind: string | null
+  failure_msg: string | null
+  cookie_status: "ok" | "expired" | "unknown"
+  consecutive_failures: number
+  /** 后端派生：consecutive_failures>0 → fail；有 last_success → ok；否则 pending */
+  status: "ok" | "fail" | "pending"
+}
+
 export interface StatusResponse {
-  sources: Record<string, {
-    last_success?: string
-    last_attempt?: string
-    last_error?: string
-    status?: "ok" | "fail" | "pending" | "skip"
-  }>
+  sources: Record<string, SyncSourceState>
   retry_queue_size: number
   failed_ai_jobs: Record<string, number>
   candidates_count: number
@@ -141,7 +149,9 @@ export interface NewsItem {
   matched_keyword: string | null
   app_name: string | null
   fetched_at: string | null
-  is_business: boolean | null
+  /** MySQL TINYINT(1) — 实际通过 JSON 序列化为 0 / 1 / null（不是 boolean）。
+   *  前端用 truthy 检查兼容 (`if (n.is_business)`) 即可，别用 `=== true`。 */
+  is_business: 0 | 1 | null
   business_category: BusinessCategory | null
   competitors_mentioned: string[]
   classification_confidence: number | null

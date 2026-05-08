@@ -42,6 +42,9 @@ function formatTime(iso: string): string {
 export default function AlertRow({ alert, onAck, className }: AlertRowProps) {
   const href = buildDetailHref(alert)
   const isUnread = alert.status === "new"
+  // id<0 是后端派生 alert（来自 JSON fallback，不入 alerts 表）— ack 不会持久化，
+  // 重新加载就还在。直接隐藏 ack 按钮，避免用户白点。
+  const isDerived = alert.id < 0
   return (
     <div className={cn(
       "flex items-stretch gap-2 py-2 px-2 rounded transition-colors duration-150",
@@ -73,7 +76,7 @@ export default function AlertRow({ alert, onAck, className }: AlertRowProps) {
         <span className="text-2xs text-muted-foreground tabular-nums">
           {formatTime(alert.fired_at)}
         </span>
-        {isUnread && onAck && (
+        {isUnread && onAck && !isDerived && (
           <button
             onClick={() => onAck(alert.id)}
             className="px-1.5 h-6 inline-flex items-center gap-1 text-2xs border border-border-soft rounded hover:bg-muted text-muted-foreground"
@@ -81,6 +84,14 @@ export default function AlertRow({ alert, onAck, className }: AlertRowProps) {
           >
             <Check className="w-3 h-3" />
           </button>
+        )}
+        {isDerived && (
+          <span
+            className="text-2xs text-muted-foreground/60 italic"
+            title="来自 JSON fallback 的派生 alert — alerts 表为空时占位用，无法标记已读"
+          >
+            派生
+          </span>
         )}
       </div>
     </div>

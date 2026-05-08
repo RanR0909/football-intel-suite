@@ -90,10 +90,25 @@ EXTRACT_JS = r"""
     const fullText = (parent.innerText || '').slice(0, 2000);
     const idMatch = fullText.match(ID_EXTRACT);
     if (!idMatch) continue;
+    // Fix 4 (2026-05-08): 之前 start_date 经常拿到 "平台"、platform 拿到零宽空格 —
+    //   多语言 DOM 中"开始投放"和"平台"标签经常紧挨着，没有日期/平台值时
+    //   贪婪 [^\n]+ 会把下一个 label 字符串本身当成 value 抓回来。
+    //   修复：捕获后做内容校验 — 日期必须含年份(20XX)，平台必须含 Facebook/Instagram/Audience。
     const startMatch = fullText.match(
-      /(?:Started running on|开始投放|Diffusion lancée le)[:：\s]+([^\n]+)/i
+      /(?:Started running on|开始投放|Diffusion lancée le)[:：\s]*\n?\s*([^\n]+)/i
     );
-    const platformsMatch = fullText.match(/(?:Platforms?|平台|Plateformes?)[:：\s]*\n?\s*([^\n]+)/i);
+    const platformsMatch = fullText.match(
+      /(?:Platforms?|平台|Plateformes?)[:：\s]*\n?\s*([^\n]+)/i
+    );
+    // 校验日期：必须含 20XX 年份；否则视为 label-only 漏值，置空。
+    let startDate = startMatch ? startMatch[1].trim() : '';
+    if (!/\b20\d{2}\b/.test(startDate)) startDate = '';
+    // 校验平台：剥零宽字符 + 控制符；必须含已知平台关键字 (Facebook/Instagram/Audience/Messenger/Threads)，
+    // 否则视为 label-only 漏值，置空。
+    let platform = platformsMatch ? platformsMatch[1].trim() : '';
+    platform = platform.replace(/[​-‏⁠ ]/g, '').trim();
+    if (!/Facebook|Instagram|Audience|Messenger|Threads/i.test(platform)) platform = '';
+
     const lines = fullText.split('\n').map(s => s.trim()).filter(Boolean);
     const pageName = lines[0] || '';
     let mediaUrl = '';
@@ -114,8 +129,8 @@ EXTRACT_JS = r"""
     cards.push({
       ad_id: idMatch[1],
       text: adText,
-      start_date: startMatch ? startMatch[1].trim() : '',
-      platform: platformsMatch ? platformsMatch[1].trim() : '',
+      start_date: startDate,
+      platform: platform,
       page_name: pageName,
       media_url: mediaUrl,
     });
