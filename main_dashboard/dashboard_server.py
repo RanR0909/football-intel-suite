@@ -858,19 +858,36 @@ class APIHandler(BaseHTTPRequestHandler):
             params["date"] = date
         else:
             wheres.append("m.snapshot_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)")
+        # day_ago_rank: 最近 < 同源同 key 的 snapshot_date 的 rank_value（最近一次历史快照，
+        #   通常是昨天，但跳天也兼容）→ 用于"日变化"列
         # week_ago_rank: 最近 ≤ 6 天前的同 (source, name, platform, region) 的 rank_value
+        #   → 用于"周变化"列
+        # first_seen_date: 该 app 在本源+区域+平台下首次进库的 snapshot_date
+        #   → 用于"今日/本周新上榜"过滤（first_seen_date == snapshot_date 表示今天首次冒头）
         # 用 <=> NULL-safe equality 处理 platform / region_code 可能为 NULL 的情况
         sql = (
             "SELECT m.id, m.source, m.platform, m.region_code, c.name as competitor, "
             "m.name, m.rank_value, m.delta, m.downloads, m.downloads_num, "
             "m.revenue_num, m.snapshot_date, m.fetched_at, "
+            "(SELECT m1.rank_value FROM market_rank_snapshots m1 "
+            " WHERE m1.source = m.source AND m1.name = m.name "
+            "   AND m1.platform <=> m.platform "
+            "   AND m1.region_code <=> m.region_code "
+            "   AND m1.snapshot_date < m.snapshot_date "
+            " ORDER BY m1.snapshot_date DESC LIMIT 1"
+            ") as day_ago_rank, "
             "(SELECT m2.rank_value FROM market_rank_snapshots m2 "
             " WHERE m2.source = m.source AND m2.name = m.name "
             "   AND m2.platform <=> m.platform "
             "   AND m2.region_code <=> m.region_code "
             "   AND m2.snapshot_date <= DATE_SUB(m.snapshot_date, INTERVAL 6 DAY) "
             " ORDER BY m2.snapshot_date DESC LIMIT 1"
-            ") as week_ago_rank "
+            ") as week_ago_rank, "
+            "(SELECT MIN(m3.snapshot_date) FROM market_rank_snapshots m3 "
+            " WHERE m3.source = m.source AND m3.name = m.name "
+            "   AND m3.platform <=> m.platform "
+            "   AND m3.region_code <=> m.region_code"
+            ") as first_seen_date "
             "FROM market_rank_snapshots m "
             "LEFT JOIN competitors c ON c.id = m.competitor_id "
             f"WHERE {' AND '.join(wheres)} "

@@ -126,8 +126,14 @@ export interface RankSnapshot {
   revenue_num: number | null
   snapshot_date: string
   fetched_at: string
+  /** 最近一次更早 snapshot 的同 (source, name, platform, region) 的 rank；
+   *  通常是昨天的，但跳天兼容；NULL = 没有更早的快照（首次出现） */
+  day_ago_rank: number | null
   /** 最近 ≤ 6 天前的同 (source, name, platform, region) 的 rank；NULL = 没有历史数据 */
   week_ago_rank: number | null
+  /** 该 app 在本源+区域+平台下首次进库的 snapshot_date（YYYY-MM-DD）。
+   *  first_seen_date == snapshot_date 表示今天首次出现 → "今日新上榜"。 */
+  first_seen_date: string | null
 }
 
 export interface RankResponse {
