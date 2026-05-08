@@ -25,14 +25,14 @@ export default function Overview() {
         <SyncStatusBar />
       </div>
 
-      {/* 主视图 · 内容类（5 卡 · 2 列 · AdsCard 占双列） */}
+      {/* 主视图 · 内容类（5 卡 · 2 列 · RevenueCard 占双列做 3 冠军横排） */}
       <section className="mb-5">
         <div className="grid grid-cols-2 gap-3">
           <ReleasesCard />
           <GPReviewsCard />
           <SocialCard />
           <NewsCard />
-          <AdsCard />
+          <RevenueCard />
         </div>
       </section>
 
@@ -40,7 +40,7 @@ export default function Overview() {
       <section>
         <div className="grid grid-cols-4 gap-3">
           <RankingsCard />
-          <RevenueCard />
+          <AdsCard />
           <IapCard />
           <WebsiteCard />
         </div>

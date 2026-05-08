@@ -32,6 +32,8 @@ export default function Sidebar() {
         { to: "/overview", label: "总览看点", icon: LayoutDashboard },
         { to: "/alerts", label: "预警中心", icon: AlertCircle,
           badge: () => status?.alerts_new_7d },
+        { to: "/system/candidates", label: "候选发现", icon: Search,
+          badge: () => status?.candidates_count },
       ],
     },
     {
@@ -56,8 +58,6 @@ export default function Sidebar() {
     {
       title: "系统",
       items: [
-        { to: "/system/candidates", label: "候选发现", icon: Search,
-          badge: () => status?.candidates_count },
         { to: "/system/failed-jobs", label: "AI 失败队列", icon: AlertTriangle,
           // 显式指定 Object.values 的元素类型，否则空对象 fallback `{} as {}` 会让
           // b 推断为 unknown，导致 a + b 报 TS18046。
