@@ -22,7 +22,7 @@ import EmptyState from "@/components/shared/EmptyState"
 import FilterChips from "@/components/shared/FilterChips"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useRank } from "@/hooks/api/useRank"
-import { computeNumericDelta } from "@/lib/baseline"
+import { computeNumericRatio } from "@/lib/baseline"
 import { formatCompactNumber } from "@/lib/utils"
 import { BASELINE_APP } from "@/types/domain"
 
@@ -218,7 +218,7 @@ export default function Revenue() {
                     {showBaseline && (
                       <td className="px-3 h-9 text-right">
                         {isAf ? <span className="text-muted-foreground">—</span>
-                              : <BaselineDeltaCell delta={computeNumericDelta(r.st_dl, af?.st_dl ?? null)} />}
+                              : <BaselineDeltaCell delta={computeNumericRatio(r.st_dl, af?.st_dl ?? null)} />}
                       </td>
                     )}
                     <td className="px-3 h-9 text-right tabular-nums">
@@ -227,7 +227,7 @@ export default function Revenue() {
                     {showBaseline && (
                       <td className="px-3 h-9 text-right">
                         {isAf ? <span className="text-muted-foreground">—</span>
-                              : <BaselineDeltaCell delta={computeNumericDelta(r.st_rev, af?.st_rev ?? null)} />}
+                              : <BaselineDeltaCell delta={computeNumericRatio(r.st_rev, af?.st_rev ?? null)} />}
                       </td>
                     )}
                     {/* Androidrank 块 — vs AF 列仅在 AF 有数据时展示 */}
@@ -237,7 +237,7 @@ export default function Revenue() {
                     {showBaseline && arHasAf && (
                       <td className="px-3 h-9 text-right">
                         {isAf ? <span className="text-muted-foreground">—</span>
-                              : <BaselineDeltaCell delta={computeNumericDelta(r.ar_dl, af?.ar_dl ?? null)} />}
+                              : <BaselineDeltaCell delta={computeNumericRatio(r.ar_dl, af?.ar_dl ?? null)} />}
                       </td>
                     )}
                     {/* 排名 */}
