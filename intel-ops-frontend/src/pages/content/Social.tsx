@@ -50,9 +50,9 @@ const SOURCE_OPTIONS = [
 
 export default function Social() {
   const { value, setValue } = useUrlFilters({
-    tab: "topic", source: "", competitor: "", since: "30d",
+    tab: "product", source: "", competitor: "", since: "30d",
   })
-  const tab = (value("tab") || "topic") as SocialTab
+  const tab = (value("tab") || "product") as SocialTab
   const source = value("source") as "reddit" | "twitter" | ""
   const competitor = value("competitor")
   const since = value("since")
@@ -159,11 +159,11 @@ export default function Social() {
                 {p.url ? (
                   <a href={p.url} target="_blank" rel="noreferrer"
                      className="text-xs font-medium hover:text-brand-700 inline-flex items-baseline gap-1">
-                    {p.title || "(no title)"}
+                    {p.title_zh || p.title || "(no title)"}
                     <ExternalLink className="w-3 h-3 shrink-0" />
                   </a>
                 ) : (
-                  <div className="text-xs font-medium">{p.title || "(no title)"}</div>
+                  <div className="text-xs font-medium">{p.title_zh || p.title || "(no title)"}</div>
                 )}
               </article>
             ))}
@@ -249,15 +249,15 @@ function ProductSignalsTab({ posts }: { posts: ReturnType<typeof useCommunity>["
                       rel="noreferrer"
                       className="text-sm font-medium hover:text-brand-700 inline-flex items-baseline gap-1 leading-snug"
                     >
-                      {p.title || "(no title)"}
+                      {p.title_zh || p.title || "(no title)"}
                       <ExternalLink className="w-3 h-3 shrink-0" />
                     </a>
                   ) : (
-                    <div className="text-sm font-medium leading-snug">{p.title || "(no title)"}</div>
+                    <div className="text-sm font-medium leading-snug">{p.title_zh || p.title || "(no title)"}</div>
                   )}
-                  {p.selftext && (
+                  {(p.selftext_zh || p.selftext) && (
                     <p className="mt-1 text-xs text-muted-foreground line-clamp-3 leading-snug">
-                      {p.selftext}
+                      {p.selftext_zh || p.selftext}
                     </p>
                   )}
                 </article>

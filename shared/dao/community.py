@@ -230,3 +230,59 @@ def update_topic(post_db_id: int, payload: dict) -> bool:
             row.topic_confidence = None
         row.topic_classified_at = datetime.utcnow()
     return True
+
+
+# ─────────────────── post translate (migration 0019) ──────────────────────
+
+
+def fetch_untranslated_posts(*, limit: int = 200) -> list[dict]:
+    """translated_at IS NULL 的帖子（task 9 post_translate 还没跑过）。
+
+    排除 failed_ai_jobs 里 task_name='post_translate' 的 post_id。
+    """
+    if not _db.is_mysql_enabled():
+        return []
+    import sqlalchemy as sa
+
+    blacklist: set[int] = set()
+    with _db.engine().connect() as c:
+        rows = c.execute(sa.text("""
+            SELECT DISTINCT JSON_EXTRACT(payload_json, '$.post_id') AS pid
+            FROM failed_ai_jobs
+            WHERE task_name = 'post_translate' AND resolved_at IS NULL
+        """)).fetchall()
+        for r in rows:
+            try:
+                blacklist.add(int(r[0]))
+            except (TypeError, ValueError):
+                pass
+
+    with _db.session() as s:
+        q = s.query(CommunityPost).filter(CommunityPost.translated_at.is_(None))
+        if blacklist:
+            q = q.filter(~CommunityPost.id.in_(blacklist))
+        rows = q.order_by(CommunityPost.score.desc(),
+                          CommunityPost.id.desc()).limit(limit).all()
+        return [
+            {
+                "id": r.id,
+                "title": r.title or "",
+                "selftext": r.selftext or "",
+            }
+            for r in rows
+        ]
+
+
+def update_post_translation(post_db_id: int, title_zh: str, selftext_zh: str) -> bool:
+    """写回 title_zh + selftext_zh + translated_at。"""
+    if not _db.is_mysql_enabled():
+        return False
+    with _db.session() as s:
+        row = s.query(CommunityPost).filter(CommunityPost.id == post_db_id).first()
+        if not row:
+            return False
+        # 切到 column 上限以防超长
+        row.title_zh = (title_zh or "")[:512] or None
+        row.selftext_zh = (selftext_zh or "")[:65535] or None
+        row.translated_at = datetime.utcnow()
+    return True

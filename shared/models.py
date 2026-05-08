@@ -175,6 +175,11 @@ class CommunityPost(Base):
     # ---- entity_extract on community_posts（migration 0016）----
     entity_extracted_at = Column(DateTime)          # NULL = 未跑过 entity_extract
 
+    # ---- post translate（migration 0019）— ai_tasks/translate_community_posts.py 写入 ----
+    title_zh = Column(String(512))                  # 中文翻译；NULL = 还没翻译
+    selftext_zh = Column(Text)                      # 中文翻译；NULL = 还没翻译或 selftext 本身为空
+    translated_at = Column(DateTime)
+
     __table_args__ = (
         UniqueConstraint("source", "post_id", name="uniq_post"),
         Index("idx_post_comp_created", "competitor_id", "created_utc"),

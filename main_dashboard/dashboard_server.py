@@ -1077,10 +1077,11 @@ class APIHandler(BaseHTTPRequestHandler):
 
         sql = (
             "SELECT p.id, c.name as competitor, p.source, p.post_id, p.subreddit, "
-            "p.title, p.selftext, p.score, p.num_comments, p.url, "
+            "p.title, p.title_zh, p.selftext, p.selftext_zh, "
+            "p.score, p.num_comments, p.url, "
             "p.created_utc, p.fetched_at, "
             "p.primary_topic, p.secondary_topics, p.competitor_mentioned, "
-            "p.topic_classified_at, p.topic_confidence "
+            "p.topic_classified_at, p.topic_confidence, p.translated_at "
             "FROM community_posts p JOIN competitors c ON c.id = p.competitor_id "
             f"WHERE {' AND '.join(wheres)} "
             "ORDER BY p.score DESC, p.created_utc DESC LIMIT :limit"
