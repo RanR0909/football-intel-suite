@@ -194,3 +194,59 @@ def mark_reviewed(canonical_ids: list[str]) -> int:
                 row.reviewed_at = now
                 n += 1
     return n
+
+
+# ---- chinese_name 翻译（task #8 entity_translate）---------------------------
+
+
+def fetch_untranslated(*, limit: int = 200) -> list[dict]:
+    """取还没翻译过的 entity（chinese_name IS NULL）。
+
+    为避免反复死磕同一条 garbage payload，排除已在 failed_ai_jobs 里的 canonical_id。
+    """
+    if not _db.is_mysql_enabled():
+        return []
+    import sqlalchemy as sa
+
+    blacklist: set[str] = set()
+    with _db.engine().connect() as c:
+        rows = c.execute(sa.text(
+            """
+            SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.canonical_id')) AS cid
+            FROM failed_ai_jobs
+            WHERE task_name = 'entity_translate' AND resolved_at IS NULL
+            """
+        )).fetchall()
+        blacklist = {r[0] for r in rows if r[0]}
+
+    out: list[dict] = []
+    with _db.session() as s:
+        q = (
+            s.query(EntityAlias)
+            .filter(EntityAlias.chinese_name.is_(None))
+            .order_by(EntityAlias.entity_type, EntityAlias.canonical_id)
+        )
+        for row in q.limit(max(1, limit + len(blacklist))).all():
+            if row.canonical_id in blacklist:
+                continue
+            out.append({
+                "canonical_id": row.canonical_id,
+                "entity_type": row.entity_type,
+                "primary_name": row.primary_name,
+            })
+            if len(out) >= limit:
+                break
+    return out
+
+
+def set_chinese_name(canonical_id: str, chinese_name: str) -> bool:
+    """写回 chinese_name + translated_at。"""
+    if not _db.is_mysql_enabled() or not canonical_id or not chinese_name:
+        return False
+    with _db.session() as s:
+        row = s.query(EntityAlias).filter(EntityAlias.canonical_id == canonical_id).first()
+        if not row:
+            return False
+        row.chinese_name = chinese_name[:255]
+        row.translated_at = datetime.utcnow()
+        return True

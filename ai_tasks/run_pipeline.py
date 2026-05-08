@@ -2,10 +2,11 @@
 
 顺序：
   1. comment pipeline（comment_label + entity_extract，主路径，~200 条/批）
-  2. content classifier（task 5/6/7，独立可选，互不依赖 — 5 条铁律 §1）
+  2. content classifier（task 5/6/7/8，独立可选，互不依赖 — 5 条铁律 §1）
      a. news_classifier      → 写 news_items.is_business / business_category / ...
      b. post_topic_classifier → 写 community_posts.primary_topic / ...
      c. ad_selling_point     → 写 ad_creatives.selling_points / audience / tone
+     d. entity_translate     → 写 entity_aliases.chinese_name (GP Reviews 主题中文化)
   3. alert_engine 全 7 类规则
 
 每个分支独立失败不阻塞其他（铁律 1 落地）。
@@ -15,10 +16,11 @@ CLI：
     python3 -m ai_tasks.run_pipeline --limit 50         # 只跑 50 条评论
     python3 -m ai_tasks.run_pipeline --skip-alerts      # 跳过 alert_engine
     python3 -m ai_tasks.run_pipeline --skip-comments    # 跳过评论管道
-    python3 -m ai_tasks.run_pipeline --skip-content     # 跳过 task 5/6/7
+    python3 -m ai_tasks.run_pipeline --skip-content     # 跳过 task 5/6/7/8
     python3 -m ai_tasks.run_pipeline --only news        # 只跑 news_classifier
     python3 -m ai_tasks.run_pipeline --only post        # 只跑 post_topic
     python3 -m ai_tasks.run_pipeline --only ads         # 只跑 ad_selling_point
+    python3 -m ai_tasks.run_pipeline --only translate   # 只跑 entity_translate
     python3 -m ai_tasks.run_pipeline --dry-run          # 不调 AI 不入库
 """
 
@@ -48,6 +50,7 @@ from ai_tasks.news_classifier import classify_pending as run_news_classifier  # 
 from ai_tasks.post_topic import classify_pending as run_post_topic  # noqa: E402
 from ai_tasks.ad_selling_point import classify_pending as run_ad_selling_point  # noqa: E402
 from ai_tasks.post_entity_extract import classify_pending as run_post_entity  # noqa: E402
+from ai_tasks.translate_entity_names import translate_pending as run_entity_translate  # noqa: E402
 
 log = logging.getLogger("ai_pipeline")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s · %(message)s")
@@ -55,17 +58,19 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 
 def run_content_classifiers(*, limit: int = 200, dry_run: bool = False,
                             only: str | None = None) -> dict:
-    """跑 task 5/6/7 + post_entity_extract — 4 个独立 content classifier。
+    """跑 task 5/6/7/8 + post_entity_extract — 5 个独立 content classifier。
 
     每个分支独立 try/except — 任一失败不阻塞其他（铁律 1：AI 队列内部各任务互不依赖）。
 
-    only=None         跑全部四个
-    only='news'       只跑 news_classifier
-    only='post'       只跑 post_topic
-    only='post_ent'   只跑 post_entity_extract（球员/联赛实体抽取）
-    only='ads'        只跑 ad_selling_point
+    only=None          跑全部五个
+    only='news'        只跑 news_classifier
+    only='post'        只跑 post_topic
+    only='post_ent'    只跑 post_entity_extract（球员/联赛实体抽取）
+    only='ads'         只跑 ad_selling_point
+    only='translate'   只跑 entity_translate（entity_aliases 主题名翻中文）
     """
-    out = {"news": None, "post_topic": None, "post_entity": None, "ad_selling_point": None}
+    out = {"news": None, "post_topic": None, "post_entity": None,
+           "ad_selling_point": None, "entity_translate": None}
 
     if only in (None, "news"):
         try:
@@ -100,6 +105,16 @@ def run_content_classifiers(*, limit: int = 200, dry_run: bool = False,
         except Exception as e:
             log.exception(f"ad_selling_point 整体失败: {e}")
             out["ad_selling_point"] = {"error": str(e)}
+
+    if only in (None, "translate"):
+        # task 8 — entity_aliases.primary_name → chinese_name (GP Reviews 主题中文化)
+        # 需要在 entity_extract / post_entity_extract 跑完后才有意义
+        try:
+            log.info("--- task 8 · entity_translate ---")
+            out["entity_translate"] = run_entity_translate(limit=limit, dry_run=dry_run)
+        except Exception as e:
+            log.exception(f"entity_translate 整体失败: {e}")
+            out["entity_translate"] = {"error": str(e)}
 
     return out
 
@@ -189,9 +204,9 @@ def main() -> int:
     ap.add_argument("--skip-alerts", action="store_true",
                     help="跳过 alert_engine")
     ap.add_argument("--skip-content", action="store_true",
-                    help="跳过 task 5/6/7 + post_entity_extract (4 个内容分类器)")
-    ap.add_argument("--only", choices=["news", "post", "post_ent", "ads"],
-                    help="只跑 4 个内容分类器中的某一个")
+                    help="跳过 task 5/6/7/8 + post_entity_extract (5 个内容分类器)")
+    ap.add_argument("--only", choices=["news", "post", "post_ent", "ads", "translate"],
+                    help="只跑 5 个内容分类器中的某一个")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 

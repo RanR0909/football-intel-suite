@@ -114,6 +114,17 @@
       "prompt": {
         "file": "ai_tasks/prompts/ad_selling_point.txt"
       }
+    },
+    "entity_translate": {
+      "_doc": "任务 8 — entity_aliases.primary_name (多语言) → 简洁中文 (≤10字名词性短语)。GP 评论 4 个聚合 tab 主题名展示用。",
+      "model": "haiku_4_5",
+      "output_format": "json",
+      "json_strip_markdown": true,
+      "max_tokens": 128,
+      "temperature": 0.0,
+      "prompt": {
+        "file": "ai_tasks/prompts/entity_translate.txt"
+      }
     }
   }
 }

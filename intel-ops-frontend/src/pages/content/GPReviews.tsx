@@ -169,7 +169,15 @@ function AggregatedList({
       {items.map((it) => (
         <article key={it.canonical_id} className="border border-border-soft rounded-md bg-card overflow-hidden">
           <header className="flex items-baseline gap-2 px-3 h-9 bg-muted/30 border-b border-border-soft">
-            <span className="text-sm font-medium">{it.primary_name}</span>
+            {/* 中文翻译优先；翻译过的同时把原文小字附在后面便于交叉确认 */}
+            <span className="text-sm font-medium">
+              {it.chinese_name || it.primary_name}
+            </span>
+            {it.chinese_name && it.chinese_name !== it.primary_name && (
+              <span className="text-2xs text-muted-foreground italic">
+                ({it.primary_name})
+              </span>
+            )}
             <span className="text-2xs text-muted-foreground font-mono">{it.canonical_id}</span>
             <span className="ml-auto text-2xs font-mono tabular-nums">
               {it.total_mentions} 提及
