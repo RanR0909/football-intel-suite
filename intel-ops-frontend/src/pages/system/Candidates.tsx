@@ -85,6 +85,28 @@ export default function Candidates() {
           value={String(conf)}
           onChange={(v) => setValue("conf", v)}
         />
+        <details className="text-2xs text-muted-foreground bg-muted/20 border border-border-soft rounded px-2 py-1.5">
+          <summary className="cursor-pointer hover:text-foreground select-none">
+            ⓘ 置信度是什么？
+          </summary>
+          <div className="mt-2 space-y-1.5 leading-relaxed pl-1">
+            <p>
+              <span className="font-medium text-foreground">置信度</span> = AI 对
+              "我这次分类判得对不对" 的自评（0 – 1），由 <code className="font-mono">app_classifier</code> 任务（Claude haiku 4.5）输出。
+            </p>
+            <p>
+              <span className="text-foreground">不是</span>衡量"这个 app 跟我们多像 / 多重要"——只是 AI 自评把握。
+            </p>
+            <ul className="pl-4 list-disc space-y-0.5 font-mono">
+              <li><span className="text-foreground">≥ 0.95</span> — AI 极有把握；列表干净，可能漏掉新出的边缘 app</li>
+              <li><span className="text-foreground">≥ 0.85</span>（默认）— 接受少量边缘 case，覆盖广</li>
+              <li><span className="text-foreground">≥ 0.70</span> — 含 AI 拿不准的；需要人工 review</li>
+            </ul>
+            <p>
+              决策要不要采纳，关键看 <span className="font-mono text-foreground">topic</span> 和 <span className="font-mono text-foreground">categories</span> 是否合适，置信度只是过滤"AI 自己不确定"的 noise。
+            </p>
+          </div>
+        </details>
       </div>
 
       {isLoading && <SkeletonTable rows={6} />}
