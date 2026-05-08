@@ -238,12 +238,17 @@ export interface CommunityPost {
   post_id: string
   subreddit: string | null
   title: string | null
+  /** task 9 post_translate 写入；NULL = 还没翻译过 */
+  title_zh: string | null
   selftext: string | null
+  /** task 9 post_translate 写入；NULL = 还没翻译过或原 selftext 为空 */
+  selftext_zh: string | null
   score: number | null
   num_comments: number | null
   url: string | null
   created_utc: string | null
   fetched_at: string
+  translated_at: string | null
   /** task #6 post_topic_classifier 写入 */
   primary_topic: PostTopic | null
   secondary_topics: PostTopic[]

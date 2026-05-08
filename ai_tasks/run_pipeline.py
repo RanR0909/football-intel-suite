@@ -51,6 +51,7 @@ from ai_tasks.post_topic import classify_pending as run_post_topic  # noqa: E402
 from ai_tasks.ad_selling_point import classify_pending as run_ad_selling_point  # noqa: E402
 from ai_tasks.post_entity_extract import classify_pending as run_post_entity  # noqa: E402
 from ai_tasks.translate_entity_names import translate_pending as run_entity_translate  # noqa: E402
+from ai_tasks.translate_community_posts import translate_pending as run_post_translate  # noqa: E402
 
 log = logging.getLogger("ai_pipeline")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s · %(message)s")
@@ -58,19 +59,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 
 def run_content_classifiers(*, limit: int = 200, dry_run: bool = False,
                             only: str | None = None) -> dict:
-    """跑 task 5/6/7/8 + post_entity_extract — 5 个独立 content classifier。
+    """跑 task 5/6/7/8/9 + post_entity_extract — 6 个独立 content classifier。
 
     每个分支独立 try/except — 任一失败不阻塞其他（铁律 1：AI 队列内部各任务互不依赖）。
 
-    only=None          跑全部五个
-    only='news'        只跑 news_classifier
-    only='post'        只跑 post_topic
-    only='post_ent'    只跑 post_entity_extract（球员/联赛实体抽取）
-    only='ads'         只跑 ad_selling_point
-    only='translate'   只跑 entity_translate（entity_aliases 主题名翻中文）
+    only=None             跑全部六个
+    only='news'           只跑 news_classifier
+    only='post'           只跑 post_topic
+    only='post_ent'       只跑 post_entity_extract（球员/联赛实体抽取）
+    only='ads'            只跑 ad_selling_point
+    only='translate'      只跑 entity_translate（entity_aliases 主题名翻中文）
+    only='post_translate' 只跑 post_translate（community_posts title+selftext 翻中文）
     """
     out = {"news": None, "post_topic": None, "post_entity": None,
-           "ad_selling_point": None, "entity_translate": None}
+           "ad_selling_point": None, "entity_translate": None,
+           "post_translate": None}
 
     if only in (None, "news"):
         try:
@@ -115,6 +118,15 @@ def run_content_classifiers(*, limit: int = 200, dry_run: bool = False,
         except Exception as e:
             log.exception(f"entity_translate 整体失败: {e}")
             out["entity_translate"] = {"error": str(e)}
+
+    if only in (None, "post_translate"):
+        # task 9 — community_posts.title / selftext → 中文（Social 产品信号 tab 展示用）
+        try:
+            log.info("--- task 9 · post_translate ---")
+            out["post_translate"] = run_post_translate(limit=limit, dry_run=dry_run)
+        except Exception as e:
+            log.exception(f"post_translate 整体失败: {e}")
+            out["post_translate"] = {"error": str(e)}
 
     return out
 
@@ -204,9 +216,9 @@ def main() -> int:
     ap.add_argument("--skip-alerts", action="store_true",
                     help="跳过 alert_engine")
     ap.add_argument("--skip-content", action="store_true",
-                    help="跳过 task 5/6/7/8 + post_entity_extract (5 个内容分类器)")
-    ap.add_argument("--only", choices=["news", "post", "post_ent", "ads", "translate"],
-                    help="只跑 5 个内容分类器中的某一个")
+                    help="跳过 task 5/6/7/8/9 + post_entity_extract (6 个内容分类器)")
+    ap.add_argument("--only", choices=["news", "post", "post_ent", "ads", "translate", "post_translate"],
+                    help="只跑 6 个内容分类器中的某一个")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 

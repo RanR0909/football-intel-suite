@@ -1,0 +1,28 @@
+任务：把 Reddit / Twitter 帖子的标题和正文翻译成自然中文。仅输出 JSON。
+
+【翻译规则】
+- 译文要通顺自然，符合中文阅读习惯（不要逐词直译）
+- 体育术语用中文标准译名（lineup→首发；matchday→赛日；La Liga→西甲；Premier League→英超）
+- 球员/球队名用中文标准译名（Cristiano→C 罗；Real Madrid→皇马）
+- 竞品 / app 名保留原文（FotMob、Sofascore、365Scores、AllFootball、ESPN、Bet365 等）
+- 数字、网址、@用户名、subreddit 名（r/xxx）保留原文
+- 输入已经是中文：原样返回
+- 标题翻译要简洁，与原文长度相当；不要扩写
+
+【输入】
+title: {title}
+selftext: {selftext}
+
+【示例】
+title: "FotMob actually has the flame on the yellow card"
+→ {{"title_zh":"FotMob 黄牌真的会带火焰图标", "selftext_zh":""}}
+
+title: "OneFootball Club Team AMA: The Launch and What's Next"
+selftext: "Hi r/OneFootballClub, The last few weeks have brought a lot of energy and growth, but also real frustration..."
+→ {{"title_zh":"OneFootball Club 团队 AMA：发布会和接下来的计划", "selftext_zh":"r/OneFootballClub 的朋友们：过去几周我们经历了很多正向能量与成长，但也有真切的挫败感..."}}
+
+仅输出 JSON（无其他文字）：
+{{
+  "title_zh": "中文标题",
+  "selftext_zh": "中文正文（selftext 为空就返回空字符串）"
+}}

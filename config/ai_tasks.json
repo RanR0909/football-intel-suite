@@ -125,6 +125,17 @@
       "prompt": {
         "file": "ai_tasks/prompts/entity_translate.txt"
       }
+    },
+    "post_translate": {
+      "_doc": "任务 9 — community_posts (Reddit + Twitter 原文绝大多数英语) title + selftext → 中文。社媒评论页产品信号 tab 展示用。",
+      "model": "haiku_4_5",
+      "output_format": "json",
+      "json_strip_markdown": true,
+      "max_tokens": 1024,
+      "temperature": 0.1,
+      "prompt": {
+        "file": "ai_tasks/prompts/post_translate.txt"
+      }
     }
   }
 }
