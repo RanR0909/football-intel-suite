@@ -78,10 +78,7 @@ export default function Ads() {
 
   return (
     <div>
-      <PageHeader
-        title="广告投放"
-        subtitle="Meta 广告库 · 按 fb_page_id 精确匹配（仅竞品官方 Page 投放的广告）"
-      />
+      <PageHeader title="广告投放" />
 
       {/* per-competitor 命中数（一行紧凑） */}
       <div className="text-xs mb-3 leading-relaxed">

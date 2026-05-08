@@ -17,10 +17,7 @@ import AdsCard from "@/components/dashboard/AdsCard"
 export default function Overview() {
   return (
     <div>
-      <PageHeader
-        title="总览看点"
-        subtitle="9 个板块今天的关键信号 · AllFootball 为数据基准"
-      />
+      <PageHeader title="总览看点" />
 
       <div className="mb-4">
         <SyncStatusBar />

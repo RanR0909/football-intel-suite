@@ -102,10 +102,7 @@ export default function Revenue() {
 
   return (
     <div>
-      <PageHeader
-        title="收入下载"
-        subtitle={`Sensor Tower ${stPlatform === "ios" ? "iOS" : "Android"} (US 月估算) + Androidrank (全球·Android) · 以 AF 为基准`}
-      />
+      <PageHeader title="收入下载" />
 
       <KpiRow>
         <KpiCard

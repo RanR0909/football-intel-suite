@@ -90,11 +90,6 @@ export default function News() {
     <div>
       <PageHeader
         title="商业新闻"
-        subtitle={
-          showAll
-            ? "Google News RSS · 含未分类与非商业条目"
-            : "体育 app 公司商业事件 · is_business AI 过滤"
-        }
         right={
           <span className="text-xs text-muted-foreground tabular-nums">
             共 {filtered.length} 条

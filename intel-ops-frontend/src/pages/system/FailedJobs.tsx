@@ -60,14 +60,7 @@ export default function FailedJobs() {
 
   return (
     <div>
-      <PageHeader
-        title="AI 失败队列"
-        subtitle={
-          latestRound
-            ? "重试耗尽的 AI 任务 · 默认只看每个 task 最近 6h 内的失败（切换“全部历史”看全量）"
-            : "重试耗尽的 AI 任务 · 全部历史"
-        }
-      />
+      <PageHeader title="AI 失败队列" />
 
       <KpiRow>
         <KpiCard
