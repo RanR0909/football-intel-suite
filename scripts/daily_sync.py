@@ -307,8 +307,19 @@ def _notify_cookie_expired(source: str, error_tail: str = "") -> None:
 
 # ---- Phase runners --------------------------------------------------------
 
+# 幂等增量任务豁免 freshness。这些任务内部只处理"未处理过"的数据，
+# 重跑的代价 ≈ 0（一上来就发现没活干就退）但 skip 的代价很大：
+# 之前 Phase 0 跑了一次 ai_pipeline → 写了 last_success → Phase 2 主管道 skip
+# → 同一次 daily_sync 里 Phase 1 新抓的 evidence 永远不被分类。
+# 跨天也一样 — 02:00 launchd 跑时 last_success 才 5h 前，仍 fresh，主管道 skip。
+# 修法：ai_pipeline 不看 freshness；同一次 run 内的双跑由 already_ran_this_run 拦。
+_NO_FRESHNESS_TASKS: set[str] = {"ai_pipeline"}
+
+
 def _should_skip(name: str, force: bool, max_age_hours: float) -> bool:
     if force:
+        return False
+    if name in _NO_FRESHNESS_TASKS:
         return False
     return sync_state.is_fresh(name, max_age_hours)
 
@@ -331,11 +342,17 @@ def _enqueue_if_failed(name: str, result: dict) -> None:
             print(f"  [retry-queue] {name} 已超过 max_attempts，永久失败")
 
 
-def run_phase_0_retry(dry_run: bool) -> tuple[int, int]:
-    """主流水线开始前先尝试重跑过期的失败任务。"""
+def run_phase_0_retry(dry_run: bool) -> tuple[int, int, set[str]]:
+    """主流水线开始前先尝试重跑过期的失败任务。
+
+    Returns:
+        (ok, fail, succeeded_names) — succeeded_names 用于让 Phase 1/2 跳过
+        本次 run 已成功跑过的任务（防止同一次 daily_sync 把同一个 task 跑两次）。
+    """
     items = retry_queue.due_items()
+    succeeded: set[str] = set()
     if not items:
-        return (0, 0)
+        return (0, 0, succeeded)
     print("\n" + "=" * 70)
     print(f"Phase 0/3 — 重试队列（{len(items)} 个到期项）")
     print("=" * 70)
@@ -361,6 +378,7 @@ def run_phase_0_retry(dry_run: bool) -> tuple[int, int]:
         if result["success"]:
             retry_queue.remove(it["id"])
             ok += 1
+            succeeded.add(name)
         else:
             ek = result.get("kind") or "error"
             updated = retry_queue.update_retry(it["id"], result.get("stderr_tail") or "", ek)
@@ -371,14 +389,17 @@ def run_phase_0_retry(dry_run: bool) -> tuple[int, int]:
                     print(f"    [retry-queue] {name} 达 max_attempts，永久失败移出队列")
             fail += 1
     print(f"[phase0] 完成：ok={ok} fail={fail}")
-    return (ok, fail)
+    return (ok, fail, succeeded)
 
 
-def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, int, list[str], list[dict]]:
+def run_phase_1(force: bool, max_age_hours: float, dry_run: bool,
+                already_ran: set[str] | None = None) -> tuple[int, int, list[str], list[dict]]:
     """并行跑所有抓取源；返回 (ok, fail, expired_cookies, failures_detail)。
 
     failures_detail = [{"name", "kind", "duration_sec"}, ...] 给飞书卡片用。
+    already_ran: 本次 run 在 Phase 0 已成功跑过的 task 集合，跳过避免双跑。
     """
+    already_ran = already_ran or set()
     print("\n" + "=" * 70)
     print(f"Phase 1/3 — 抓取源（{len(PHASE_1_FETCHERS)} 个并行）")
     print("=" * 70)
@@ -387,6 +408,10 @@ def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, 
     skipped: list[str] = []
     pending = []
     for name, label, args, to, kind in PHASE_1_FETCHERS:
+        if name in already_ran:
+            print(f"[skip] {name} 本次 run 在 Phase 0 已跑过")
+            skipped.append(name)
+            continue
         if _should_skip(name, force, max_age_hours):
             print(f"[skip] {name} 上次成功 < {max_age_hours}h，跳过")
             skipped.append(name)
@@ -429,14 +454,22 @@ def run_phase_1(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, 
     return (ok, fail, expired, failures)
 
 
-def run_phase_2(force: bool, max_age_hours: float, dry_run: bool) -> tuple[int, int, list[dict]]:
-    """串行跑 AI 重活；失败不阻塞后续。返回 (ok, fail, failures_detail)。"""
+def run_phase_2(force: bool, max_age_hours: float, dry_run: bool,
+                already_ran: set[str] | None = None) -> tuple[int, int, list[dict]]:
+    """串行跑 AI 重活；失败不阻塞后续。返回 (ok, fail, failures_detail)。
+
+    already_ran: 本次 run 在 Phase 0 已成功跑过的 task 集合 — 这些 task 不重跑。
+    """
+    already_ran = already_ran or set()
     print("\n" + "=" * 70)
     print(f"Phase 2/3 — AI 分析（{len(PHASE_2_AI)} 个串行）")
     print("=" * 70)
     ok = fail = 0
     failures: list[dict] = []
     for name, label, args, to in PHASE_2_AI:
+        if name in already_ran:
+            print(f"[skip] {name} 本次 run 在 Phase 0 已跑过")
+            continue
         if _should_skip(name, force, max_age_hours):
             print(f"[skip] {name}")
             continue
@@ -498,7 +531,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # --retry-only：只清理队列，不跑主流水线
     if args.retry_only:
-        p0_ok, p0_fail = run_phase_0_retry(args.dry_run)
+        p0_ok, p0_fail, _ = run_phase_0_retry(args.dry_run)
         queue_size = len(retry_queue.snapshot().get("items") or [])
         total = time.monotonic() - t0
         print("\n" + "=" * 70)
@@ -525,9 +558,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0 if p0_fail == 0 else 1
 
     # Phase 0：重试队列里到期的失败任务（不一定每次都有）
-    p0_ok, p0_fail = run_phase_0_retry(args.dry_run)
-    p1_ok, p1_fail, expired, p1_failures = run_phase_1(args.force, args.max_age_hours, args.dry_run)
-    p2_ok, p2_fail, p2_failures = run_phase_2(args.force, args.max_age_hours, args.dry_run)
+    p0_ok, p0_fail, p0_succeeded = run_phase_0_retry(args.dry_run)
+    p1_ok, p1_fail, expired, p1_failures = run_phase_1(
+        args.force, args.max_age_hours, args.dry_run, already_ran=p0_succeeded)
+    p2_ok, p2_fail, p2_failures = run_phase_2(
+        args.force, args.max_age_hours, args.dry_run, already_ran=p0_succeeded)
     p3_ok = run_phase_3(args.dry_run)
 
     total = time.monotonic() - t0
