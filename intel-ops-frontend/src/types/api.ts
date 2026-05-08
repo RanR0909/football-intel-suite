@@ -126,6 +126,8 @@ export interface RankSnapshot {
   revenue_num: number | null
   snapshot_date: string
   fetched_at: string
+  /** 最近 ≤ 6 天前的同 (source, name, platform, region) 的 rank；NULL = 没有历史数据 */
+  week_ago_rank: number | null
 }
 
 export interface RankResponse {
