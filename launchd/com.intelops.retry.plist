@@ -10,7 +10,7 @@
         <string>/usr/bin/env</string>
         <string>bash</string>
         <string>-c</string>
-        <string>cd /Users/ranr/Desktop/Football_Intel_Suite &amp;&amp; set -a &amp;&amp; [ -f .env.local ] &amp;&amp; source .env.local; set +a; /usr/bin/python3 scripts/daily_sync.py --retry-only</string>
+        <string>cd __PROJECT_ROOT__ &amp;&amp; set -a &amp;&amp; [ -f .env.local ] &amp;&amp; source .env.local; set +a; /usr/bin/python3 scripts/daily_sync.py --retry-only</string>
     </array>
 
     <!-- 每 60 分钟扫一次重试队列；轻任务，不跑主流水线 -->

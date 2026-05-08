@@ -1,0 +1,20 @@
+# INTEL-OPS · Python 依赖
+# Python 3.10+
+#
+# 装：pip install -r requirements.txt
+# 然后：playwright install chromium  （或装系统 Google Chrome — qimai 抓取要用）
+
+# ── 必需 ──
+aiohttp>=3.9            # async_crawler / 所有 HTTP 抓取
+google-play-scraper>=1.2 # GP 评论 + 包名验证
+sqlalchemy>=2.0         # DB 抽象层（dao / dashboard_server / 所有 fact 表读写）
+alembic>=1.13           # DB schema migration
+playwright>=1.40        # 4 个 scraper：appmagic / sensor_tower / fb_adlib / qimai_iap
+
+# ── 可选（按需启用）──
+# 数据库后端 —— 不装则 dao 自动降级 JSON-only 模式：
+pymysql>=1.1            # MYSQL_DSN=mysql+pymysql://... 时由 SQLAlchemy 自动加载
+redis>=5.0              # REDIS_URL=redis://... 才需要
+
+# iOS 评论备用源（iTunes RSS 已够，不装也行）：
+app-store-scraper>=0.3

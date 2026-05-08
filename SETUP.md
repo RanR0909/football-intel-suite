@@ -1,390 +1,260 @@
-# INTEL-OPS 新机器初始化指南
+# INTEL-OPS 安装指南
 
-> 在一台几乎全新的 macOS / Linux 电脑上，从零跑起这个看板。
-> 全程预计 **15–25 分钟**（不含 API key 申请）。
+新 Mac 上从 0 跑起来这套看板，整流程 15–25 分钟（不含 API key 申请）。
+
+> Linux / WSL2 也能跑，但 `启动看板.command` 是 macOS bash 脚本；Linux 用户直接跑下面 §6 里的两条命令分别启 backend 和前端即可。
 
 ---
 
-## 一、系统要求
+## 1. 系统要求
 
 | 项 | 最低 | 推荐 |
 |---|---|---|
-| **OS** | macOS 12+ / Ubuntu 20.04+ / Windows WSL2 | macOS 14+ |
-| **Python** | 3.10 | 3.11 或 3.12 |
-| **磁盘** | 500 MB（含依赖） | 1 GB |
-| **网络** | 必须能访问 Apple iTunes / Google Play / Reddit / Sensor Tower | 全球可达 |
-
-> Windows 直接跑会有 SSL / shell 兼容问题，**强烈建议 WSL2**。
-
----
-
-## 二、零步骤总览
-
-```
-1. 装 Python 3.10+ + git                       ~5 min
-2. clone 仓库                                  ~1 min
-3. 装 Python 依赖                              ~5 min
-4. 创建 .env.local 填 API key                   ~5 min（含申请）
-5. 双击 启动看板.command 跑起来                  ~30 sec
-6. 浏览器打开 → 点"同步数据"拉真数据              ~3-5 min
-```
+| OS | macOS 12+ | macOS 14+ |
+| Python | 3.10 | 3.11 / 3.12 |
+| Node.js | 18 | 20 LTS |
+| 磁盘 | 1 GB（含 Playwright Chromium） | 2 GB |
+| 网络 | 能访问 Apple iTunes / Google Play / Reddit / Sensor Tower / qimai.cn | 全球可达 |
 
 ---
 
-## 三、详细步骤
-
-### 1. 装系统依赖
-
-#### macOS
+## 2. 装系统依赖
 
 ```bash
-# 1.1 装 Xcode 命令行工具（含 git）
+# Xcode 命令行工具（带 git）
 xcode-select --install
 
-# 1.2 装 Homebrew（如还没装）
+# Homebrew
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# 1.3 装 Python 3.11+
-brew install python@3.11
+# Python + Node
+brew install python@3.11 node@20
 
 # 验证
-python3 --version    # 期望 ≥ 3.10
+python3 --version    # ≥ 3.10
+node --version       # ≥ 18
 ```
-
-#### Ubuntu / Debian
-
-```bash
-sudo apt update
-sudo apt install -y python3 python3-pip python3-venv git curl
-python3 --version
-```
-
-#### Windows (WSL2)
-
-参考 [Microsoft 官方指南](https://learn.microsoft.com/en-us/windows/wsl/install) 装好 WSL2 + Ubuntu，然后跟 Ubuntu 步骤。
 
 ---
 
-### 2. Clone 仓库
+## 3. Clone 仓库
 
 ```bash
-cd ~/Desktop                                    # 或任意位置
-git clone <你的仓库 URL> Football_Intel_Suite
+cd ~/Desktop                                   # 或任意位置
+git clone <仓库 URL> Football_Intel_Suite
 cd Football_Intel_Suite
 ```
 
-> 私有仓库需先配 SSH key 或用 PAT。
+---
+
+## 4. 装 Python 依赖
+
+```bash
+pip3 install --user --break-system-packages -r requirements.txt
+
+# Playwright 还要装浏览器内核 —— qimai 抓取走系统 Chrome 也行，
+# 其他 3 个 scraper（appmagic / sensor_tower / fb_adlib）需要 chromium：
+python3 -m playwright install chromium
+```
+
+> 推荐 venv：`python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`。
+> 注意：用 venv 时 `启动看板.command` 调的是系统 `python3`，要么改脚本里的 `python3` 为 `.venv/bin/python3`，要么每次启动前 `source .venv/bin/activate`。
+
+[requirements.txt](requirements.txt) 里 `pymysql` 和 `redis` 是可选 —— 不配 `MYSQL_DSN` / `REDIS_URL` 就用不上，dao 层会自动降级到 JSON-only 模式（看板照常显示，但少了一些历史趋势数据）。
 
 ---
 
-### 3. 装 Python 依赖
-
-**推荐方式：用户级安装（避免污染系统 Python）**
+## 5. 装前端依赖
 
 ```bash
-# macOS Homebrew Python 14+ 需 --break-system-packages（PEP 668）
-pip3 install --user --break-system-packages \
-  aiohttp \
-  google-play-scraper \
-  app-store-scraper \
-  pandas \
-  requests \
-  beautifulsoup4
+cd intel-ops-frontend
+npm install
+cd ..
 ```
 
-**或用 venv（更干净，推荐）**
+---
+
+## 6. 配 API Key
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install \
-  aiohttp \
-  google-play-scraper \
-  app-store-scraper \
-  pandas \
-  requests \
-  beautifulsoup4
+cp .env.local.example .env.local
+nano .env.local       # 或 vim / code
 ```
 
-> 启动看板.command 用的是系统 `python3`。如果用 venv，要么改 .command 里的 `python3` 为 `.venv/bin/python3`，要么每次启动前 `source .venv/bin/activate`。
+至少填一个 Claude key：
 
-#### 依赖清单（按用途）
+```bash
+# 中转（推荐 — 国内更稳）
+CLAUDE_API_KEY=sk-xxxxxx
 
-| 包 | 用途 | 必需 / 可选 |
+# 或官方
+ANTHROPIC_API_KEY=sk-ant-xxxx
+```
+
+可选 key（不填就跳过对应抓取源 / 通知，不影响其他流程）：
+
+| 变量 | 影响 | 怎么拿 |
 |---|---|---|
-| `aiohttp` | async_crawler 异步抓取（fb_adlib / reddit / twitter / iap_pricing） | **必需** |
-| `google-play-scraper` | Google Play 评论抓取（auto_report / weekly_review / competitor_detail） | **必需** |
-| `app-store-scraper` | App Store 评论备用 | 可选（iTunes RSS 已够用） |
-| `pandas` | market_rank 表格处理 | **必需** |
-| `requests` | strategy_monitor / market_rank HTTP 调用 | **必需** |
-| `beautifulsoup4` | 部分 HTML 解析备用 | 可选 |
+| `UTOOLS_AUTH_TOKEN` | X (Twitter) 抓取 | 详见 .env.local.example 顶部 cookie 提取步骤 |
+| `MYSQL_DSN` | 历史 fact 表读写（评论 / 广告 / IAP / 排名 / 社媒）| `docker compose up -d` 起本地 MySQL；DSN 默认值已写在模板里可直接用 |
+| `REDIS_URL` | sync_state / retry_queue 实时镜像 | 同上 docker-compose 起 Redis |
+| `FEISHU_WEBHOOK_URL` | sync 完成 / cookie 失效 / 重试时飞书通知 | 飞书群 → 群机器人 → 自定义机器人 |
 
-> **最小集**（跑看板 + 同步抓取够）：`aiohttp + google-play-scraper + pandas + requests`
-
----
-
-### 4. 配置 API Key
-
-```bash
-cp .env.local.example .env.local
-# 用任意编辑器打开
-nano .env.local        # 或 vim / code .env.local
-```
-
-填入这些 key：
-
-```bash
-# === 必填（至少其一）===
-
-# Claude API 中转代理（推荐 — 国内更稳）
-CLAUDE_API_KEY=sk-xxxxxxxx...
-
-# 或 Anthropic 官方
-ANTHROPIC_API_KEY=sk-ant-xxxx...
-
-
-# === 可选 ===
-
-# X (Twitter) v2 Bearer Token
-# 不填：社媒抓取自动跳过 X 源
-# 申请：https://developer.x.com → Apps → Keys and tokens → Bearer Token
-X_BEARER_TOKEN=AAAA...
-
-# Meta 广告库 Access Token
-# 不填：Meta 广告抓取大概率被反爬
-# 申请：https://developers.facebook.com/tools/explorer/
-#   → 选 App → Get User Access Token → 勾 ads_read
-META_AD_LIBRARY_TOKEN=EAA...
-```
-
-> **`.env.local` 已在 `.gitignore`，绝不会提交。**
-
-#### 申请 Claude API Key
-
-- **方案 A · 中转（推荐）**：联系内部管理员拿 flashapi.top 的 key（开头 `sk-...`）
-- **方案 B · 官方**：https://console.anthropic.com → API Keys → Create Key
-
-#### 申请 X Bearer Token（10 分钟）
-
-1. https://developer.x.com → 登录 → Sign up for Free Account
-2. 创建 Project + App
-3. App settings → Keys and tokens → Bearer Token → Generate
-
-#### 申请 Meta Token（10 分钟）
-
-1. https://developers.facebook.com/apps/ → Create App → Other
-2. Add Product → Ad Library API
-3. Tools → Graph API Explorer → 选 App → Get User Access Token → 勾 `ads_read`
-4. Tools → Access Token Debugger → "Extend Access Token"（拿 60 天版本）
+> `.env.local` 已 gitignored，绝不会提交。
+> 想"换台 Mac 不用重填"：把同样的 key 写一份到 `~/.intelops-secrets`，`shared/env_loader.py` 会双层兜底加载。
 
 ---
 
-### 5. 首次启动
+## 7. 起服务
 
 ```bash
-# 给启动脚本执行权限
 chmod +x 启动看板.command
-
-# 启动
 ./启动看板.command
 ```
 
-期望输出：
+期望看到：
 
 ```
-✅ 服务器已启动 (PID: xxxxx)
-   - 中转 key:  已配置
-   - 官方 key:  未配置
-   - X token:   已配置
+✓ backend ready (PID xxxxx)
+✓ vite ready    (PID xxxxx)
+════════════════════════════════════════
+  ✅ INTEL-OPS 已启动
+  v2 前端:    http://127.0.0.1:5173/
+  v2 后端 API: http://127.0.0.1:8899/
+════════════════════════════════════════
 ```
 
-浏览器自动开 http://localhost:8899
+浏览器自动打开 http://localhost:5173/overview。Ctrl+C 停两个服务。
 
-> **首次启动前，data/ 目录下会有一些样本 fixture（已 commit），可以直接看到看板效果。要拉真实数据，点页面顶部"同步数据"按钮。**
-
----
-
-### 5b. Playwright 持久登录态（一次性手动登）
-
-下面 4 个抓取器走 Playwright 持久 profile，**首次必须手动登录一次**（cookie 存盘后续自动用，失效再重登）：
-
-| 抓取器 | 一次性登录命令 | 登录页 | 登录方式 |
-|---|---|---|---|
-| **qimai IAP**（替代 Apple HTML，绕开 IP redirect 到 CN 的死结） | `python3 -m market_rank.scrape_qimai_iap login` | qimai.cn 首页 | 手机号 / 微信 / 账号 |
-| AppMagic | `python3 -m market_rank.scrape_appmagic login` | appmagic.rocks | 免费账号 |
-| Sensor Tower | `python3 -m market_rank.scrape_sensor_tower login` | sensortower.com | 免费账号 |
-| Meta Ad Library | `python3 -m market_rank.scrape_fb_adlib login` | facebook.com/ads/library | FB 账号 |
-
-**qimai 登录的额外注意**（反爬绕过）：
-- 我们用**系统 Google Chrome** 而不是 Playwright bundled chromium（关掉 `AutomationControlled` flag）
-- 弹窗打开后**只在首页操作**，不要点 app 链接（点错跳到详情页未登录态会被 SPA 弹 /404，那是 qimai 反爬正常行为）
-- 在 qimai.cn 首页右上角点「登录」 → 完成验证 → 看到自己的头像/昵称才算登录成
-- 回终端按 Enter 保存 cookie 到 `~/.qimai-profile/state.json`
-
-如果新登的还 404，重新跑 `login` 命令——cookie 失效或 qimai 换了反爬规则，可能要再加 stealth 措施。
-
----
-
-### 6. 首次同步数据
-
-1. 浏览器顶部点 "**同步数据**" 按钮
-2. 进度条显示 `(N/8)：标签`
-3. 等 3-5 分钟全部完成
-4. 总览页底部 "**同步抓取日志**" 卡可看每步耗时 / 失败详情
-
-期望成果：
-- 产品动态卡：6 个竞品的发布时间填好
-- 排名页：top 100 全有 + 监测竞品有 14 天历史
-- 用户评论页：6 个竞品都有评论
-- 商业页：IAP 价格 + Sensor Tower 收入数据
-- 社媒页：Reddit 帖子（如 X token 已配，含 X）
-
----
-
-## 四、目录结构
-
-```
-Football_Intel_Suite/
-├── .env.local              # API key 配置（gitignored，自己创建）
-├── .env.local.example      # 模板
-├── 启动看板.command         # macOS 双击启动
-├── SETUP.md                # 本文档
-│
-├── data/                   # 所有数据（部分 gitignored）
-│   ├── competitors.json    # 监测竞品配置（必需）
-│   ├── regions.json        # 地区配置
-│   ├── dashboard_data.json # 聚合产物（自动生成）
-│   ├── sync_log.json       # 同步日志（自动生成）
-│   ├── alert_config.json   # 预警阈值（自动生成）
-│   └── raw/                # 抓取产物
-│
-├── main_dashboard/
-│   └── dashboard_server.py       # v2 REST API（:8899）
-│
-├── intel-ops-frontend/           # React + Vite 前端（:5173）
-│
-├── data_pipeline/
-│   ├── aggregator.py        # 7 数据源 → 统一 dashboard_data.json
-│   ├── alert_engine.py      # 23 条预警触发器
-│   └── schema.py            # 数据结构定义
-│
-├── async_crawler/           # 异步抓取（fb / reddit / twitter / iap）
-├── market_rank/             # iTunes 体育榜 + sensor_tower
-├── strategy_monitor/        # iTunes 版本监测
-├── competitor_comment/      # 评论抓取 + 周报 + 详情分析
-├── commercial_strategy/     # 商业策略 / IAP 定价
-├── community_insights/      # 社媒 AI 分析
-├── prompts/                 # AI prompt 模板
-├── shared/                  # 共享工具（env_loader 等）
-└── config/                  # AI / Alert 配置
-```
-
----
-
-## 五、常见故障
-
-### 1. `ModuleNotFoundError: No module named 'aiohttp'`
+**Linux / WSL2 用户**：
 
 ```bash
-pip3 install --user --break-system-packages aiohttp
-```
+# 终端 A
+python3 main_dashboard/dashboard_server.py 8899
 
-### 2. `❌ 缺少 .env.local`
-
-```bash
-cp .env.local.example .env.local
-# 编辑填 key
-```
-
-### 3. 端口 8899 被占用
-
-```bash
-lsof -ti:8899 | xargs kill -9
-./启动看板.command
-```
-
-### 4. 同步失败，怎么排查
-
-打开浏览器看 **同步抓取日志卡**（总览页底部）：
-- ✗ 红色行 → 点击展开看 stderr
-- 常见错误：
-  - `HTTP 429`：API 限流，等几分钟重试
-  - `403 Client challenge`：Meta 反爬，需配 META_AD_LIBRARY_TOKEN
-  - `超时（1200秒）`：网络慢，单独跑该脚本看进度
-  - `ModuleNotFoundError`：装依赖
-
-### 5. 想 SSL 证书校验跳过
-
-部分企业网络拦截 SSL，脚本里多数 `urlopen` 已加 `ssl.CERT_NONE` 跳过。如仍报错：
-
-```python
-# 检查 ~/.python-eggs/ 或 SSL 证书路径
-# 或临时：export PYTHONHTTPSVERIFY=0
-```
-
-### 7. Sensor Tower 一直 429
-
-新代码已加退避重试（5/10/20/40s）。如仍失败，等 1 小时再试 — 它的公开 API 有 IP 级限制。
-
----
-
-## 六、最小 / 最大依赖矩阵
-
-### 最小可跑（仅看板 + 评论 + 排名）
-
-```
-aiohttp + google-play-scraper + pandas + requests
-+ CLAUDE_API_KEY
-```
-
-不能用：Meta 广告 / X 社媒 / Streamlit UI
-
-### 全功能
-
-```
-aiohttp + google-play-scraper + app-store-scraper +
-pandas + requests + beautifulsoup4
-+ CLAUDE_API_KEY + X_BEARER_TOKEN
+# 终端 B
+cd intel-ops-frontend && npm run dev
+# 浏览器开 http://localhost:5173/overview
 ```
 
 ---
 
-## 七、第二天用法
+## 8. 第一次拉数据
+
+仓库里只 commit 了 3 个种子文件（`competitors.json` / `regions.json` / `market_history.csv`），首次启动看板看不到任何真实数据。**手动跑一次同步** 生成 `dashboard_data.json`：
+
+```bash
+python3 scripts/daily_sync.py
+```
+
+第一次大约 15–30 分钟（评论抓取 9 竞品 × 12 区是大头）。跑完看板就有数据了。
+
+如果有源失败：打开 [系统 → 同步日志](http://localhost:5173/system/sync-log) 看 stderr。
+
+---
+
+## 9. Playwright 持久登录态（一次性）
+
+下面 4 个抓取器走 Playwright 持久 profile，**首次必须手动登录一次**（cookie 落盘后续自动用，失效再重登）：
+
+| 抓取器 | 一次性登录命令 | profile 路径 |
+|---|---|---|
+| AppMagic | `python3 -m market_rank.scrape_appmagic login` | `~/.appmagic-profile` |
+| Sensor Tower | `python3 -m market_rank.scrape_sensor_tower login` | `~/.sensortower-profile` |
+| Meta 广告库 | `python3 -m market_rank.scrape_fb_adlib login` | `~/.meta-adlib-profile` |
+| qimai IAP（cn 区 IAP 价格）| `python3 -m market_rank.scrape_qimai_iap login` | `~/.qimai-profile` |
+
+**qimai 反爬注意**：用系统 Chrome（`channel='chrome'`）而不是 bundled chromium，弹窗后只在 qimai.cn 首页操作，登录后回终端按 Enter 保存。
+
+---
+
+## 10. 装 launchd 自动同步（可选）
+
+让 daily / weekly / retry 三个任务自动跑：
+
+```bash
+bash scripts/install_launchd.sh
+```
+
+| Agent | 调度 | 跑什么 |
+|---|---|---|
+| `com.intelops.daily` | 每天 02:00 | `daily_sync.py`（12 数据源 + AI 管道 + 聚合）|
+| `com.intelops.weekly` | 周日 03:00 | `weekly_sync.py`（IAP 价格 + Google News + sitedata 流量）|
+| `com.intelops.retry` | 每小时 | `daily_sync.py --retry-only`（清重试队列）|
+
+> install 脚本会自动把 plist 模板里的 `__PROJECT_ROOT__` 替换成当前仓库路径 —— 换电脑 / 换用户名重跑这一行就行。
+
+```bash
+launchctl list | grep intelops    # 查状态
+tail -f /tmp/intelops-daily.log    # 看最近一次跑的日志
+bash scripts/uninstall_launchd.sh  # 卸
+```
+
+---
+
+## 11. 起 MySQL + Redis（可选 · 推荐）
+
+不配也能跑，但配上能存历史趋势（评论标签 / 排名快照 / 收入历史）。
+
+```bash
+# 装 docker desktop（一次性）
+brew install --cask docker
+open -a Docker        # 启动 Docker Desktop，等托盘图标变绿
+
+# 起服务
+docker compose up -d
+
+# 验证
+docker compose ps     # 看 mysql + redis 都是 Up
+```
+
+`.env.local.example` 里默认 DSN 已经匹配 `docker-compose.yml`，不用改。
+
+---
+
+## 12. 第二天怎么用
 
 ```bash
 cd ~/Desktop/Football_Intel_Suite
 ./启动看板.command
 ```
 
-浏览器自动打开 http://localhost:8899，点"同步数据"刷新。
+如果装了 launchd，数据每天 02:00 自动更新；不装就手动 `python3 scripts/daily_sync.py`。
+
+前端面板 60s 内会自动拉最新数据（TanStack Query staleTime + refetchOnMount），不用手动刷。
 
 ---
 
-## 八、卸载 / 重装
+## 13. 常见故障
+
+| 症状 | 排查 |
+|---|---|
+| `ModuleNotFoundError: No module named 'X'` | `pip install -r requirements.txt` |
+| `❌ 缺少 .env.local` | `cp .env.local.example .env.local` 编辑填 key |
+| 端口 8899 / 5173 被占 | `lsof -ti:8899 \| xargs kill -9` |
+| Playwright 任务报 `LoginRequired` | 重新跑对应的 `login` 命令（cookie 失效）|
+| qimai 登录后 404 | 反爬规则可能更新，重新登录；只在 qimai.cn 首页操作不要点 app 链接 |
+| 同步失败查原因 | http://localhost:5173/system/sync-log 看 stderr / http 状态码 |
+| 前端面板数据看起来旧 | 切换路由 / Cmd+R / 等 60 秒（staleTime 到期）|
+| `dashboard_data.json` 不存在 | 跑一次 `python3 scripts/daily_sync.py` 生成 |
+| Sensor Tower 持续 429 | 等 1 小时（IP 级限流）|
+
+---
+
+## 14. 完全卸载
 
 ```bash
-# 1. 停服务
+# 停服务
 pkill -9 -f dashboard_server.py
+bash scripts/uninstall_launchd.sh
 
-# 2. 删依赖（仅 venv 模式）
-rm -rf .venv
-
-# 3. 删数据（保留代码）
+# 删数据（保留代码）
 rm -rf data/raw data/dashboard_data.json data/sync_log.json
 rm -rf data/competitor_detail_*.json data/review_3d_*.json
 
-# 4. 完全删
+# Playwright cookies
+rm -rf ~/.appmagic-profile ~/.sensortower-profile ~/.meta-adlib-profile ~/.qimai-profile
+
+# 整个删
 cd ~/Desktop && rm -rf Football_Intel_Suite
 ```
-
----
-
-## 九、需要进一步帮助
-
-| 场景 | 怎么办 |
-|---|---|
-| 添加新竞品 | 编辑 `data/competitors.json`，加 `{name: {gp, ios, app_id, bundle_id}}`；用 `google_play_scraper.app(pkg)` 验证包名 |
-| 修改预警阈值 | 编辑 `data/alert_config.json`（首次运行后自动生成） |
-| 调整 AI prompt | 编辑 `prompts/*.py` 里对应的 builder 函数 |
-| 改抓取频率 | 编辑 `async_crawler/sources/*.py` 里的 `rate_limit` |
-| 看完整 API | http://localhost:8899/api/sync_log 等端点直接 curl |
