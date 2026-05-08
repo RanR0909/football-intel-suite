@@ -389,10 +389,12 @@ class APIHandler(BaseHTTPRequestHandler):
         )
 
         # candidates (待审阅 = is_relevant=true + reviewed=false 不直接存，前端 localStorage 判定)
+        # 与 /api/candidates 默认过滤口径对齐：排除博彩 app
         candidate_count = _query(
             "SELECT COUNT(*) as n FROM app_classifications "
             "WHERE is_relevant = 1 AND topic IN ('football','multi_sport') "
-            "AND confidence >= 0.85"
+            "AND confidence >= 0.85 "
+            "AND (categories IS NULL OR JSON_CONTAINS(categories, '\"betting\"') = 0)"
         )
         cand_n = (candidate_count[0]["n"] if candidate_count else 0)
         # 表为空 → 用派生候选数
@@ -1501,11 +1503,17 @@ class APIHandler(BaseHTTPRequestHandler):
         return self._send_json({"error": f"invalid dim: {dim}"}, status=400)
 
     def api_candidates(self):
-        """GET /api/candidates?topic=&conf_min=&limit= — 候选 app（不含已 in competitors 的）"""
+        """GET /api/candidates?topic=&conf_min=&limit=&include_betting=
+        候选 app（不含已 in competitors 的）。
+
+        默认排除 categories 含 'betting' 的博彩 app — AllFootball 是足球数据/资讯产品，
+        博彩类不算同业竞品。如需查看，传 `include_betting=1`。
+        """
         q = self._qs()
         topic = q.get("topic", "")
         conf_min = _parse_float(q, "conf_min", default=0.85)
         limit = _parse_int(q, "limit", default=100, max_=500, min_=1)
+        include_betting = q.get("include_betting", "") in ("1", "true", "yes")
 
         wheres = ["a.is_relevant = 1", "a.confidence >= :cmin"]
         params = {"cmin": conf_min, "limit": limit}
@@ -1517,6 +1525,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 params[f"t{i}"] = t
         else:
             wheres.append("a.topic IN ('football','multi_sport')")
+
+        # 默认排除博彩类（除非 ?include_betting=1）
+        if not include_betting:
+            wheres.append("(a.categories IS NULL OR JSON_CONTAINS(a.categories, '\"betting\"') = 0)")
 
         # 排除已在 competitors 的
         wheres.append(
