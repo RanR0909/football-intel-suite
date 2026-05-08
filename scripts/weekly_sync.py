@@ -79,8 +79,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             ["-m", "market_rank.scrape_qimai_iap", "scrape", "--country", "ca"], 600, "http"),
         ("google_news", "Google 商业新闻（RSS 周更）",
             ["-m", "async_crawler", "--sources", "google_news"], 600, "http"),
-        ("similarweb_traffic", "Similarweb 网站流量（周更）",
-            ["-m", "market_rank.scrape_similarweb", "scrape"], 900, "http"),
+        ("sitedata_traffic", "SiteData 网站流量（周更）",
+            ["-m", "market_rank.scrape_sitedata"], 900, "http"),
         ("aggregate_weekly", "聚合 dashboard_data.json（周更）",
             ["-m", "data_pipeline.aggregator"], 120, "aggregate"),
     ]
