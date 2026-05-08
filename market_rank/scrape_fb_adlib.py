@@ -110,11 +110,10 @@ EXTRACT_JS = r"""
     if (!/Facebook|Instagram|Audience|Messenger|Threads/i.test(platform)) platform = '';
 
     const lines = fullText.split('\n').map(s => s.trim()).filter(Boolean);
-    const pageName = lines[0] || '';
     let mediaUrl = '';
     const img = parent.querySelector('img[src*="scontent"], img[src*="fbcdn"], video');
     if (img) mediaUrl = img.src || img.currentSrc || '';
-    // 文案：去掉 metadata 行
+    // metadata 行前缀（多语言）
     const metaPrefixes = [
       'Library ID', '资料库编号', 'ID de la bibliothèque',
       'Started running', '开始投放', 'Platforms', '平台', 'Plateformes',
@@ -122,6 +121,47 @@ EXTRACT_JS = r"""
       'Sponsored', '赞助内容', '赞助',
       'EU transparency', '欧盟境内',
     ];
+
+    // Fix 5 (2026-05-08): page_name + page_id 双轨提取
+    //   旧版用 lines[0] 拿广告主名字，但 FB 卡片首行经常是 metadata（"Active"/"Library ID"），
+    //   导致 376/376 page_name 全空。
+    //   新方案：
+    //   1. 优先从 DOM link 找 — 广告卡顶部有 <a> 链向广告主主页，
+    //      href 形如 "/<vanity>/" 或 "?id=<page_id>"，link 内文本是 page name
+    //   2. fallback：扫 lines 找第一个非 metadata 短行（< 60 字 + 非纯标点）
+    let pageName = '';
+    let pageId = '';
+    const advertiserLinks = parent.querySelectorAll('a[href]');
+    for (const a of advertiserLinks) {
+      const href = a.getAttribute('href') || '';
+      // 跳过广告库自身链接
+      if (href.includes('/ads/library')) continue;
+      if (href.includes('/profile.php?id=')) {
+        const m = href.match(/[?&]id=(\d+)/);
+        if (m) pageId = m[1];
+        const txt = (a.innerText || '').trim();
+        if (txt && txt.length < 60 && !pageName) pageName = txt;
+        if (pageId && pageName) break;
+      } else if (/^https?:\/\/(www\.)?facebook\.com\/[^\/?#]+\/?$/.test(href)
+                 || /^\/[^\/?#]+\/?$/.test(href)) {
+        // vanity URL: facebook.com/sofascore 或 /sofascore/
+        const txt = (a.innerText || '').trim();
+        if (txt && txt.length < 60 && !pageName) pageName = txt;
+        // vanity URL 拿不到 numeric page_id，由后端 discover 流程补
+      }
+    }
+    // fallback: 扫 lines 找首行非 metadata 短行
+    if (!pageName) {
+      for (const l of lines) {
+        if (l.length < 2 || l.length > 80) continue;
+        if (metaPrefixes.some(p => l.startsWith(p))) continue;
+        // 排除全数字 / 全标点 / Library ID 这种
+        if (/^[\d\s.\-,:#]+$/.test(l)) continue;
+        pageName = l;
+        break;
+      }
+    }
+
     const bodyLines = lines.filter(l =>
       !metaPrefixes.some(p => l.startsWith(p)) && l.length > 4
     );
@@ -132,6 +172,7 @@ EXTRACT_JS = r"""
       start_date: startDate,
       platform: platform,
       page_name: pageName,
+      page_id: pageId,
       media_url: mediaUrl,
     });
   }
@@ -275,11 +316,19 @@ async def cmd_scrape(headed: bool = False, countries: list[str] | None = None) -
         PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
     target_countries = [c.upper() for c in (countries or AD_COUNTRIES)]
-    competitors = list(get_comment_competitors().keys())
+    comp_dict = get_comment_competitors()
+    competitors = list(comp_dict.keys())
     results: list[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    print(f"[fb_adlib] 抓取国家：{target_countries}（{len(competitors)} 竞品 × {len(target_countries)} 国 = {len(competitors) * len(target_countries)} query）")
+    # 统计 page_id 配置情况：有 fb_page_id 的走精确，无的回退到关键词搜索（污染严重）
+    with_page_id = [n for n in competitors if comp_dict[n].get("fb_page_id")]
+    without_page_id = [n for n in competitors if not comp_dict[n].get("fb_page_id")]
+    print(f"[fb_adlib] 抓取国家：{target_countries} · {len(competitors)} 竞品")
+    print(f"  · 精确 (fb_page_id): {len(with_page_id)} 个 — {with_page_id}")
+    if without_page_id:
+        print(f"  · 关键词回退（污染高）: {len(without_page_id)} 个 — {without_page_id}")
+        print(f"    建议先跑 discover-pages 命令补全 fb_page_id")
 
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(
@@ -291,23 +340,39 @@ async def cmd_scrape(headed: bool = False, countries: list[str] | None = None) -
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
             for app_name in competitors:
+                fb_page_id = comp_dict[app_name].get("fb_page_id")
                 for country in target_countries:
-                    # Fix 1 (2026-05-06): URL 参数对齐 Meta 当前默认行为。
-                    # 旧版只有 active_status / ad_type / country / q，Meta 默认走"广告主精确匹配"
-                    # → 用 q=SofaScore 找不到（FB Page name 不一定叫 SofaScore）→ 0 条。
-                    # 加 search_type=keyword_unordered 强制关键词模糊匹配（与 Chrome 手动访问一致）。
-                    url = (
-                        "https://www.facebook.com/ads/library/"
-                        f"?active_status=active&ad_type=all&country={country}"
-                        f"&is_targeted_country=false&media_type=all"
-                        f"&q={quote(app_name)}&search_type=keyword_unordered"
-                    )
-                    print(f"[{app_name}/{country}] 抓取中...")
+                    # 优先用 view_all_page_id (精确，仅该 page 投的广告)；缺失则关键词回退
+                    if fb_page_id:
+                        url = (
+                            "https://www.facebook.com/ads/library/"
+                            f"?active_status=active&ad_type=all&country={country}"
+                            f"&view_all_page_id={fb_page_id}"
+                            f"&is_targeted_country=false&media_type=all"
+                        )
+                        mode = f"page_id={fb_page_id}"
+                    else:
+                        # 回退：search_type=keyword_unordered 关键词模糊匹配（污染严重）
+                        url = (
+                            "https://www.facebook.com/ads/library/"
+                            f"?active_status=active&ad_type=all&country={country}"
+                            f"&is_targeted_country=false&media_type=all"
+                            f"&q={quote(app_name)}&search_type=keyword_unordered"
+                        )
+                        mode = f"keyword='{app_name}'"
+                    print(f"[{app_name}/{country}] 抓取中 ({mode})...")
                     try:
                         cards = await _scroll_and_collect(page, url)
                     except Exception as e:
                         print(f"  ERROR: {e}", file=sys.stderr)
                         cards = []
+                    # 关键词模式下做后过滤：只留 page_name 含竞品名 fuzzy 匹配的
+                    if not fb_page_id and cards:
+                        norm_app = app_name.lower().replace(" ", "")
+                        kept = [c for c in cards if norm_app in (c.get("page_name") or "").lower().replace(" ", "")]
+                        if len(kept) < len(cards):
+                            print(f"  关键词后过滤：{len(cards)} → {len(kept)} 条 (剥离 page_name 不含 '{app_name}' 的)")
+                        cards = kept
                     for c in cards:
                         c["country"] = country.lower()
                     rec = {
@@ -341,21 +406,183 @@ async def cmd_scrape(headed: bool = False, countries: list[str] | None = None) -
     return DATA_OUT
 
 
+# ---- 命令：discover-pages（自动找 fb_page_id 写回 competitors.json）----------
+
+# advertiser search 页面 DOM 抽取：找所有 <a href="...view_all_page_id=N..."> 链接
+DISCOVER_JS = r"""
+() => {
+  const out = [];
+  const seen = new Set();
+  // advertiser search 结果 = 含 view_all_page_id= 链接
+  const links = document.querySelectorAll('a[href*="view_all_page_id="]');
+  for (const a of links) {
+    const m = a.href.match(/view_all_page_id=(\d+)/);
+    if (!m) continue;
+    const pageId = m[1];
+    if (seen.has(pageId)) continue;
+    seen.add(pageId);
+    // 找 advertiser name — 优先 link 内文本；空则爬 parent 找首行有意义文本
+    let name = (a.innerText || '').trim();
+    if (!name) {
+      let p = a.parentElement;
+      for (let i = 0; i < 4 && p; i++) {
+        const lines = (p.innerText || '').split('\n').map(s => s.trim()).filter(Boolean);
+        for (const l of lines) {
+          if (l.length > 1 && l.length < 80 && !/^[\d\s.\-]+$/.test(l)) {
+            name = l;
+            break;
+          }
+        }
+        if (name) break;
+        p = p.parentElement;
+      }
+    }
+    out.push({ page_id: pageId, name: name || '' });
+    if (out.length >= 20) break;
+  }
+  return out;
+};
+"""
+
+
+def _best_page_match(app_name: str, candidates: list[dict]) -> dict | None:
+    """启发式选 advertiser search 结果里 name 与 app_name 最匹配的。"""
+    if not candidates:
+        return None
+    import difflib
+    norm_app = app_name.lower().replace(" ", "")
+    # Tier 1: substring 包含
+    for c in candidates:
+        np = (c.get("name") or "").lower().replace(" ", "")
+        if not np:
+            continue
+        if norm_app in np or np in norm_app:
+            return c
+    # Tier 2: SequenceMatcher ≥ 0.6
+    scored = []
+    for c in candidates:
+        np = (c.get("name") or "").lower().replace(" ", "")
+        if not np:
+            continue
+        ratio = difflib.SequenceMatcher(None, norm_app, np).ratio()
+        scored.append((ratio, c))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored[0][1] if scored and scored[0][0] >= 0.6 else None
+
+
+async def cmd_discover_pages(headed: bool = False, dry_run: bool = False) -> None:
+    """访问 FB 广告库的 advertiser search 自动找每个竞品的 page_id 写回 competitors.json。
+
+    advertiser search URL: facebook.com/ads/library/?country=ALL&q=<竞品>&search_type=page
+    返回结果是 advertiser pages 而非 ads，每个卡片有 link 含 view_all_page_id=<id>。
+    """
+    competitors_path = _PROJECT_ROOT / "data" / "competitors.json"
+    if not competitors_path.exists():
+        print(f"❌ {competitors_path} 不存在", file=sys.stderr)
+        sys.exit(1)
+    raw = json.loads(competitors_path.read_text(encoding="utf-8"))
+    apps = raw.get("competitors") if isinstance(raw, dict) and "competitors" in raw else raw
+    if not isinstance(apps, dict):
+        print(f"❌ competitors.json 格式不对（顶层应是 dict）", file=sys.stderr)
+        sys.exit(1)
+    target_apps = list(apps.keys())
+    print(f"[discover] 共 {len(target_apps)} 个竞品要找 page_id")
+    print(f"  已有 fb_page_id 的 (跳过): {[a for a in target_apps if apps[a].get('fb_page_id')]}")
+
+    findings: dict[str, list[dict]] = {}
+    async with async_playwright() as p:
+        ctx = await p.chromium.launch_persistent_context(
+            str(PROFILE_DIR),
+            headless=not headed,
+            viewport={"width": 1400, "height": 900},
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        try:
+            for app_name in target_apps:
+                if apps[app_name].get("fb_page_id"):
+                    continue   # 已有则跳过
+                url = (
+                    "https://www.facebook.com/ads/library/"
+                    f"?country=ALL&q={quote(app_name)}&search_type=page"
+                )
+                print(f"\n[{app_name}] 搜 advertiser pages: {url}")
+                try:
+                    await page.goto(url, wait_until="domcontentloaded")
+                    await _accept_cookies_if_needed(page)
+                    await asyncio.sleep(3)
+                    candidates = await page.evaluate(DISCOVER_JS)
+                except Exception as e:
+                    print(f"  ERROR: {e}", file=sys.stderr)
+                    candidates = []
+                findings[app_name] = candidates
+                # 打印前 5 条
+                for c in candidates[:5]:
+                    print(f"    候选 page_id={c.get('page_id')} name={c.get('name')!r}")
+                if not candidates:
+                    print(f"    (找不到任何 advertiser page)")
+                await asyncio.sleep(1.5)
+        finally:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
+
+    print(f"\n[discover] 启发式 best-match：")
+    updates: dict[str, str] = {}
+    for app_name, candidates in findings.items():
+        best = _best_page_match(app_name, candidates)
+        if best:
+            print(f"  ✓ {app_name:<14} → page_id={best['page_id']} name={best.get('name')!r}")
+            updates[app_name] = best["page_id"]
+        else:
+            print(f"  ✗ {app_name:<14} → 找不到合适的 (top 候选: {candidates[:3]})")
+
+    if dry_run:
+        print(f"\n[dry-run] 不写回 competitors.json")
+        return
+    if not updates:
+        print(f"\n[discover] 没有要更新的；competitors.json 不变")
+        return
+
+    # 写回
+    for app_name, page_id in updates.items():
+        if "competitors" in raw:
+            raw["competitors"][app_name]["fb_page_id"] = page_id
+        else:
+            raw[app_name]["fb_page_id"] = page_id
+    competitors_path.write_text(
+        json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"\n[discover] 已写回 {competitors_path}（更新 {len(updates)} 个）")
+    print(f"  下次 fb_adlib scrape 会自动用 page_id 精确匹配")
+
+
 # ---- main -----------------------------------------------------------------
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["login", "scrape"], nargs="?", default="scrape")
+    ap.add_argument(
+        "command",
+        choices=["login", "scrape", "discover-pages"],
+        nargs="?", default="scrape",
+        help="login: 首次登录 / cookie 刷新；scrape: 抓广告（默认）；"
+             "discover-pages: 自动找每个竞品的 fb_page_id 写回 competitors.json",
+    )
     ap.add_argument("--headed", action="store_true")
     ap.add_argument(
         "--country",
         action="append",
         help="指定单个国家（可多次传：--country US --country GB）；缺省 = 全部 5 国",
     )
+    ap.add_argument("--dry-run", action="store_true",
+                    help="discover-pages: 只打印不写回 JSON")
     args = ap.parse_args()
 
     if args.command == "login":
         asyncio.run(cmd_login())
+    elif args.command == "discover-pages":
+        asyncio.run(cmd_discover_pages(headed=args.headed, dry_run=args.dry_run))
     else:
         asyncio.run(cmd_scrape(headed=args.headed, countries=args.country))
 
