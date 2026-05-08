@@ -68,8 +68,15 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # ---- 任务序列（AI 报告类全部废弃；只剩 3 个数据更新 + 1 个聚合） ----
     tasks = [
-        ("iap_pricing", "IAP 定价（qimai · 周更）",
-            ["-m", "market_rank.scrape_qimai_iap", "scrape"], 600, "http"),
+        # IAP 抓 4 区：US / ID / MY / CA（CN 已废弃，从 region 列表删掉）
+        ("iap_pricing_us", "IAP 定价 · US（qimai · 周更）",
+            ["-m", "market_rank.scrape_qimai_iap", "scrape", "--country", "us"], 600, "http"),
+        ("iap_pricing_id", "IAP 定价 · ID（qimai · 周更）",
+            ["-m", "market_rank.scrape_qimai_iap", "scrape", "--country", "id"], 600, "http"),
+        ("iap_pricing_my", "IAP 定价 · MY（qimai · 周更）",
+            ["-m", "market_rank.scrape_qimai_iap", "scrape", "--country", "my"], 600, "http"),
+        ("iap_pricing_ca", "IAP 定价 · CA（qimai · 周更）",
+            ["-m", "market_rank.scrape_qimai_iap", "scrape", "--country", "ca"], 600, "http"),
         ("google_news", "Google 商业新闻（RSS 周更）",
             ["-m", "async_crawler", "--sources", "google_news"], 600, "http"),
         ("similarweb_traffic", "Similarweb 网站流量（周更）",
