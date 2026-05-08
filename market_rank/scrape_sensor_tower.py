@@ -249,11 +249,15 @@ async def cmd_scrape(headed: bool = False, platform: str = DEFAULT_PLATFORM) -> 
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
             for app_name, comp in competitors.items():
-                # iOS 用 ios numeric id；Android 用 gp_package（com.xxx.yyy 字符串）
-                if platform == "ios":
-                    app_id = str(comp.get("ios") or comp.get("app_id") or "")
+                # Sensor Tower URL 用同一个 ID 对两个平台 — iOS numeric id (1176147574) 通用，
+                # `?os=android` 是 query 参数切视图。实测 SST overview 页面能识别 numeric id
+                # 并返回对应平台数据。
+                # Android 优先用 GP package name（com.sofascore.results），fallback 到 ios id。
+                # 部分 app 在 SST 上 Android 页用 GP package 作 slug，少部分用 numeric。
+                if platform == "android":
+                    app_id = str(comp.get("gp") or comp.get("ios") or comp.get("app_id") or "")
                 else:
-                    app_id = str(comp.get("gp_package") or comp.get("android") or "")
+                    app_id = str(comp.get("ios") or comp.get("app_id") or "")
                 if not app_id:
                     print(f"[{app_name}] 没有 {platform} id，跳过", file=sys.stderr)
                     continue

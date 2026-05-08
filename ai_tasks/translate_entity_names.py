@@ -68,15 +68,20 @@ def translate_one(
         return {"canonical_id": canonical_id, "error": "json_parse"}
 
     chinese_name = (result.get("chinese_name") or "").strip()
-    # 校验：必须是非空 + 含中文字符
-    if not chinese_name or not _has_cjk(chinese_name):
+    # 校验：只要非空即接受。常见的合理输出有三类：
+    #   a) 中文翻译（CJK，最常见）
+    #   b) 原样品牌/平台名（iOS/Sofascore/USDT — prompt 规则要求保留）
+    #   c) 剥前缀的别名（@PolymarketFC → PolymarketFC; @laoctavasports → La Octava Sports）
+    # 前端展示时 chinese_name 与 primary_name 完全一致就不附原文，否则附小字交叉确认。
+    # garbage 由下面的 20 字截断兜底；过长说明 AI 出戏，前端能一眼看出。
+    if not chinese_name:
         dao_failed.push(
             task_name="entity_translate",
             payload={"canonical_id": canonical_id, "primary_name": primary_name},
-            error_msg=f"invalid chinese_name: {chinese_name!r}",
+            error_msg="empty chinese_name",
             error_kind="validation",
         )
-        return {"canonical_id": canonical_id, "error": "no_cjk"}
+        return {"canonical_id": canonical_id, "error": "empty"}
 
     # 长度兜底：超 20 字截断（prompt 要 ≤10 字，给 buffer）
     if len(chinese_name) > 20:
