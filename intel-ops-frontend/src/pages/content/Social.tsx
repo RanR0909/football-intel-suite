@@ -80,10 +80,7 @@ export default function Social() {
 
   return (
     <div>
-      <PageHeader
-        title="社媒评论"
-        subtitle="Reddit + Twitter · 按主题 / 球员 / 联赛 / 产品聚合"
-      />
+      <PageHeader title="社媒评论" />
 
       <KpiRow>
         <KpiCard label="总帖子数" value={kpi.total} hint={`近 ${since}`} />

@@ -75,7 +75,6 @@ export default function AlertCenter() {
     <div>
       <PageHeader
         title="预警中心"
-        subtitle="7 类预警事件流（数据驱动 + AI 写 ≤50 字事实陈述）"
         right={
           data && (
             <span className="text-xs text-muted-foreground tabular-nums">

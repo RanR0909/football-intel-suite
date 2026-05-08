@@ -44,10 +44,7 @@ export default function IAP() {
 
   return (
     <div>
-      <PageHeader
-        title="IAP 内购"
-        subtitle="9 竞品的 IAP 商品配置（按 spec 不展示 AllFootball）"
-      />
+      <PageHeader title="IAP 内购" />
 
       <KpiRow>
         <KpiCard label="覆盖竞品" value={kpi.apps} />

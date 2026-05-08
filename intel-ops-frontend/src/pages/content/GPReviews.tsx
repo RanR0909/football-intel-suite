@@ -70,7 +70,6 @@ export default function GPReviews() {
     <div>
       <PageHeader
         title="GP 评论"
-        subtitle="用户在抱怨什么 / 喜欢什么 / 本地化做得怎样"
         right={
           agg && (
             <span className="text-xs text-muted-foreground tabular-nums">

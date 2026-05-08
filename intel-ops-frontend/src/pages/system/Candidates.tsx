@@ -52,10 +52,7 @@ export default function Candidates() {
 
   return (
     <div>
-      <PageHeader
-        title="候选发现"
-        subtitle="AI 自动发现的潜在新竞品（不含博彩类） · 详情 + 复制 JSON 后人工贴入 data/competitors.json"
-      />
+      <PageHeader title="候选发现" />
 
       <KpiRow>
         <KpiCard label="候选总数" value={kpi.total} hint="符合门槛的候选" />

@@ -69,10 +69,7 @@ export default function SyncLog() {
 
   return (
     <div>
-      <PageHeader
-        title="同步日志"
-        subtitle="抓取作业详细日志（rolling 50 · 30s 自动刷新）"
-      />
+      <PageHeader title="同步日志" />
 
       <KpiRow>
         <KpiCard label="近 50 次成功率" value={kpi.successRate} />

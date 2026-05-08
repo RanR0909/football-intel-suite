@@ -118,10 +118,7 @@ export default function Rankings() {
 
   return (
     <div>
-      <PageHeader
-        title="排名异动"
-        subtitle={`Top ${rows.length} 体育榜（AllFootball 蓝色 = baseline · ⭐绿底 = 9 监控竞品 · 其它为友商）`}
-      />
+      <PageHeader title="排名异动" />
 
       <KpiRow>
         <KpiCard label="监控覆盖" value={kpi.tracked} hint={`${kpi.tracked} 个监控竞品上榜`} />

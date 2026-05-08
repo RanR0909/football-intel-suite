@@ -72,7 +72,6 @@ export default function Releases() {
     <div>
       <PageHeader
         title="产品动态"
-        subtitle="每个版本改了什么 + 用户怎么反应 · ⭐ 重要更新置顶（含新功能 / 本地化 / 重大改版）"
         right={
           <span className="text-xs text-muted-foreground tabular-nums">
             {versions.length} 个版本 · ⭐ {significant.length}

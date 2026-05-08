@@ -23,10 +23,7 @@ export default function Website() {
 
   return (
     <div>
-      <PageHeader
-        title="网站数据"
-        subtitle="Similarweb 公开页 · trial-only 字段已永久删除（device / 6 渠道分布 / top_keywords）"
-      />
+      <PageHeader title="网站数据" />
 
       <KpiRow>
         <KpiCard
