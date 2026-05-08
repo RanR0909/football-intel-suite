@@ -1,15 +1,12 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import PageHeader from "@/components/shared/PageHeader"
 import KpiCard, { KpiRow } from "@/components/shared/KpiCard"
 import FilterChips from "@/components/shared/FilterChips"
 import RegionChip from "@/components/shared/RegionChip"
-import BaselineToggle from "@/components/shared/BaselineToggle"
-import BaselineDeltaCell from "@/components/shared/BaselineDeltaCell"
 import EmptyState from "@/components/shared/EmptyState"
 import { SkeletonTable } from "@/components/shared/Skeleton"
 import { useRank } from "@/hooks/api/useRank"
 import { useUrlFilters } from "@/hooks/useUrlFilters"
-import { computeRankDelta } from "@/lib/baseline"
 import { cn } from "@/lib/utils"
 import { BASELINE_APP, COMPETITORS, REGION_LABELS, type Region } from "@/types/domain"
 import { ArrowUp, ArrowDown, Minus, Star } from "lucide-react"
@@ -41,7 +38,6 @@ export default function Rankings() {
   const { value, setValue } = useUrlFilters({
     source: "appmagic", region: "global", competitor: "", sort: "rank",
   })
-  const [showBaseline, setShowBaseline] = useState(true)
 
   const source = value("source")
   const region = value("region")
@@ -114,7 +110,6 @@ export default function Rankings() {
     }
     return { af, others }
   }, [normalized, sortBy])
-  const afRank = sorted.af?.rank_value ?? null
 
   return (
     <div>
@@ -146,20 +141,17 @@ export default function Rankings() {
           value={sortBy}
           onChange={(v) => setValue("sort", v)}
         />
-        <div className="flex items-center justify-between">
-          <span className="text-2xs text-muted-foreground">竞品筛选：</span>
-          <div className="flex items-center gap-3">
-            {competitor && (
-              <button
-                onClick={() => setValue("competitor", "")}
-                className="text-2xs text-muted-foreground hover:text-foreground underline"
-              >
-                清除 {competitor}
-              </button>
-            )}
-            <BaselineToggle show={showBaseline} onChange={setShowBaseline} />
+        {competitor && (
+          <div className="flex items-center justify-between">
+            <span className="text-2xs text-muted-foreground">竞品筛选：</span>
+            <button
+              onClick={() => setValue("competitor", "")}
+              className="text-2xs text-muted-foreground hover:text-foreground underline"
+            >
+              清除 {competitor}
+            </button>
           </div>
-        </div>
+        )}
       </div>
 
       {isLoading && <SkeletonTable rows={10} />}
@@ -176,9 +168,6 @@ export default function Rankings() {
                 <th className="text-right px-3 h-8">当前排名</th>
                 <th className="text-right px-3 h-8" title="本期 vs 一周前的同源 + 同区域 + 同平台 rank 差值">周变化</th>
                 <th className="text-right px-3 h-8">下载估算</th>
-                {showBaseline && (
-                  <th className="text-right px-3 h-8">vs AF</th>
-                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-border-soft">
@@ -198,7 +187,6 @@ export default function Rankings() {
                   <td className="px-3 h-9 text-right tabular-nums">
                     {sorted.af.downloads || "—"}
                   </td>
-                  {showBaseline && <td className="px-3 h-9 text-right text-muted-foreground">—</td>}
                 </tr>
               )}
               {sorted.others.map((r, idx) => (
@@ -227,15 +215,6 @@ export default function Rankings() {
                   <td className="px-3 h-9 text-right tabular-nums">
                     {r.downloads || "—"}
                   </td>
-                  {showBaseline && (
-                    <td className="px-3 h-9 text-right">
-                      {r.isMonitored ? (
-                        <BaselineDeltaCell delta={computeRankDelta(r.rank_value, afRank)} />
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  )}
                 </tr>
               ))}
             </tbody>
