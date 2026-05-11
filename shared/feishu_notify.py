@@ -79,7 +79,12 @@ def _keyword() -> str:
 
 
 def _post(payload: dict) -> bool:
-    """POST payload 到 webhook。失败返回 False（不抛）。"""
+    """POST payload 到 webhook。失败返回 False（不抛）。
+
+    SSL 验证：默认开。公司网络做 HTTPS 中间人代理（自签名根 CA）时验不过，
+    会拿到 `CERTIFICATE_VERIFY_FAILED`。在 .env.local 设置 FEISHU_VERIFY_SSL=false
+    可绕过验证，跟 ai_tasks.json 里 endpoint 的 verify_ssl 一个思路。
+    """
     url = (os.environ.get(WEBHOOK_ENV) or "").strip()
     if not url:
         return False
@@ -88,7 +93,9 @@ def _post(payload: dict) -> bool:
         url, data=body,
         headers={"Content-Type": "application/json; charset=utf-8"},
     )
-    ctx = ssl.create_default_context()
+    verify = (os.environ.get("FEISHU_VERIFY_SSL", "true").strip().lower()
+              not in ("false", "0", "no"))
+    ctx = ssl.create_default_context() if verify else ssl._create_unverified_context()
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
             data = json.loads(resp.read().decode("utf-8"))
