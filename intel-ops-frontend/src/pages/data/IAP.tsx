@@ -29,6 +29,7 @@ export default function IAP() {
   const all = (data?.iap_items || []).filter((it) => COMPETITORS.includes(it.competitor as typeof COMPETITORS[number]))
 
   // 按 (competitor, name) 分组合并 region 价格
+  // iap_items 保留历史快照，同 (competitor, name, region) 可能有多行；只保留最新 fetched_at
   const grouped = useMemo(() => {
     const m = new Map<string, Map<string, typeof all>>()
     for (const it of all) {
@@ -36,6 +37,16 @@ export default function IAP() {
       const inner = m.get(it.competitor)!
       if (!inner.has(it.name)) inner.set(it.name, [])
       inner.get(it.name)!.push(it)
+    }
+    for (const inner of m.values()) {
+      for (const [name, rows] of inner.entries()) {
+        const byRegion = new Map<string, typeof rows[number]>()
+        for (const r of rows) {
+          const cur = byRegion.get(r.region_code)
+          if (!cur || r.fetched_at > cur.fetched_at) byRegion.set(r.region_code, r)
+        }
+        inner.set(name, [...byRegion.values()])
+      }
     }
     return m
   }, [all])

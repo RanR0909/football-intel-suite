@@ -729,7 +729,7 @@ class APIHandler(BaseHTTPRequestHandler):
         label = q.get("label", "")
         region = q.get("region", "")
         since = q.get("since", "")
-        limit = _parse_int(q, "limit", default=100, max_=500, min_=1)
+        limit = _parse_int(q, "limit", default=100, max_=1000, min_=1)
 
         wheres = ["r.labeled_at IS NOT NULL"]
         params = {}
@@ -758,7 +758,8 @@ class APIHandler(BaseHTTPRequestHandler):
             "GROUP_CONCAT(DISTINCT r.region_code "
             "             ORDER BY r.region_code SEPARATOR ',') as regions, "
             "r.platform, r.score, r.version, r.content, r.label, r.language, "
-            "r.translated_text, MIN(r.at) as at, MIN(r.labeled_at) as labeled_at "
+            "r.translated_text, MIN(r.at) as at, MIN(r.labeled_at) as labeled_at, "
+            "MAX(c.gp_package) as gp_package, MAX(c.ios_app_id) as ios_app_id "
             "FROM reviews r JOIN competitors c ON c.id = r.competitor_id "
             f"WHERE {' AND '.join(wheres)} "
             "GROUP BY c.name, r.platform, r.score, r.version, r.content, "
@@ -839,6 +840,8 @@ class APIHandler(BaseHTTPRequestHandler):
         limit = _parse_int(q, "limit", default=200, max_=2000, min_=1)
         wheres = ["1=1"]
         params = {"limit": limit}
+        # 排名页只展示有 rank_value 的源（androidrank 写的是 downloads_num，rank_value 永远 NULL）
+        wheres.append("m.rank_value IS NOT NULL")
         if source:
             wheres.append("m.source = :source")
             params["source"] = source
@@ -1377,7 +1380,9 @@ class APIHandler(BaseHTTPRequestHandler):
             # 代表评论
             sample_rows = _query(f"""
                 SELECT r.id, COALESCE(r.translated_text, r.content) as text_zh,
-                       cp.name as competitor, r.region_code as region, r.score as score
+                       cp.name as competitor, r.region_code as region, r.score as score,
+                       r.platform as platform,
+                       cp.gp_package as gp_package, cp.ios_app_id as ios_app_id
                 FROM comment_entities ce
                 JOIN reviews r ON r.id = ce.review_id
                 JOIN competitors cp ON cp.id = r.competitor_id

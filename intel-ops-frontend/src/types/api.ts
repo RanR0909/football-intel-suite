@@ -83,6 +83,9 @@ export interface Review {
   at: string | null
   labeled_at: string | null
   entities?: ReviewEntity[]
+  /** 用于拼商店页 URL（reviews 表没存原 review_id，跳不到单条） */
+  gp_package: string | null
+  ios_app_id: string | null
 }
 
 export interface ReviewsResponse {
@@ -335,6 +338,9 @@ export interface ReviewsAggregatedItem {
     competitor: string
     region: string
     score: number | null
+    platform: "gp" | "ios" | null
+    gp_package: string | null
+    ios_app_id: string | null
   } | null
 }
 

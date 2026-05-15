@@ -28,6 +28,25 @@ import type { ReviewLabel, ReviewsAggregatedTab, ReviewsAggregatedResponse } fro
  *  其他 4 个直接走 useReviewsAggregated。 */
 type GPTab = "top" | ReviewsAggregatedTab | "raw_problems"
 
+/** 拼商店页 URL —— GP/iOS 评论都没存 review_id，只能跳到 app 商店页（带 region）。
+ *  GP: play.google.com/store/apps/details?id=PACKAGE&gl=US
+ *  iOS: apps.apple.com/us/app/idXXX  */
+function storeUrl(
+  platform: "gp" | "ios" | null | undefined,
+  gpPackage: string | null | undefined,
+  iosAppId: string | null | undefined,
+  region: string | null | undefined,
+): string | null {
+  const gl = (region || "us").toUpperCase()
+  if (platform === "gp" && gpPackage) {
+    return `https://play.google.com/store/apps/details?id=${gpPackage}&gl=${gl}`
+  }
+  if (platform === "ios" && iosAppId) {
+    return `https://apps.apple.com/${gl.toLowerCase()}/app/id${iosAppId}`
+  }
+  return null
+}
+
 const TABS: Array<{ value: GPTab; label: string }> = [
   { value: "top",           label: "讨论 Top" },   // 问题 + 好评 合并按提及降序
   { value: "problems",      label: "问题 Top" },
@@ -69,11 +88,11 @@ export default function GPReviews() {
   }, [tab, agg, aggPraiseForTop])
 
   // 用于 KPI 计算和底部矩阵的原始 reviews
-  // raw_problems tab 同时拿 label='complaint' 的全量原文（最多 500 条）
+  // raw_problems tab 同时拿 label='complaint' 的全量原文（最多 1000 条）
   const { data: rawReviews } = useReviews({
     competitor: competitor || undefined,
     label: tab === "raw_problems" ? "complaint" : undefined,
-    since, limit: 500,
+    since, limit: 1000,
   })
   const allReviews = useMemo(() => rawReviews?.reviews || [], [rawReviews])
 
@@ -245,9 +264,30 @@ function AggregatedList({
                 {it.representative_review?.text_zh || "—"}
               </div>
               {it.representative_review && (
-                <div className="mt-1 text-2xs text-muted-foreground">
-                  {it.representative_review.competitor} · {it.representative_review.region?.toUpperCase()}
-                  {it.representative_review.score != null && ` · ${it.representative_review.score}★`}
+                <div className="mt-1 text-2xs text-muted-foreground flex items-center gap-2 flex-wrap">
+                  <span>
+                    {it.representative_review.competitor} · {it.representative_review.region?.toUpperCase()}
+                    {it.representative_review.score != null && ` · ${it.representative_review.score}★`}
+                  </span>
+                  {(() => {
+                    const url = storeUrl(
+                      it.representative_review.platform,
+                      it.representative_review.gp_package,
+                      it.representative_review.ios_app_id,
+                      it.representative_review.region,
+                    )
+                    return url ? (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline"
+                        title="跳到商店页（无法定位到单条评论 — DB 未保存原 review_id）"
+                      >
+                        商店页 →
+                      </a>
+                    ) : null
+                  })()}
                 </div>
               )}
             </div>
@@ -356,6 +396,25 @@ function RawProblemsTab({ reviews }: { reviews: any[] }) {
                       {r.version && (
                         <span className="font-mono text-muted-foreground">v{r.version}</span>
                       )}
+                      {(() => {
+                        const url = storeUrl(
+                          r.platform,
+                          r.gp_package,
+                          r.ios_app_id,
+                          regions[0] || r.region_code,
+                        )
+                        return url ? (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline"
+                            title="跳到商店页（无法定位到单条评论）"
+                          >
+                            商店页 →
+                          </a>
+                        ) : null
+                      })()}
                       <span className="ml-auto font-mono text-muted-foreground tabular-nums">
                         {r.at ? new Date(r.at).toLocaleDateString("zh-CN") : "—"}
                       </span>
